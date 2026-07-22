@@ -96,6 +96,12 @@ The System is the **template**; the Game **refines** it.
 | Saves not always; SRAM vs memcard | Save module, optional, `kind`-specialized |
 | 2 vs 4 pads; expose 1/2/4 | `SystemProfile.max_players` + `Game.exposed_players` |
 
+Hosts may optionally provide a complete `default_settings` snapshot through
+the C ABI. The launcher copies it during model initialization and then exposes
+a confirmed Restore Defaults action in the Settings footer. Confirmation
+replaces only the editable settings value; ROM selection and save files remain
+separately owned.
+
 ## Concrete C shape (data-driven, no fake OOP)
 
 ```c

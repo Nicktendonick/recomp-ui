@@ -333,6 +333,12 @@ typedef struct RecompLauncherCGameInfo {
     // an Adaptive view toggle. Adaptive + fullscreen leaves the fixed aspect
     // control visible but disabled because the display chooses the live width.
     int  adaptive_view_supported;
+    /* Optional complete host-owned defaults snapshot. When non-NULL, the
+     * Settings footer exposes a confirmed "Restore Defaults" action that
+     * copies this value into the launcher's editable settings. The launcher
+     * copies the snapshot during initialization. ROM and save files are not
+     * part of this structure and are never deleted. */
+    const RecompLauncherCSettings* default_settings;
 } RecompLauncherCGameInfo;
 
 // Returns: 0 = LAUNCH (boot out_rom_path with the edited *io),

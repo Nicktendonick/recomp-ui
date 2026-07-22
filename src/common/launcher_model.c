@@ -143,6 +143,10 @@ void launcher_model_init(LauncherModel* m,
     }
 
     if (io) m->s = *io;
+    if (game && game->default_settings) {
+        m->default_settings = *game->default_settings;
+        m->has_default_settings = true;
+    }
     m->s.adaptive_view =
         (m->adaptive_view_supported && m->s.adaptive_view) ? 1 : 0;
 
@@ -427,6 +431,25 @@ void launcher_model_set_view(LauncherModel* m, LngView v) {
 void launcher_model_open_config(LauncherModel* m, int player) {
     m->cfg_player = clampi(player, 0, LNG_MAX_PLAYERS - 1);
     m->view = LNG_VIEW_CONTROLLER;
+}
+
+bool launcher_model_can_restore_defaults(const LauncherModel* m) {
+    return m && m->has_default_settings;
+}
+
+void launcher_model_request_restore_defaults(LauncherModel* m) {
+    if (!launcher_model_can_restore_defaults(m)) return;
+    m->defaults_modal_open = true;
+}
+
+void launcher_model_restore_defaults(LauncherModel* m) {
+    if (!launcher_model_can_restore_defaults(m)) return;
+    m->s = m->default_settings;
+    m->defaults_modal_open = false;
+}
+
+void launcher_model_cancel_restore_defaults(LauncherModel* m) {
+    if (m) m->defaults_modal_open = false;
 }
 
 void launcher_model_cycle_scale(LauncherModel* m) {

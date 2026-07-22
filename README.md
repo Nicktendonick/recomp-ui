@@ -78,6 +78,8 @@ RecompLauncherCGameInfo gi = {0};
 launcher_profile_apply("snes", &gi);   // "psx", "n64", ... — one call sets the console identity
 gi.name = "My Game";
 gi.expected_crc = 0x1B4B2E9C; gi.has_expected_crc = 1;
+RecompLauncherCSettings defaults = { /* authoritative first-run values */ };
+gi.default_settings = &defaults;       // optional Restore Defaults action
 /* ...per-game overrides... */
 
 char out_rom[512];
@@ -116,6 +118,13 @@ identification (`disc_verify`) and memory-card inspection (`memcard_inspect`).
 - **MSU-1** — dashboard IPS auto-patching for SNES MSU-1 titles.
 - **Hotkeys** — per-console subset of the emulator hotkey catalog, editable.
 - **Footer** — PLAY, skip-launcher-on-boot (+ confirm modal), gamepad navigation.
+
+---
+
+When `RecompLauncherCGameInfo.default_settings` is non-NULL, the Settings
+footer also exposes a confirmed **Restore Defaults** action. The snapshot is
+copied at launcher initialization; resetting never changes the separately
+owned ROM selection or deletes save files.
 
 ---
 

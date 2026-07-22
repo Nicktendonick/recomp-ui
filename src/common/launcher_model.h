@@ -267,12 +267,15 @@ typedef struct {
 
     // ---- editable settings (working copy of the C ABI struct) ----
     RecompLauncherCSettings s;
+    RecompLauncherCSettings default_settings;
+    bool      has_default_settings;
 
     // ---- transient UI state ----
     LngView   view;
     LngAction action;
     int       cfg_player;            // 0..LNG_MAX_PLAYERS-1 — which player the Controller view edits
     bool      skip_modal_open;       // "Skip the launcher on boot?" confirm
+    bool      defaults_modal_open;   // confirmed full-settings reset
 
     // Selected gamepad per player (when player_src == 2). pad_id is the live
     // SDL_JoystickID; name is cached for display if the device disconnects.
@@ -328,6 +331,12 @@ bool launcher_model_rom_verified(const LauncherModel* m);
 // ---- navigation ----
 void launcher_model_set_view(LauncherModel* m, LngView v);
 void launcher_model_open_config(LauncherModel* m, int player);  // -> Controller view
+
+// ---- restore host-provided settings defaults ----
+bool launcher_model_can_restore_defaults(const LauncherModel* m);
+void launcher_model_request_restore_defaults(LauncherModel* m);
+void launcher_model_restore_defaults(LauncherModel* m);
+void launcher_model_cancel_restore_defaults(LauncherModel* m);
 
 // ---- display settings ----
 void launcher_model_cycle_scale(LauncherModel* m);   // 1..6 wrap
