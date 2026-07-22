@@ -797,7 +797,6 @@ typedef struct RecompLauncherCGameInfo {
     // an Adaptive view toggle. Adaptive + fullscreen leaves the fixed aspect
     // control visible but disabled because the display chooses the live width.
     int  adaptive_view_supported;
-
     // Netplay is a title/developer capability, not a user setting. When set,
     // the dashboard exposes lobby host/join controls through host-owned
     // callbacks.
@@ -977,6 +976,13 @@ typedef struct RecompLauncherCGameInfo {
      * are appended so older zero-initialized hosts retain their exact UI. */
     const char* aspect_setting_label;
     const char* aspect_setting_help;
+
+    /* Optional complete host-owned defaults snapshot. When non-NULL, the
+     * Settings footer exposes a confirmed "Restore Defaults" action that
+     * copies this value into the launcher's editable settings. The launcher
+     * copies the snapshot during initialization. ROM and save files are not
+     * part of this structure and are never deleted. */
+    const RecompLauncherCSettings* default_settings;
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */

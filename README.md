@@ -105,6 +105,8 @@ RecompLauncherCGameInfo gi = {0};
 launcher_profile_apply("snes", &gi);   // "psx", "n64", ... — one call sets the console identity
 gi.name = "My Game";
 gi.expected_crc = 0x1B4B2E9C; gi.has_expected_crc = 1;
+RecompLauncherCSettings defaults = { /* authoritative first-run values */ };
+gi.default_settings = &defaults;       // optional Restore Defaults action
 /* ...per-game overrides... */
 
 char out_rom[512];
@@ -417,6 +419,13 @@ snesrecomp `docs/RECOMP_NET.md` → "Soft-return rematch checklist".
   resolution, and committing changes before launch; recomp-ui never executes
   package code.
 - **Footer** — PLAY, skip-launcher-on-boot (+ confirm modal), gamepad navigation.
+
+---
+
+When `RecompLauncherCGameInfo.default_settings` is non-NULL, the Settings
+footer also exposes a confirmed **Restore Defaults** action. The snapshot is
+copied at launcher initialization; resetting never changes the separately
+owned ROM selection or deletes save files.
 
 ---
 

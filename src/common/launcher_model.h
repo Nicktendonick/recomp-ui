@@ -369,6 +369,8 @@ typedef struct {
 
     // ---- editable settings (working copy of the C ABI struct) ----
     RecompLauncherCSettings s;
+    RecompLauncherCSettings default_settings;
+    bool      has_default_settings;
 
     // ---- transient UI state ----
     LngView   view;
@@ -451,6 +453,7 @@ typedef struct {
     int       netplay_host_max_players;
     /* Active room seat ceiling after create/join (0 = use game player_count). */
     int       netplay_lobby_max_slots;
+    bool      defaults_modal_open;   // confirmed full-settings reset
 
     // Selected gamepad per player (when player_src == 2). pad_id is the live
     // SDL_JoystickID; name is cached for display if the device disconnects.
@@ -521,6 +524,12 @@ void launcher_model_set_view(LauncherModel* m, LngView v);
 void launcher_model_open_config(LauncherModel* m, int player);  // -> Controller view
 void launcher_model_begin_camera_capture(LauncherModel* m, int action);
 void launcher_model_cancel_camera_capture(LauncherModel* m);
+
+// ---- restore host-provided settings defaults ----
+bool launcher_model_can_restore_defaults(const LauncherModel* m);
+void launcher_model_request_restore_defaults(LauncherModel* m);
+void launcher_model_restore_defaults(LauncherModel* m);
+void launcher_model_cancel_restore_defaults(LauncherModel* m);
 
 // ---- display settings ----
 void launcher_model_cycle_scale(LauncherModel* m);   // 1..6 wrap

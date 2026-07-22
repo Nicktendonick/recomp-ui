@@ -6289,6 +6289,12 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
         ImGui::SetCursorScreenPos(ImVec2(origin.x, cta_y + (play_h - ImGui::GetFrameHeight()) * 0.5f));
         if (ImGui::Checkbox("Skip launcher on boot", &skip))
             launcher_model_request_skip_toggle(m);
+    } else if (m->view == LNG_VIEW_SETTINGS &&
+               launcher_model_can_restore_defaults(m)) {
+        ImGui::SetCursorScreenPos(
+            ImVec2(origin.x, cta_y + (play_h - px(34.0f)) * 0.5f));
+        if (ImGui::Button("Restore Defaults", ImVec2(px(150.0f), px(34.0f))))
+            launcher_model_request_restore_defaults(m);
     }
     if (m->view == LNG_VIEW_NETPLAY) {
         const float action_w = px(190.0f);
@@ -7223,6 +7229,29 @@ void draw_skip_modal(LauncherModel* m) {
     }
 }
 
+void draw_restore_defaults_modal(LauncherModel* m) {
+    if (m->defaults_modal_open) ImGui::OpenPopup("Restore default settings?");
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Restore default settings?", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped(
+            "This resets display, audio, controller, and launcher choices. "
+            "Your selected ROM, SRAM, and save states are not changed.");
+        ImGui::Spacing();
+        if (ImGui::Button("Cancel", ImVec2(px(120), 0))) {
+            launcher_model_cancel_restore_defaults(m);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Restore Defaults", ImVec2(px(150), 0))) {
+            launcher_model_restore_defaults(m);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
 void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logical_h) {
     ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->Pos);
@@ -7359,6 +7388,7 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
     draw_netplay_password_modal(m, th);
     draw_netplay_direct_modal(m, th);
     draw_netplay_room_modal(m, th);
+    draw_restore_defaults_modal(m);
     // Transfer Pak config modal (N64): opened by any tile, dashboard or
     // Controller page. Drawn at root so it isn't clipped by a card child.
     if (m->tpak_slots > 0) draw_tpak_modal(m, th);
