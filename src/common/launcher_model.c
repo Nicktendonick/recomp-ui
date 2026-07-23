@@ -171,6 +171,8 @@ void launcher_model_init(LauncherModel* m,
     m->netplay_list_fresh = false;
     m->netplay_selected_lobby = -1;
     m->mod_selected = 0;
+    m->mod_package_selected = 0;
+    m->mod_show_packages = false;
     m->s.adaptive_view =
         (m->adaptive_view_supported && m->s.adaptive_view) ? 1 : 0;
 

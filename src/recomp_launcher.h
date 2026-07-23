@@ -136,7 +136,7 @@ typedef struct RecompLauncherCNetplayCallbacks {
     void (*clear_last_error)(void* ctx);
 } RecompLauncherCNetplayCallbacks;
 
-/* ---- schema-driven mod packages -----------------------------------------
+/* ---- schema-driven mods --------------------------------------------------
  * The host owns package parsing, persistence, dependency resolution, and
  * installation. recomp-ui only renders this stable query/mutation surface.
  * All strings are copied into fixed buffers so provider implementations may
@@ -164,6 +164,24 @@ typedef struct RecompLauncherCModPackage {
     int  has_error;
 } RecompLauncherCModPackage;
 
+/* A package may contribute any number of independently configurable features.
+ * Feature identity is the (package_id, id) pair; feature ids only need to be
+ * unique within their owning package. */
+typedef struct RecompLauncherCModFeature {
+    char id[RECOMP_LAUNCHER_MOD_ID_MAX];
+    char package_id[RECOMP_LAUNCHER_MOD_ID_MAX];
+    char package_version[32];
+    char package_name[128];
+    char name[128];
+    char author[96];
+    char description[512];
+    char group[96];
+    char status[256];
+    int  enabled;
+    int  option_count;
+    int  has_error;
+} RecompLauncherCModFeature;
+
 typedef struct RecompLauncherCModOption {
     char id[RECOMP_LAUNCHER_MOD_ID_MAX];
     char label[128];
@@ -189,6 +207,20 @@ typedef struct RecompLauncherCModVersion {
     int removable;
 } RecompLauncherCModVersion;
 
+typedef enum RecompLauncherCModDiagnosticSeverity {
+    RECOMP_MOD_DIAGNOSTIC_INFO = 0,
+    RECOMP_MOD_DIAGNOSTIC_WARNING = 1,
+    RECOMP_MOD_DIAGNOSTIC_ERROR = 2,
+} RecompLauncherCModDiagnosticSeverity;
+
+typedef struct RecompLauncherCModDiagnostic {
+    int  severity; /* RecompLauncherCModDiagnosticSeverity */
+    char resource[192];
+    char message[512];
+    char related_package_id[RECOMP_LAUNCHER_MOD_ID_MAX];
+    char related_feature_id[RECOMP_LAUNCHER_MOD_ID_MAX];
+} RecompLauncherCModDiagnostic;
+
 typedef struct RecompLauncherCModProvider {
     void* ctx;
     int (*package_count)(void* ctx);
@@ -211,6 +243,28 @@ typedef struct RecompLauncherCModProvider {
      * image_path is the ROM/disc currently selected in the launcher. */
     int (*commit)(void* ctx, const char* image_path);
     const char* (*last_error)(void* ctx);
+    /* Feature-oriented surface. Appended for ABI stability. New providers
+     * should implement this complete group; package callbacks above remain the
+     * secondary install/version/removal surface. Feature identity is always
+     * (package_id, feature_id). */
+    int (*feature_count)(void* ctx);
+    int (*feature_get)(void* ctx, int index, RecompLauncherCModFeature* out);
+    int (*feature_option_get)(void* ctx, const char* package_id,
+                              const char* feature_id, int index,
+                              RecompLauncherCModOption* out);
+    int (*feature_choice_get)(void* ctx, const char* package_id,
+                              const char* feature_id, const char* option_id,
+                              int index, RecompLauncherCModChoice* out);
+    int (*feature_enable)(void* ctx, const char* package_id,
+                          const char* feature_id, int enabled);
+    int (*feature_set_option)(void* ctx, const char* package_id,
+                              const char* feature_id, const char* option_id,
+                              const char* value);
+    int (*diagnostic_count)(void* ctx, const char* package_id,
+                            const char* feature_id);
+    int (*diagnostic_get)(void* ctx, const char* package_id,
+                          const char* feature_id, int index,
+                          RecompLauncherCModDiagnostic* out);
 } RecompLauncherCModProvider;
 
 // Plain-C mirror of the launcher's internal settings (bools as int).
@@ -540,8 +594,9 @@ typedef struct RecompLauncherCGameInfo {
     int resume_netplay_room;
     const char* resume_netplay_endpoint;
 
-    /* Optional schema-driven mod package provider. Appended for ABI stability.
-     * NULL hides the Mods view completely. */
+    /* Optional schema-driven mod provider. Appended for ABI stability. NULL
+     * hides the Mods view completely. Features are the primary user-facing
+     * surface; packages are the secondary installation/maintenance surface. */
     const RecompLauncherCModProvider* mods;
 } RecompLauncherCGameInfo;
 

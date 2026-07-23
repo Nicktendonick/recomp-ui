@@ -198,6 +198,8 @@ typedef struct {
     const RecompLauncherCNetplayCallbacks* netplay;
     const RecompLauncherCModProvider* mods;
     int       mod_selected;
+    int       mod_package_selected;
+    bool      mod_show_packages;
     char      mod_search[96];
     char      mod_status[256];
     // Game-supplied aspect vocabulary (GameInfo.aspect_labels): when set,
