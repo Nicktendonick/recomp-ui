@@ -65,11 +65,13 @@
 #endif
 
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 extern "C" const char* launcher_backend_name(void) { return "Dear ImGui"; }
@@ -3464,6 +3466,56 @@ static bool mod_commit_launch(LauncherModel* m) {
     return false;
 }
 
+struct ModIntegerEditState {
+    int64_t value = 0;
+    std::string provider_value;
+};
+
+static bool draw_mod_integer_option(const RecompLauncherCModOption& option,
+                                    char* next, size_t next_size) {
+    ImGui::TextUnformatted(option.label);
+    ImGui::SameLine(px(260));
+    ImGui::SetNextItemWidth(px(230));
+
+    errno = 0;
+    char* end = nullptr;
+    const long long parsed = std::strtoll(option.value, &end, 10);
+    int64_t provider_value =
+        errno == 0 && end && *end == '\0'
+            ? static_cast<int64_t>(parsed)
+            : option.min_value;
+    provider_value = std::max(
+        option.min_value, std::min(option.max_value, provider_value));
+
+    static std::unordered_map<ImGuiID, ModIntegerEditState> edits;
+    const ImGuiID id = ImGui::GetID("##integer");
+    ModIntegerEditState& edit = edits[id];
+    if (edit.provider_value != option.value) {
+        edit.value = provider_value;
+        edit.provider_value = option.value;
+    }
+
+    const int64_t step = option.step > 0 ? option.step : 1;
+    const bool edited = ImGui::InputScalar(
+        "##integer", ImGuiDataType_S64, &edit.value, &step, nullptr, nullptr,
+        ImGuiInputTextFlags_EnterReturnsTrue);
+    const bool commit = ImGui::IsItemDeactivatedAfterEdit() ||
+                        (edited && !ImGui::IsItemActive());
+    if (!commit) return false;
+
+    edit.value = std::max(
+        option.min_value, std::min(option.max_value, edit.value));
+    const uint64_t distance =
+        static_cast<uint64_t>(edit.value) -
+        static_cast<uint64_t>(option.min_value);
+    edit.value -= static_cast<int64_t>(
+        distance % static_cast<uint64_t>(step));
+    std::snprintf(next, next_size, "%lld",
+                  static_cast<long long>(edit.value));
+    edit.provider_value = next;
+    return true;
+}
+
 static void draw_mod_packages(LauncherModel* m, const LauncherTheme& th) {
     const auto* mods = m ? m->mods : nullptr;
     if (!mods || !mods->package_count || !mods->package_get) return;
@@ -3658,15 +3710,8 @@ static void draw_mod_packages(LauncherModel* m, const LauncherTheme& th) {
                         ImGui::EndCombo();
                     }
                 } else {
-                    int value = std::atoi(option.value);
-                    ImGui::TextUnformatted(option.label);
-                    ImGui::SameLine(px(260));
-                    ImGui::SetNextItemWidth(px(230));
-                    int lo = (int)option.min_value, hi = (int)option.max_value;
-                    if (ImGui::SliderInt("##integer", &value, lo, hi)) {
-                        std::snprintf(next, sizeof(next), "%d", value);
-                        changed = true;
-                    }
+                    changed = draw_mod_integer_option(
+                        option, next, sizeof(next));
                 }
                 if (ImGui::IsItemHovered() && option.description[0])
                     ImGui::SetTooltip("%s", option.description);
@@ -3754,16 +3799,7 @@ static void draw_mod_feature_option(LauncherModel* m,
             ImGui::EndCombo();
         }
     } else {
-        int value = std::atoi(option.value);
-        ImGui::TextUnformatted(option.label);
-        ImGui::SameLine(px(260));
-        ImGui::SetNextItemWidth(px(230));
-        const int lo = (int)option.min_value;
-        const int hi = (int)option.max_value;
-        if (ImGui::SliderInt("##integer", &value, lo, hi)) {
-            std::snprintf(next, sizeof(next), "%d", value);
-            changed = true;
-        }
+        changed = draw_mod_integer_option(option, next, sizeof(next));
     }
 
     if (ImGui::IsItemHovered() && option.description[0])
