@@ -4019,21 +4019,8 @@ static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
                 ImGui::TextWrapped("%s", feature.description);
             ImGui::Spacing();
 
-            // An optionless feature is a boolean switch: its list-row checkbox
-            // is the complete editor. Repeat the Enabled control here only when
-            // the detail pane also contains configuration options, where it
-            // remains useful as the feature's master switch.
-            if (feature.option_count > 0) {
-                bool enabled = feature.enabled != 0;
-                if (ImGui::Checkbox("Enabled", &enabled)) {
-                    if (!mods->feature_enable(
-                            mods->ctx, feature.package_id, feature.id,
-                            enabled ? 1 : 0)) {
-                        mod_note_error(m);
-                    }
-                }
-            }
-
+            // The list-row checkbox is the single enable/disable control.
+            // The detail pane owns configuration values only.
             draw_mod_feature_diagnostics(m, th, feature);
             if (feature.option_count > 0) {
                 ImGui::Spacing();
