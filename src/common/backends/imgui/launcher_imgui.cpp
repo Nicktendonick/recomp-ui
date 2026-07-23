@@ -3817,6 +3817,51 @@ static void draw_mod_feature_diagnostics(
     }
 }
 
+static bool set_all_mod_features(LauncherModel* m, bool enabled) {
+    const auto* mods = m ? m->mods : nullptr;
+    if (!mods || !mods->feature_count || !mods->feature_get ||
+        !mods->feature_enable) {
+        return false;
+    }
+
+    const int count = mods->feature_count(mods->ctx);
+    std::vector<RecompLauncherCModFeature> features;
+    features.reserve(count > 0 ? (size_t)count : 0);
+    for (int index = 0; index < count; ++index) {
+        RecompLauncherCModFeature feature{};
+        if (!mods->feature_get(mods->ctx, index, &feature)) {
+            mod_note_error(m);
+            return false;
+        }
+        features.push_back(feature);
+    }
+
+    std::vector<size_t> changed;
+    changed.reserve(features.size());
+    for (size_t index = 0; index < features.size(); ++index) {
+        const RecompLauncherCModFeature& feature = features[index];
+        if ((feature.enabled != 0) == enabled) continue;
+        if (!mods->feature_enable(mods->ctx, feature.package_id, feature.id,
+                                  enabled ? 1 : 0)) {
+            // Treat the bulk action as one edit. Best-effort rollback prevents
+            // a failed feature from leaving an unexpected half-toggled set.
+            for (auto rollback = changed.rbegin(); rollback != changed.rend();
+                 ++rollback) {
+                const RecompLauncherCModFeature& prior = features[*rollback];
+                mods->feature_enable(mods->ctx, prior.package_id, prior.id,
+                                     prior.enabled ? 1 : 0);
+            }
+            mod_note_error(m);
+            return false;
+        }
+        changed.push_back(index);
+    }
+    std::snprintf(m->mod_status, sizeof(m->mod_status),
+                  enabled ? "All mod features enabled. Changes apply on PLAY."
+                          : "All mod features disabled. Changes apply on PLAY.");
+    return true;
+}
+
 static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
     const auto* mods = m ? m->mods : nullptr;
     if (!mods || !mods->feature_count || !mods->feature_get ||
@@ -3825,6 +3870,7 @@ static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
         return;
     }
 
+    const int feature_count = mods->feature_count(mods->ctx);
     if (ImGui::Button("Install .psxmod")) {
         static const char* patterns[] = { "*.psxmod" };
         char path[1024];
@@ -3841,6 +3887,16 @@ static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
         }
     }
     ImGui::SameLine();
+    if (ImGui::Button("Enable all"))
+        set_all_mod_features(m, true);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Enable every installed mod feature");
+    ImGui::SameLine();
+    if (ImGui::Button("Disable all"))
+        set_all_mod_features(m, false);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Disable every installed mod feature");
+    ImGui::SameLine();
     ImGui::SetNextItemWidth(px(300));
     ImGui::InputTextWithHint("##mod_search", "Search features, groups, packages...",
                              m->mod_search, sizeof(m->mod_search));
@@ -3850,7 +3906,6 @@ static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
     }
     ImGui::Spacing();
 
-    const int feature_count = mods->feature_count(mods->ctx);
     if (feature_count <= 0) m->mod_selected = 0;
     else if (m->mod_selected >= feature_count)
         m->mod_selected = feature_count - 1;
