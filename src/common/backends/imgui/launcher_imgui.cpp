@@ -3628,7 +3628,21 @@ static void draw_mod_packages(LauncherModel* m, const LauncherTheme& th) {
                     ImGui::TextUnformatted(option.label);
                     ImGui::SameLine(px(260));
                     ImGui::SetNextItemWidth(px(230));
-                    if (ImGui::BeginCombo("##choice", option.value)) {
+                    char preview[128];
+                    std::snprintf(preview, sizeof(preview), "%s", option.value);
+                    for (int c = 0; c < option.choice_count; ++c) {
+                        RecompLauncherCModChoice choice{};
+                        if (mods->choice_get &&
+                            mods->choice_get(mods->ctx, package.id, option.id,
+                                             c, &choice) &&
+                            std::strcmp(choice.value, option.value) == 0) {
+                            std::snprintf(preview, sizeof(preview), "%s",
+                                          choice.label[0] ? choice.label
+                                                          : choice.value);
+                            break;
+                        }
+                    }
+                    if (ImGui::BeginCombo("##choice", preview)) {
                         for (int c = 0; c < option.choice_count; ++c) {
                             RecompLauncherCModChoice choice{};
                             if (!mods->choice_get ||
@@ -3704,7 +3718,22 @@ static void draw_mod_feature_option(LauncherModel* m,
         ImGui::TextUnformatted(option.label);
         ImGui::SameLine(px(260));
         ImGui::SetNextItemWidth(px(230));
-        if (ImGui::BeginCombo("##choice", option.value)) {
+        char preview[128];
+        std::snprintf(preview, sizeof(preview), "%s", option.value);
+        for (int choice_index = 0; choice_index < option.choice_count;
+             ++choice_index) {
+            RecompLauncherCModChoice choice{};
+            if (mods->feature_choice_get &&
+                mods->feature_choice_get(mods->ctx, feature.package_id,
+                                          feature.id, option.id,
+                                          choice_index, &choice) &&
+                std::strcmp(choice.value, option.value) == 0) {
+                std::snprintf(preview, sizeof(preview), "%s",
+                              choice.label[0] ? choice.label : choice.value);
+                break;
+            }
+        }
+        if (ImGui::BeginCombo("##choice", preview)) {
             for (int choice_index = 0; choice_index < option.choice_count;
                  ++choice_index) {
                 RecompLauncherCModChoice choice{};
