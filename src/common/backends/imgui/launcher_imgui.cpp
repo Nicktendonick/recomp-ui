@@ -64,7 +64,10 @@
   #endif
 #endif
 
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -2436,14 +2439,19 @@ void np_refresh_lobby_list(LauncherModel* m) {
     m->netplay_status[0] = '\0';
 }
 
+static void mod_note_error(LauncherModel* m);
+static bool mod_commit_launch(LauncherModel* m);
+
 void np_try_launch(LauncherModel* m) {
     const auto* np = np_cb(m);
     if (!np || !np->fill_launch) return;
     RecompLauncherCNetplayLaunch launch{};
     if (!np->fill_launch(np->ctx, &launch) || !launch.enabled) return;
-    m->s.netplay_launch = launch;
-    if (np->clear_launch_pending) np->clear_launch_pending(np->ctx);
-    m->action = LNG_ACTION_LAUNCH;
+    if (mod_commit_launch(m)) {
+        m->s.netplay_launch = launch;
+        if (np->clear_launch_pending) np->clear_launch_pending(np->ctx);
+        m->action = LNG_ACTION_LAUNCH;
+    }
 }
 
 void np_refresh_host_ip(LauncherModel* m) {
@@ -3414,6 +3422,226 @@ void draw_netplay(LauncherModel* m, const LauncherTheme& th) {
     end_container();
 }
 
+static bool mod_text_matches(const char* search, const RecompLauncherCModPackage& package) {
+    if (!search || !search[0]) return true;
+    std::string needle(search), haystack = std::string(package.name) + " " +
+        package.id + " " + package.author + " " + package.description;
+    std::transform(needle.begin(), needle.end(), needle.begin(),
+        [](unsigned char c) { return (char)std::tolower(c); });
+    std::transform(haystack.begin(), haystack.end(), haystack.begin(),
+        [](unsigned char c) { return (char)std::tolower(c); });
+    return haystack.find(needle) != std::string::npos;
+}
+
+static void mod_note_error(LauncherModel* m) {
+    const auto* mods = m ? m->mods : nullptr;
+    const char* error = mods && mods->last_error ? mods->last_error(mods->ctx) : nullptr;
+    std::snprintf(m->mod_status, sizeof(m->mod_status), "%s",
+                  error && error[0] ? error : "The mod operation failed.");
+}
+
+static bool mod_commit_launch(LauncherModel* m) {
+    if (!m || !m->mods || !m->mods->commit ||
+        m->mods->commit(m->mods->ctx, launcher_model_rom_path(m))) {
+        return true;
+    }
+    mod_note_error(m);
+    return false;
+}
+
+void draw_mods(LauncherModel* m, const LauncherTheme& th) {
+    const auto* mods = m ? m->mods : nullptr;
+    if (!mods || !mods->package_count || !mods->package_get) return;
+
+    if (ImGui::Button("Install .psxmod")) {
+        static const char* patterns[] = { "*.psxmod" };
+        char path[1024];
+        if (launcher_pick_file("Install PSXRecomp Mod", patterns, 1,
+                               "PSXRecomp mod package (.psxmod)",
+                               path, sizeof(path))) {
+            if (!mods->install_archive || !mods->install_archive(mods->ctx, path))
+                mod_note_error(m);
+            else
+                std::snprintf(m->mod_status, sizeof(m->mod_status),
+                              "Package installed. Changes apply when you press PLAY.");
+        }
+    }
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(px(300));
+    ImGui::InputTextWithHint("##mod_search", "Search mods and options...",
+                             m->mod_search, sizeof(m->mod_search));
+    if (m->mod_status[0]) {
+        ImGui::SameLine();
+        ImGui::TextColored(col(th.warn), "%s", m->mod_status);
+    }
+    ImGui::Spacing();
+
+    const float list_w = px(300);
+    if (ImGui::BeginChild("##mod_list", ImVec2(list_w, 0), ImGuiChildFlags_Borders)) {
+        const int count = mods->package_count(mods->ctx);
+        int visible = 0;
+        for (int i = 0; i < count; ++i) {
+            RecompLauncherCModPackage package{};
+            if (!mods->package_get(mods->ctx, i, &package) ||
+                !mod_text_matches(m->mod_search, package)) continue;
+            visible++;
+            ImGui::PushID(i);
+            const bool selected = m->mod_selected == i;
+            char label[196];
+            std::snprintf(label, sizeof(label), "%s\n%s  %s",
+                          package.name, package.version,
+                          package.enabled ? "[enabled]" : "[disabled]");
+            if (ImGui::Selectable(label, selected, 0, ImVec2(0, px(52))))
+                m->mod_selected = i;
+            if (package.has_error)
+                ImGui::TextColored(col(th.warn), "%s", package.status);
+            ImGui::PopID();
+        }
+        if (!visible) ImGui::TextColored(col(th.text_muted), "No matching packages.");
+    }
+    ImGui::EndChild();
+    ImGui::SameLine();
+
+    if (ImGui::BeginChild("##mod_detail", ImVec2(0, 0), ImGuiChildFlags_Borders)) {
+        RecompLauncherCModPackage package{};
+        if (mods->package_get(mods->ctx, m->mod_selected, &package)) {
+            ImGui::TextColored(col(th.accent2), "%s", package.name);
+            ImGui::SameLine();
+            ImGui::TextColored(col(th.text_muted), "%s", package.version);
+            if (package.author[0])
+                ImGui::TextColored(col(th.text_muted), "by %s", package.author);
+            if (package.description[0]) ImGui::TextWrapped("%s", package.description);
+            if (package.license[0])
+                ImGui::TextColored(col(th.text_muted), "License: %s", package.license);
+            ImGui::Spacing();
+
+            bool enabled = package.enabled != 0;
+            if (ImGui::Checkbox("Enabled", &enabled)) {
+                if (!mods->set_enabled ||
+                    !mods->set_enabled(mods->ctx, package.id, enabled ? 1 : 0))
+                    mod_note_error(m);
+            }
+            if (mods->version_count && mods->version_get && mods->select_version) {
+                const int version_count = mods->version_count(mods->ctx, package.id);
+                if (version_count > 1) {
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(px(170));
+                    if (ImGui::BeginCombo("##mod_version", package.version)) {
+                        for (int version_index = 0; version_index < version_count;
+                             ++version_index) {
+                            RecompLauncherCModVersion version{};
+                            if (!mods->version_get(mods->ctx, package.id,
+                                                   version_index, &version)) continue;
+                            if (ImGui::Selectable(version.version,
+                                                  version.selected != 0)) {
+                                if (!mods->select_version(
+                                        mods->ctx, package.id, version.version))
+                                    mod_note_error(m);
+                            }
+                            if (version.selected) ImGui::SetItemDefaultFocus();
+                        }
+                        ImGui::EndCombo();
+                    }
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Select an installed version (rollback)");
+                }
+            }
+            if (package.removable) {
+                ImGui::SameLine();
+                if (ImGui::Button("Remove")) ImGui::OpenPopup("Remove mod package?");
+                if (ImGui::BeginPopupModal("Remove mod package?", nullptr,
+                                           ImGuiWindowFlags_AlwaysAutoResize)) {
+                    ImGui::TextWrapped("Remove %s %s from this installation?",
+                                       package.name, package.version);
+                    if (ImGui::Button("Cancel", ImVec2(px(110), 0)))
+                        ImGui::CloseCurrentPopup();
+                    ImGui::SameLine();
+                    if (ImGui::Button("Remove", ImVec2(px(110), 0))) {
+                        if (!mods->remove_package ||
+                            !mods->remove_package(mods->ctx, package.id, package.version))
+                            mod_note_error(m);
+                        else if (m->mod_selected > 0) m->mod_selected--;
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::EndPopup();
+                }
+            }
+            ImGui::Separator();
+
+            std::string last_group;
+            for (int i = 0; i < package.option_count; ++i) {
+                RecompLauncherCModOption option{};
+                if (!mods->option_get ||
+                    !mods->option_get(mods->ctx, package.id, i, &option)) continue;
+                if (m->mod_search[0]) {
+                    RecompLauncherCModPackage searchable = package;
+                    std::snprintf(searchable.name, sizeof(searchable.name), "%s", option.label);
+                    std::snprintf(searchable.description, sizeof(searchable.description),
+                                  "%s %s", option.description, option.group);
+                    if (!mod_text_matches(m->mod_search, searchable)) continue;
+                }
+                if (last_group != option.group) {
+                    last_group = option.group;
+                    ImGui::Spacing();
+                    ImGui::TextColored(col(th.accent), "%s",
+                                       last_group.empty() ? "General" : last_group.c_str());
+                    ImGui::Separator();
+                }
+                ImGui::PushID(option.id);
+                bool changed = false;
+                char next[RECOMP_LAUNCHER_MOD_VALUE_MAX];
+                std::snprintf(next, sizeof(next), "%s", option.value);
+                if (option.type == RECOMP_MOD_OPTION_BOOLEAN) {
+                    bool value = std::strcmp(option.value, "true") == 0;
+                    if (ImGui::Checkbox(option.label, &value)) {
+                        std::snprintf(next, sizeof(next), "%s", value ? "true" : "false");
+                        changed = true;
+                    }
+                } else if (option.type == RECOMP_MOD_OPTION_CHOICE) {
+                    ImGui::TextUnformatted(option.label);
+                    ImGui::SameLine(px(260));
+                    ImGui::SetNextItemWidth(px(230));
+                    if (ImGui::BeginCombo("##choice", option.value)) {
+                        for (int c = 0; c < option.choice_count; ++c) {
+                            RecompLauncherCModChoice choice{};
+                            if (!mods->choice_get ||
+                                !mods->choice_get(mods->ctx, package.id, option.id, c, &choice))
+                                continue;
+                            const bool selected = std::strcmp(choice.value, option.value) == 0;
+                            if (ImGui::Selectable(choice.label, selected)) {
+                                std::snprintf(next, sizeof(next), "%s", choice.value);
+                                changed = true;
+                            }
+                            if (selected) ImGui::SetItemDefaultFocus();
+                        }
+                        ImGui::EndCombo();
+                    }
+                } else {
+                    int value = std::atoi(option.value);
+                    ImGui::TextUnformatted(option.label);
+                    ImGui::SameLine(px(260));
+                    ImGui::SetNextItemWidth(px(230));
+                    int lo = (int)option.min_value, hi = (int)option.max_value;
+                    if (ImGui::SliderInt("##integer", &value, lo, hi)) {
+                        std::snprintf(next, sizeof(next), "%d", value);
+                        changed = true;
+                    }
+                }
+                if (ImGui::IsItemHovered() && option.description[0])
+                    ImGui::SetTooltip("%s", option.description);
+                if (changed && (!mods->set_option ||
+                    !mods->set_option(mods->ctx, package.id, option.id, next)))
+                    mod_note_error(m);
+                ImGui::PopID();
+            }
+        } else {
+            ImGui::TextColored(col(th.text_muted),
+                               "Install or select a package to configure it.");
+        }
+    }
+    ImGui::EndChild();
+}
+
 // ---- panel registry: id -> {view, slot, available, draw} --------------------
 // The single implementation table for every panel this backend draws. A
 // SystemProfile's panels_dashboard/panels_settings/panels_controller arrays
@@ -3525,8 +3753,10 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
         }
     }
     ImGui::SetCursorScreenPos(ImVec2(play_x, cta_y));
-    if (neon_cta("##play", "PLAY", ImVec2(play_w, play_h)))
-        m->action = LNG_ACTION_LAUNCH;
+    if (neon_cta("##play", "PLAY", ImVec2(play_w, play_h))) {
+        if (mod_commit_launch(m))
+            m->action = LNG_ACTION_LAUNCH;
+    }
     ImGui::SetItemDefaultFocus();   // gamepad/keyboard start on the primary action
     (void)win;
 }
@@ -3621,6 +3851,7 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
     {   // right-aligned netplay name + nav buttons
         const char* label = (m->view == LNG_VIEW_DASHBOARD) ? "Settings" : "< Back";
         const float w = px(110.0f);
+        const float gap = px(10.0f);
         const float name_w = px(170.0f);
         float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
         float nav_y = hdr_top + px(6.0f);
@@ -3632,6 +3863,11 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
                               m->s.netplay_player_name);
                 m->netplay_name_modal_open = true;
             }
+        }
+        if (m->view == LNG_VIEW_DASHBOARD && m->mods) {
+            ImGui::SetCursorPos(ImVec2(right - w * 2.0f - gap, nav_y));
+            if (ImGui::Button("Mods", ImVec2(w, px(34))))
+                launcher_model_set_view(m, LNG_VIEW_MODS);
         }
         ImGui::SetCursorPos(ImVec2(right - w, nav_y));
         if (ImGui::Button(label, ImVec2(w, px(34)))) {
@@ -3664,6 +3900,7 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
         case LNG_VIEW_SETTINGS:   draw_settings(m, th);             break;
         case LNG_VIEW_CONTROLLER: draw_controller(m, th);           break;
         case LNG_VIEW_NETPLAY:    draw_netplay(m, th);              break;
+        case LNG_VIEW_MODS:       draw_mods(m, th);                 break;
     }
     end_container();
 

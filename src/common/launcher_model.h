@@ -42,6 +42,7 @@ typedef enum {
     LNG_VIEW_SETTINGS,
     LNG_VIEW_CONTROLLER,
     LNG_VIEW_NETPLAY,
+    LNG_VIEW_MODS,
 } LngView;
 
 typedef enum {
@@ -195,6 +196,10 @@ typedef struct {
     bool has_mouse_controls;
     bool netplay_supported;
     const RecompLauncherCNetplayCallbacks* netplay;
+    const RecompLauncherCModProvider* mods;
+    int       mod_selected;
+    char      mod_search[96];
+    char      mod_status[256];
     // Game-supplied aspect vocabulary (GameInfo.aspect_labels): when set,
     // the aspect cycle walks these 0..num_aspect_labels-1 instead of the
     // built-in 4:3/16:9/21:9 mask set; aspect_experimental tags the row.

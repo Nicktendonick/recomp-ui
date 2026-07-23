@@ -136,6 +136,83 @@ typedef struct RecompLauncherCNetplayCallbacks {
     void (*clear_last_error)(void* ctx);
 } RecompLauncherCNetplayCallbacks;
 
+/* ---- schema-driven mod packages -----------------------------------------
+ * The host owns package parsing, persistence, dependency resolution, and
+ * installation. recomp-ui only renders this stable query/mutation surface.
+ * All strings are copied into fixed buffers so provider implementations may
+ * rebuild their catalogs after any mutation without dangling UI pointers. */
+#define RECOMP_LAUNCHER_MOD_ID_MAX 96
+#define RECOMP_LAUNCHER_MOD_VALUE_MAX 128
+
+typedef enum RecompLauncherCModOptionType {
+    RECOMP_MOD_OPTION_BOOLEAN = 0,
+    RECOMP_MOD_OPTION_CHOICE = 1,
+    RECOMP_MOD_OPTION_INTEGER = 2,
+} RecompLauncherCModOptionType;
+
+typedef struct RecompLauncherCModPackage {
+    char id[RECOMP_LAUNCHER_MOD_ID_MAX];
+    char version[32];
+    char name[128];
+    char author[96];
+    char description[512];
+    char license[64];
+    char status[256];
+    int  enabled;
+    int  option_count;
+    int  removable;
+    int  has_error;
+} RecompLauncherCModPackage;
+
+typedef struct RecompLauncherCModOption {
+    char id[RECOMP_LAUNCHER_MOD_ID_MAX];
+    char label[128];
+    char description[512];
+    char group[96];
+    char value[RECOMP_LAUNCHER_MOD_VALUE_MAX];
+    char default_value[RECOMP_LAUNCHER_MOD_VALUE_MAX];
+    int  type;          /* RecompLauncherCModOptionType */
+    int64_t min_value;
+    int64_t max_value;
+    int64_t step;
+    int  choice_count;
+} RecompLauncherCModOption;
+
+typedef struct RecompLauncherCModChoice {
+    char value[RECOMP_LAUNCHER_MOD_VALUE_MAX];
+    char label[128];
+} RecompLauncherCModChoice;
+
+typedef struct RecompLauncherCModVersion {
+    char version[32];
+    int selected;
+    int removable;
+} RecompLauncherCModVersion;
+
+typedef struct RecompLauncherCModProvider {
+    void* ctx;
+    int (*package_count)(void* ctx);
+    int (*package_get)(void* ctx, int index, RecompLauncherCModPackage* out);
+    int (*option_get)(void* ctx, const char* package_id, int index,
+                      RecompLauncherCModOption* out);
+    int (*choice_get)(void* ctx, const char* package_id, const char* option_id,
+                      int index, RecompLauncherCModChoice* out);
+    int (*version_count)(void* ctx, const char* package_id);
+    int (*version_get)(void* ctx, const char* package_id, int index,
+                       RecompLauncherCModVersion* out);
+    /* Mutations return 1 on success and 0 on failure. */
+    int (*install_archive)(void* ctx, const char* archive_path);
+    int (*remove_package)(void* ctx, const char* package_id, const char* version);
+    int (*set_enabled)(void* ctx, const char* package_id, int enabled);
+    int (*select_version)(void* ctx, const char* package_id, const char* version);
+    int (*set_option)(void* ctx, const char* package_id, const char* option_id,
+                      const char* value);
+    /* Resolve and persist the staged selection. Called before PLAY commits.
+     * image_path is the ROM/disc currently selected in the launcher. */
+    int (*commit)(void* ctx, const char* image_path);
+    const char* (*last_error)(void* ctx);
+} RecompLauncherCModProvider;
+
 // Plain-C mirror of the launcher's internal settings (bools as int).
 struct RecompLauncherCSettings {
     int  output_method;     // 0 SDL, 1 SDL-software, 2 OpenGL
@@ -462,6 +539,10 @@ typedef struct RecompLauncherCGameInfo {
      * LAN room header (NULL/empty => online Lobby Server URL). */
     int resume_netplay_room;
     const char* resume_netplay_endpoint;
+
+    /* Optional schema-driven mod package provider. Appended for ABI stability.
+     * NULL hides the Mods view completely. */
+    const RecompLauncherCModProvider* mods;
 } RecompLauncherCGameInfo;
 
 // Returns: 0 = LAUNCH (boot out_rom_path with the edited *io),

@@ -41,7 +41,7 @@ static const char* kHotkeyNames[LNG_HK_COUNT] = {
     "Window bigger", "Window smaller", "Volume up", "Volume down",
     "FPS readout", "Toggle renderer"
 };
-static const char* kViewNames[4] = { "Dashboard", "Settings", "Controller", "Netplay" };
+static const char* kViewNames[5] = { "Dashboard", "Settings", "Controller", "Netplay", "Mods" };
 static const char* kSrcNames[3]  = { "None", "Keyboard", "Gamepad" };
 
 static void safe_copy(char* dst, size_t cap, const char* src) {
@@ -137,6 +137,7 @@ void launcher_model_init(LauncherModel* m,
         m->has_mouse_controls   = game->has_mouse_controls != 0;
         m->netplay_supported    = game->netplay_supported != 0 && game->netplay != NULL;
         m->netplay              = game->netplay;
+        m->mods                 = game->mods;
     } else {
         m->game_name    = "Unknown Game";
         m->region       = "";
@@ -169,6 +170,7 @@ void launcher_model_init(LauncherModel* m,
     m->netplay_lan_only = false;
     m->netplay_list_fresh = false;
     m->netplay_selected_lobby = -1;
+    m->mod_selected = 0;
     m->s.adaptive_view =
         (m->adaptive_view_supported && m->s.adaptive_view) ? 1 : 0;
 
@@ -469,7 +471,7 @@ bool launcher_model_rom_verified(const LauncherModel* m) {
 }
 
 void launcher_model_set_view(LauncherModel* m, LngView v) {
-    if (v < 0 || v > LNG_VIEW_NETPLAY) return;
+    if (v < 0 || v > LNG_VIEW_MODS) return;
     /* Re-entering Netplay should rescan server + LAN lists. */
     if (m->view == LNG_VIEW_NETPLAY && v != LNG_VIEW_NETPLAY)
         m->netplay_list_fresh = false;
@@ -1273,6 +1275,6 @@ const char* launcher_hotkey_name(LngHotkey h) {
 }
 
 const char* launcher_view_name(LngView v) {
-    if (v < 0 || v > LNG_VIEW_NETPLAY) return "?";
+    if (v < 0 || v > LNG_VIEW_MODS) return "?";
     return kViewNames[v];
 }

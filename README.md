@@ -205,6 +205,10 @@ snesrecomp `docs/RECOMP_NET.md` → "Soft-return rematch checklist".
   `memcard_inspect` callback).
 - **MSU-1** — dashboard IPS auto-patching for SNES MSU-1 titles.
 - **Hotkeys** — per-console subset of the emulator hotkey catalog, editable.
+- **Mods** — optional host-provided package catalog with local `.psxmod`
+  installation, enable/disable, version rollback, removal, and schema-generated
+  boolean/choice/integer controls. The host resolves and commits changes before
+  launch; recomp-ui never executes package code.
 - **Footer** — PLAY, skip-launcher-on-boot (+ confirm modal), gamepad navigation.
 
 ---
