@@ -66,6 +66,8 @@ typedef struct RecompLauncherCNetplayMember {
 typedef struct RecompLauncherCNetplayLaunch {
     int      enabled;
     int      local_slot;
+    /* Host PlayerInput index to sample for this peer. -1 = auto (prefer
+     * dashboard P1 / NETPLAY card; else seat card; else sole assigned). */
     int      input_player;
     char     bind_hostport[64];
     char     peer_hostport[64];

@@ -984,7 +984,8 @@ void draw_memcard_slot(LauncherModel* m, const LauncherTheme& th, int slot) {
     float img_h;
     if (g_save_fill_h) {
         const float avail_h = ImGui::GetContentRegionAvail().y;
-        img_h = avail_h - px(78.0f);                              // reserve grid + buttons
+        // Grid + gap + Browse/New + bottom pad — keep buttons clear of the frame.
+        img_h = avail_h - px(110.0f);
         const float img_h_by_w = (0.50f * slotw) * (164.0f / 148.0f);  // cap width ~half
         if (img_h > img_h_by_w) img_h = img_h_by_w;
         if (img_h < px(92.0f))  img_h = px(92.0f);
@@ -1034,7 +1035,7 @@ void draw_memcard_slot(LauncherModel* m, const LauncherTheme& th, int slot) {
     ImGui::PopStyleColor();
 
     // Resume the card body BELOW the image, full width.
-    ImGui::SetCursorPos(ImVec2(start_x, top_y + ih + px(10.0f)));
+    ImGui::SetCursorPos(ImVec2(start_x, top_y + ih + px(14.0f)));
 
     // Dim the rest of the slot body when disabled (visual only; the Browse/New
     // controls stay clickable so the slot can be re-configured while off).
@@ -1060,18 +1061,19 @@ void draw_memcard_slot(LauncherModel* m, const LauncherTheme& th, int slot) {
         ImGui::Dummy(ImVec2(cell * kB + bgap * (kB - 1), cell));
     }
 
-    // Push the Browse/New buttons toward the bottom so a fill-height slot card
-    // (bottom-flush with the boxart column) doesn't strand them mid-card. In
-    // the hugging layout just leave the usual small gap.
+    // Push Browse/New toward the bottom on fill-height cards; hug layout keeps
+    // a comfortable gap above the buttons and a little pad below.
     static const char* kCardPatterns[] = { "*.mcd", "*.mcr", "*.mc" };
     const float cw = ImGui::GetContentRegionAvail().x;
     const float bw = (cw - px(th.spacing_sm)) * 0.5f;
     const float btn_h = px(32.0f);
+    const float btn_gap = px(16.0f);
+    const float btn_pad_bottom = px(6.0f);
     if (g_save_fill_h) {
-        const float slack = ImGui::GetContentRegionAvail().y - btn_h;
-        ImGui::Dummy(ImVec2(0, slack > px(10.0f) ? slack : px(10.0f)));
+        const float slack = ImGui::GetContentRegionAvail().y - btn_h - btn_pad_bottom;
+        ImGui::Dummy(ImVec2(0, slack > btn_gap ? slack : btn_gap));
     } else {
-        ImGui::Dummy(ImVec2(0, px(10.0f)));
+        ImGui::Dummy(ImVec2(0, btn_gap));
     }
     if (ImGui::Button("Browse", ImVec2(bw, btn_h))) {
         char buf[512];
@@ -1089,6 +1091,7 @@ void draw_memcard_slot(LauncherModel* m, const LauncherTheme& th, int slot) {
                                     "PS1 memory card (.mcd)", buf, sizeof(buf)))
             launcher_model_new_memcard(m, slot, buf);
     }
+    ImGui::Dummy(ImVec2(0, btn_pad_bottom));
 
     ImGui::PopStyleVar();  // body_alpha
     ImGui::PopID();
@@ -1107,18 +1110,39 @@ int avail_save(const LauncherModel* m) {
     return 0;
 }
 
+// Fixed logical width for dashboard player / memcard cards. Extra horizontal
+// space adds more columns instead of stretching each card.
+static float dash_card_width(float availw, float gap, int count) {
+    const float pref = px(300.0f);
+    if (count < 1) count = 1;
+    int cols = (int)((availw + gap) / (pref + gap));
+    if (cols < 1) cols = 1;
+    if (cols > count) cols = count;
+    float cardw = pref;
+    if (cols == 1 && availw < pref) cardw = availw;  // narrow: shrink to fit
+    return cardw;
+}
+
+static int dash_card_columns(float availw, float gap, float cardw, int count) {
+    if (count < 1) return 1;
+    int cols = (int)((availw + gap) / (cardw + gap));
+    if (cols < 1) cols = 1;
+    if (cols > count) cols = count;
+    return cols;
+}
+
 void panel_save_draw(LauncherModel* m, const LauncherTheme* th) {
     const SystemProfile* prof = (const SystemProfile*)m->profile;
     const SaveKind kind = prof ? prof->save.kind : SAVE_NONE;
     if (kind == SAVE_MEMCARD) {
         // No outer "MEMORY CARDS" card/eyebrow: the small per-slot cards ARE the
-        // UI (each self-labels with a memcard icon + "Memory Card N"). Laid side
-        // by side at ~a controller-card width, the whole row is short enough to
-        // sit under the controller card without scrolling.
+        // UI. Fixed width (same as player cards); wider windows add columns
+        // instead of stretching the pair across the column.
         const int slots = (prof->save.slots > 0 && prof->save.slots <= 2) ? prof->save.slots : 2;
         const float gap = px(th->spacing_sm);
         const float avail = ImGui::GetContentRegionAvail().x;
-        const float cw = (avail - gap * (slots - 1)) / (float)slots;
+        const float cw = dash_card_width(avail, gap, slots);
+        const int cols = dash_card_columns(avail, gap, cw, slots);
         // When the dashboard asks the SAVE panel to fill (wide PSX layout), the
         // slot cards take the full remaining column height so their bottoms sit
         // flush with the boxart card on the left. Only do it when there's real
@@ -1127,7 +1151,8 @@ void panel_save_draw(LauncherModel* m, const LauncherTheme* th) {
         const bool do_fill = g_save_fill_h && fill_h > px(180.0f);
         g_save_fill_h = do_fill;   // draw_memcard_slot reads this for the bottom slack
         for (int slot = 0; slot < slots; ++slot) {
-            if (slot) ImGui::SameLine(0, gap);
+            if (slot % cols) ImGui::SameLine(0, gap);
+            else if (slot) ImGui::Dummy(ImVec2(0, gap));
             char cid[16]; snprintf(cid, sizeof(cid), "mcc%d", slot);
             char pid[16]; snprintf(pid, sizeof(pid), "mcp%d", slot);
             begin_container(cid, ImVec2(cw, do_fill ? fill_h : 0.0f),
@@ -1437,13 +1462,44 @@ void draw_source_selectables(LauncherModel* m, int p) {
     }
 }
 
+/* Best-effort local lobby seat (0-based) for the NETPLAY pad card label.
+ * Prefers fill_launch.local_slot, else display_name match, else host→0.
+ * Label only — runtime netplay always samples dashboard card 0. */
+static int np_guess_local_seat(const LauncherModel* m) {
+    if (!m || !m->netplay_supported) return 0;
+    const auto* np = m->netplay;
+    if (!np || !np->ctx) return 0;
+    if (np->fill_launch) {
+        RecompLauncherCNetplayLaunch launch{};
+        if (np->fill_launch(np->ctx, &launch) && launch.enabled &&
+            launch.local_slot >= 0)
+            return launch.local_slot;
+    }
+    const char* me = m->s.netplay_player_name;
+    if ((!me || !me[0]) && np->player_name)
+        me = np->player_name(np->ctx);
+    if (np->member_count && np->member_get && me && me[0]) {
+        const int n = np->member_count(np->ctx);
+        for (int i = 0; i < n; ++i) {
+            RecompLauncherCNetplayMember mem{};
+            if (!np->member_get(np->ctx, i, &mem)) continue;
+            if (mem.display_name[0] && std::strcmp(mem.display_name, me) == 0)
+                return mem.slot >= 0 ? mem.slot : i;
+        }
+    }
+    if (np->is_host && np->is_host(np->ctx)) return 0;
+    return 0;
+}
+
 void draw_player_panel(LauncherModel* m, const LauncherTheme& th, int p, float w) {
     char id[24];  snprintf(id, sizeof(id), "player%d", p);
-    char eb[32];
-    if (p == 0 && m->netplay_supported)
-        snprintf(eb, sizeof(eb), "PLAYER 1 / NETPLAY");
-    else
+    char eb[40];
+    if (p == 0 && m->netplay_supported) {
+        const int seat = np_guess_local_seat(m);
+        snprintf(eb, sizeof(eb), "PLAYER %d / NETPLAY", seat + 1);
+    } else {
         snprintf(eb, sizeof(eb), "PLAYER %d", p + 1);
+    }
 
     if (!begin_panel(id, w, false)) { end_panel(); return; }
     ImGui::PushID(p);
@@ -1505,9 +1561,9 @@ void draw_player_panel(LauncherModel* m, const LauncherTheme& th, int p, float w
     end_panel();
 }
 
-// Lays out the player cards: one card for a 1-player game, two side-by-side
-// for a 2-player game, a 2x2/2+1 wrap for 3–5 (N64 4-port, PSX multitap).
-// Driven by the model, never hardcoded.
+// Lays out player cards: stretch to fill the row until there is room for
+// another card at the standard width, then bump the column count (memcards
+// stay fixed-width via dash_card_width).
 void draw_controllers_row(LauncherModel* m, const LauncherTheme& th) {
     if (m->lock_device) return;   // fixed pad: hide the player controller cards entirely
     int n = m->player_count;
@@ -1515,13 +1571,14 @@ void draw_controllers_row(LauncherModel* m, const LauncherTheme& th) {
     if (n > LNG_MAX_PLAYERS) n = LNG_MAX_PLAYERS;
     const float gap = px(th.spacing_md);
     const float availw = ImGui::GetContentRegionAvail().x;
-    // A 2P game splits the row; a 1P game gets ONE card of the same size rather
-    // than a full-width card with a lone pad floating in it. 3–5 players wrap
-    // into rows of two same-size cards (last row may hold a single card).
-    float cardw = (availw - gap) * 0.5f;
-    if (n == 1 && cardw < px(300.0f)) cardw = availw;   // narrow window: fill
+    const float pref = px(300.0f);
+    int cols = (int)((availw + gap) / (pref + gap));
+    if (cols < 1) cols = 1;
+    if (cols > n) cols = n;
+    float cardw = (availw - gap * (float)(cols - 1)) / (float)cols;
+    if (cardw < 1.0f) cardw = availw;
     for (int p = 0; p < n; ++p) {
-        if (p & 1) ImGui::SameLine(0, gap);
+        if (p % cols) ImGui::SameLine(0, gap);
         else if (p) ImGui::Dummy(ImVec2(0, gap));   // new row of cards
         char cid[16];
         std::snprintf(cid, sizeof(cid), "pc%d", p);
@@ -1582,8 +1639,10 @@ void draw_dashboard(LauncherModel* m, const LauncherTheme& th, int logical_w) {
                 begin_container("dash_r", ImVec2(0, right_h),
                                 ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
                 if (many_players) {
-                    // Reserve a band for memcards; controllers scroll in the rest.
-                    const float save_reserve = save_p ? px(200.0f) : 0.0f;
+                    // Tall enough for a clean fill-height memcard pair (icon,
+                    // grid, Browse/New with padding) while controllers scroll
+                    // in the space above.
+                    const float save_reserve = save_p ? px(300.0f) : 0.0f;
                     float ctrl_h = ImGui::GetContentRegionAvail().y
                                    - save_reserve - (save_p ? gap : 0.0f);
                     if (ctrl_h < px(100.0f)) ctrl_h = px(100.0f);
