@@ -1520,12 +1520,12 @@ void draw_controllers_row(LauncherModel* m, const LauncherTheme& th) {
     // into rows of two same-size cards (last row may hold a single card).
     float cardw = (availw - gap) * 0.5f;
     if (n == 1 && cardw < px(300.0f)) cardw = availw;   // narrow window: fill
-    static const char* kCardIds[LNG_MAX_PLAYERS] = {
-        "pc0", "pc1", "pc2", "pc3", "pc4"};
     for (int p = 0; p < n; ++p) {
         if (p & 1) ImGui::SameLine(0, gap);
         else if (p) ImGui::Dummy(ImVec2(0, gap));   // new row of cards
-        begin_container(kCardIds[p], ImVec2(cardw, 0), ImGuiChildFlags_AutoResizeY);
+        char cid[16];
+        std::snprintf(cid, sizeof(cid), "pc%d", p);
+        begin_container(cid, ImVec2(cardw, 0), ImGuiChildFlags_AutoResizeY);
         draw_player_panel(m, th, p, cardw);
         end_container();
     }
@@ -1559,10 +1559,13 @@ void draw_dashboard(LauncherModel* m, const LauncherTheme& th, int logical_w) {
         const bool has_save = (save_p != nullptr);
         const bool has_tpak = (tpak_p != nullptr);
         if (has_save) {
-            // Hug-then-fill: the left column hugs the box art; the right column
-            // is made exactly as tall as it, so the controller card hugs at the
-            // top and the memory-card card fills the rest — its bottom sits
-            // flush with the box-art card on the left.
+            // Capture body height before the row so the right column can grow
+            // with the window down to the footer divider (Play CTA below).
+            const float row_h = ImGui::GetContentRegionAvail().y;
+            // Hug-then-fill (2P): right column matches box-art height so
+            // memcards sit flush with the GAME card. Multitap (3+): fill to
+            // the footer and scroll the controller stack when it overflows.
+            const bool many_players = m->player_count > 2;
             float left_h = 0.0f;
             if (game_p) {
                 g_game_fill_h = false;
@@ -1573,8 +1576,27 @@ void draw_dashboard(LauncherModel* m, const LauncherTheme& th, int logical_w) {
             }
             if (game_p && ctrl_p) ImGui::SameLine(0, gap);
             if (ctrl_p) {
-                begin_container("dash_r", ImVec2(0, left_h > 0.0f ? left_h : 0.0f),
+                const float right_h = many_players
+                    ? (row_h > px(80.0f) ? row_h : px(80.0f))
+                    : (left_h > 0.0f ? left_h : 0.0f);
+                begin_container("dash_r", ImVec2(0, right_h),
                                 ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+                if (many_players) {
+                    // Reserve a band for memcards; controllers scroll in the rest.
+                    const float save_reserve = save_p ? px(200.0f) : 0.0f;
+                    float ctrl_h = ImGui::GetContentRegionAvail().y
+                                   - save_reserve - (save_p ? gap : 0.0f);
+                    if (ctrl_h < px(100.0f)) ctrl_h = px(100.0f);
+                    begin_container("dash_ctrl", ImVec2(0, ctrl_h));
+                        ctrl_p->draw(m, &th);
+                    end_container();
+                    if (save_p) {
+                        ImGui::Dummy(ImVec2(0, gap));
+                        g_save_fill_h = true;
+                        save_p->draw(m, &th);
+                        g_save_fill_h = false;
+                    }
+                } else {
                     ctrl_p->draw(m, &th);
                     if (save_p) {
                         ImGui::Dummy(ImVec2(0, gap));
@@ -1582,6 +1604,7 @@ void draw_dashboard(LauncherModel* m, const LauncherTheme& th, int logical_w) {
                         save_p->draw(m, &th);
                         g_save_fill_h = false;
                     }
+                }
                 end_container();
             }
         } else if (has_tpak) {
