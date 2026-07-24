@@ -66,6 +66,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#if defined(_WIN32)
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 
 extern "C" const char* launcher_backend_name(void) { return "Dear ImGui"; }
 
@@ -2458,6 +2463,15 @@ bool np_valid_port(const char* text) {
     return value != 0;
 }
 
+bool np_prepare_guest_bind(char* out, size_t cap, char* status, size_t status_cap) {
+    if (launcher_udp_prepare_guest_bind(out, cap) != 0) {
+        if (status && status_cap)
+            std::snprintf(status, status_cap, "No free UDP port near 7778. Try again.");
+        return false;
+    }
+    return true;
+}
+
 void np_connect_and_list(LauncherModel* m) {
     const auto* np = np_cb(m);
     if (!np) return;
@@ -3070,7 +3084,10 @@ void draw_netplay_password_modal(LauncherModel* m, const LauncherTheme& th) {
             RecompLauncherCNetplayLobby row{};
             if (np && np->list_get && np->join &&
                 np->list_get(np->ctx, m->netplay_selected_lobby, &row)) {
-                int rc = np->join(np->ctx, row.lobby_id, m->netplay_password);
+                char guest_bind[64];
+                if (np_prepare_guest_bind(guest_bind, sizeof(guest_bind),
+                                          m->netplay_status, sizeof(m->netplay_status))) {
+                int rc = np->join(np->ctx, row.lobby_id, m->netplay_password, guest_bind);
                 if (rc == 0) {
                     if (strncmp(row.lobby_id, "lan:", 4) == 0) {
                         m->netplay_local_room = true;
@@ -3096,6 +3113,7 @@ void draw_netplay_password_modal(LauncherModel* m, const LauncherTheme& th) {
                 } else {
                     std::snprintf(m->netplay_status, sizeof(m->netplay_status),
                                   "Could not join lobby.");
+                }
                 }
             }
         }
@@ -3642,7 +3660,11 @@ void np_join_selected(LauncherModel* m) {
         m->netplay_password[0] = '\0';
         m->netplay_password_modal_open = true;
     } else if (np->join) {
-        const int rc = np->join(np->ctx, row.lobby_id, "");
+        char guest_bind[64];
+        if (!np_prepare_guest_bind(guest_bind, sizeof(guest_bind),
+                                   m->netplay_status, sizeof(m->netplay_status)))
+            return;
+        const int rc = np->join(np->ctx, row.lobby_id, "", guest_bind);
         if (rc == 0) {
             if (strncmp(row.lobby_id, "lan:", 4) == 0) {
                 m->netplay_local_room = true;
