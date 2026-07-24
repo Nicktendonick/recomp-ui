@@ -280,6 +280,13 @@ typedef struct RecompLauncherCDiscVerify {
     int  verdict;      // 0 none, 1 ok, 2 warn, 3 bad
 } RecompLauncherCDiscVerify;
 
+/* Host BIOS check for the first-run setup wizard (has_bios games). */
+typedef struct RecompLauncherCBiosVerify {
+    int  ok;           // 1 = usable BIOS present
+    int  warn;         // 1 = size/CRC soft mismatch (still ok to boot)
+    char detail[160];  // short status for the UI
+} RecompLauncherCBiosVerify;
+
 typedef struct RecompLauncherCMemcard {
     int           valid;          // 128 KB + "MC" magic present
     int           used_blocks;    // 0..15
