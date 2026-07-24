@@ -23,13 +23,15 @@ extern "C" {
 // leaves new slots in the same "none" state they had implicitly before.
 // Every consumer compiles this header from source (submodule pin), so the
 // layout change is absorbed by the consumer's normal rebuild on a pin bump.
-#define RECOMP_LAUNCHER_MAX_PLAYERS 5
+#define RECOMP_LAUNCHER_MAX_PLAYERS 8
+/* Host may #ifdef this when reading player_gamepad_guid[] from settings. */
+#define RECOMP_LAUNCHER_HAS_PLAYER_GAMEPAD_GUID 1
 
 // N64 Transfer Pak slots — one per controller port.
 #define RECOMP_LAUNCHER_MAX_TPAKS 4
 
-/* Netplay lobby membership ceiling (matches MAX_PLAYERS / PSX multitap). */
-#define RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS 5
+/* Netplay lobby membership ceiling (party games up to 8). */
+#define RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS 8
 
 typedef struct RecompLauncherCSettings RecompLauncherCSettings;
 
@@ -60,9 +62,12 @@ typedef struct RecompLauncherCNetplayLaunch {
     char     peer_hostport[64];
     uint32_t session_id;
     int      input_delay;
-    int      max_slots; /* session pad count (2..RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS) */
-    /* Host match_caps: force ICE TURN/relay for all peers (0/1). */
-    int      force_turn;
+    int      max_slots; /* lobby seat ceiling (2..RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS) */
+    /* Seated players at launch — delay-sync slot_count. 0 = unknown / use max_slots. */
+    int      player_count;
+    /* Host match_caps: opt into lobby-server UDP input relay (0/1).
+     * 3+ defaults to host-as-relay unless this is set. */
+    int      force_input_relay;
 } RecompLauncherCNetplayLaunch;
 
 typedef struct RecompLauncherCNetplayLocalAddress {
@@ -99,9 +104,11 @@ typedef struct RecompLauncherCNetplayCallbacks {
      * the host itself cannot use the port (UI surfaces the same messages).
      * lan_only != 0: publish only the local LAN registry (no lobby server).
      * lan_only == 0: publish only on the lobby server (no LAN registry). */
+    /* max_slots: 2..RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS, clamped by the host
+     * to the game's supported player count. */
     int  (*create)(void* ctx, const char* lobby_name, char* host_endpoint,
                    const char* password, const RecompLauncherCSettings* settings,
-                   int lan_only);
+                   int lan_only, int max_slots);
     /* join: guest_bind is in/out (capacity >= 64). recomp-ui applies the
      * universal guest UDP bind policy before calling — prefer 7778, then
      * 7778+1 .. +31, written as "0.0.0.0:<port>". Hosts should advertise that
@@ -141,9 +148,13 @@ typedef struct RecompLauncherCNetplayCallbacks {
     /* Optional host waiting-room settings. input_delay is frames, clamped 2..20. */
     int  (*input_delay_get)(void* ctx);
     int  (*input_delay_set)(void* ctx, int delay_frames);
-    /* Optional: host-authoritative Force TURN for server lobbies (0/1). */
-    int  (*force_turn_get)(void* ctx);
-    int  (*force_turn_set)(void* ctx, int force);
+    /* Optional: host opt-in to server UDP input relay (0/1).
+     * 3+ lobbies default to host-as-relay unless this is enabled. */
+    int  (*force_input_relay_get)(void* ctx);
+    int  (*force_input_relay_set)(void* ctx, int force);
+    /* Optional: current room seat ceiling (2..RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS).
+     * 0 when not in a lobby / unknown. Prefer this over game num_players. */
+    int  (*lobby_max_slots)(void* ctx);
 } RecompLauncherCNetplayCallbacks;
 
 // Plain-C mirror of the launcher's internal settings (bools as int).
@@ -188,7 +199,7 @@ struct RecompLauncherCSettings {
     // Per-slot card-image file path (empty = none picked yet), editable via the
     // Save panel's Browse/New controls; mirrors bios_path's pattern exactly.
     char memcard_path[2][512];
-    // Per-slot enable/disable (mirrors the legacy PSX launcher's per-card
+    // Per-slot enable/disable (mirrors the RmlUi PSX launcher's per-card
     // "Enabled" switch / SIO-port concept: a disabled slot reports no card
     // present). 0 = unset (host predates this field) -> the model defaults it
     // to enabled at init. Appended additively; see launcher_model_toggle_memcard().
@@ -251,24 +262,23 @@ struct RecompLauncherCSettings {
     // transient output and is cleared by the launcher when it initializes.
     char netplay_player_name[64];
     RecompLauncherCNetplayLaunch netplay_launch;
+
+    // ---- per-player SDL gamepad GUID (player_src==2). Empty when none/keyboard.
+    // Appended additively; see RECOMP_LAUNCHER_HAS_PLAYER_GAMEPAD_GUID. Hosts
+    // persist these as pN_device in settings.toml so multi-pad assignments
+    // survive relaunches (instance IDs do not).
+    char player_gamepad_guid[RECOMP_LAUNCHER_MAX_PLAYERS][40];
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
 // Plain-C structs so a host can implement the callbacks with zero launcher
-// internal types. Mirror what the legacy launcher computed inline.
+// internal types. Mirror what the RmlUi launcher computed inline.
 typedef struct RecompLauncherCDiscVerify {
     char serial[16];   // e.g. "SCUS-94423"; "" = unknown/unread
     char region[8];    // e.g. "NTSC-U"; "" = unknown
     int  iso_ok;       // ISO9660 / system header present
     int  verdict;      // 0 none, 1 ok, 2 warn, 3 bad
 } RecompLauncherCDiscVerify;
-
-// BIOS verification result (filled by GameInfo.bios_verify).
-typedef struct RecompLauncherCBiosVerify {
-    int  ok;             // 1 = usable (warn may still be set)
-    int  warn;           // 1 = usable but not the preferred dump
-    char detail[256];    // human-readable note ("" when silent)
-} RecompLauncherCBiosVerify;
 
 typedef struct RecompLauncherCMemcard {
     int           valid;          // 128 KB + "MC" magic present
@@ -307,11 +317,10 @@ typedef struct RecompLauncherCGameInfo {
     const char* const* known_sha1_hex;
     size_t         num_known_sha1;
     int            widescreen_supported;   /* hide Widescreen settings when 0 */
-    /* How many players the GAME supports (1..RECOMP_LAUNCHER_MAX_PLAYERS),
-     * additionally capped by the active console profile. The launcher hides
-     * Player N+ rows when this is N — e.g. SMW Co-op is 2-player even though
-     * the shared ABI can store 5. 0 means "unset" and is treated as 2 for
-     * backward compatibility with callers that predate this field. */
+    /* How many players the GAME supports (1..RECOMP_LAUNCHER_MAX_PLAYERS).
+     * The launcher hides Player N+ rows when this is N — e.g. Mega Man X is
+     * 1-player, so a P2 row is dead UI. 0 means "unset" and is treated as 2
+     * for backward compatibility with callers that predate this field. */
     int            num_players;
     int            msu1_supported;
     const char*    msu1_note;          /* shown under MSU-1 settings (which patch) */
@@ -378,7 +387,7 @@ typedef struct RecompLauncherCGameInfo {
     // ---- host verification/inspection callbacks (optional; PSX uses them) ----
     // When set, the launcher shows REAL disc/memcard facts and RE-runs the
     // callback whenever the user changes the disc / a memory card (matching the
-    // legacy launcher). NULL => the launcher falls back to a placeholder verdict
+    // RmlUi launcher). NULL => the launcher falls back to a placeholder verdict
     // / empty card summary. `disc_verify` gets the current disc path; return 1
     // if `out` was filled. `memcard_inspect` gets one slot's card path; return
     // 1 if `out` was filled.

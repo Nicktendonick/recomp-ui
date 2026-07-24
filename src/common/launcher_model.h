@@ -8,7 +8,7 @@
 // purely from the existing C ABI structs (RecompLauncherCSettings /
 // RecompLauncherCGameInfo) — identical across every game in the ecosystem.
 //
-// The surface mirrors the shipping legacy MMX launcher so the
+// The surface mirrors the shipping RmlUi MMX launcher (launcher.rml) so the
 // prototype is a faithful parity check of what we offer the end user:
 //   Dashboard  : game/ROM info + CRC/SHA badges + Change ROM + controllers
 //   Settings   : window scale, linear filter, sample rate, volume, hotkeys
@@ -115,7 +115,7 @@ typedef struct {
     // Computed each time the ROM changes (launcher_model_set_rom): true iff
     // msu1_supported && msu1_patch_path && the loaded ROM verifies against the
     // game's vanilla CRC && the user hasn't dismissed the prompt this session.
-    // Mirrors the legacy launcher's `msu1_patch_available` predicate exactly.
+    // Mirrors the RmlUi launcher's `msu1_patch_available` predicate exactly.
     bool        msu1_patch_available;
     bool        msu1_patch_skipped;  // session-only "Play Unpatched" dismissal
     bool        saves_supported;     // sram_path != NULL -> show the SAVES panel
@@ -163,10 +163,6 @@ typedef struct {
                            char* err_msg, size_t err_cap);
     const char* prepare_disc_label;   // borrowed; NULL => default button text
     const char* prepare_disc_note;    // borrowed; NULL => default help
-    const char* rom_cache_path;       // borrowed; NULL => "rom.cfg"
-    int (*persist_setup_cb)(void* ctx, const char* rom_path, const char* bios_path);
-    void* persist_setup_ctx;
-    RecompLauncherCSettings* settings_io; // live host settings (may be NULL)
     // Box-art path relative to the assets dir (GameInfo.boxart_path);
     // NULL => the default "assets/img/boxart.tga".
     const char* boxart_path;
@@ -326,8 +322,12 @@ typedef struct {
     /* STUN / host external_ip cache for LAN lobby Public IP field. */
     char      netplay_public_ip[64];
     bool      netplay_public_ip_resolved;
-    /* Lobby Settings cache: host Force TURN (server lobbies only). */
-    bool      netplay_force_turn;
+    /* Lobby Settings cache: Force Server Input Relay (server lobbies only). */
+    bool      netplay_force_input_relay;
+    /* Host Lobby: desired max seats (2..min(8, game player_count)). */
+    int       netplay_host_max_players;
+    /* Active room seat ceiling after create/join (0 = use game player_count). */
+    int       netplay_lobby_max_slots;
 
     // Selected gamepad per player (when player_src == 2). pad_id is the live
     // SDL_JoystickID; name is cached for display if the device disconnects.
@@ -360,18 +360,13 @@ typedef struct {
 } LauncherModel;
 
 // Build the model from the inbound C ABI structs. `initial_rom` may be NULL.
-// `io` is retained for live commits when the setup wizard persists paths.
 void launcher_model_init(LauncherModel* m,
-                         RecompLauncherCSettings* io,
+                         const RecompLauncherCSettings* io,
                          const RecompLauncherCGameInfo* game,
                          const char* initial_rom);
 
-// Copy the working settings back into the caller's struct (on LAUNCH / persist).
+// Copy the working settings back into the caller's struct (on LAUNCH).
 void launcher_model_commit(const LauncherModel* m, RecompLauncherCSettings* io);
-
-// Write rom_cache_path (default rom.cfg), sync settings_io, and call the host
-// persist_setup callback when present. Used by Continue and path changes.
-void launcher_model_persist_setup(LauncherModel* m);
 
 // Adopt a newly-picked ROM path (from the native file dialog): updates the
 // displayed file name / verification state.
@@ -394,11 +389,6 @@ void launcher_model_cycle_scale(LauncherModel* m);   // 1..6 wrap
 void launcher_model_toggle_filter(LauncherModel* m);
 void launcher_model_toggle_widescreen(LauncherModel* m);  // gated
 void launcher_model_toggle_adaptive_view(LauncherModel* m);  // gated; fixed aspect is retained
-/* Unified Native / fixed widescreen / Adaptive control. Compatibility fields
- * (`widescreen`, `aspect_index`, `adaptive_view`) remain the host ABI, but UI
- * presents them as one mode instead of unrelated toggles. */
-void launcher_model_cycle_view_mode(LauncherModel* m);
-const char* launcher_model_view_mode_label(const LauncherModel* m);
 
 // ---- widescreen extra cells (SystemProfile.video.widescreen_cells consoles,
 // e.g. Genesis: N extra 8-px background cells rendered per side while
@@ -427,7 +417,7 @@ void launcher_model_volume_delta(LauncherModel* m, int delta);  // clamp 0..100
 
 // ---- deeper PSX-style settings (capability-gated; no-op / harmless when the
 // corresponding has_* flag is false — callers should still gate the UI on the
-// flag so the control isn't shown at all, per the legacy PSX launcher parity). ----
+// flag so the control isn't shown at all, per the RmlUi PSX launcher parity). ----
 void launcher_model_cycle_window_size(LauncherModel* m);       // {960,1280,1600,1920} wrap
 const char* launcher_model_window_size_label(const LauncherModel* m);  // "1280 x 960" (H follows aspect)
 void launcher_model_toggle_renderer(LauncherModel* m);         // Software/OpenGL
@@ -461,7 +451,7 @@ void launcher_model_clear_sram(LauncherModel* m);
 
 // ---- PSX memory-card slots (SAVE_MEMCARD only; no-op guarded by slot range) ----
 void launcher_model_set_memcard_path(LauncherModel* m, int slot, const char* path);
-// Enable/disable one card slot (mirrors the legacy launcher's per-card switch;
+// Enable/disable one card slot (mirrors the RmlUi launcher's per-card switch;
 // a disabled slot's SIO port reports no card present to the host once wired).
 void launcher_model_toggle_memcard(LauncherModel* m, int slot);
 // "New" action: format a real, mountable blank 128KB PS1 memory-card image at
@@ -527,9 +517,11 @@ void launcher_model_set_pad_mode(LauncherModel* m, int player, int mode);
 void launcher_model_cycle_player_src(LauncherModel* m, int player); // None/Kbd/Pad
 void launcher_model_deadzone_delta(LauncherModel* m, int player, int delta);
 // Set the input source explicitly (used by the device dropdown). kind: 0 None,
-// 1 Keyboard, 2 Gamepad. For gamepad, pass the SDL id + display name.
+// 1 Keyboard, 2 Gamepad. For gamepad, pass the SDL id + display name + GUID
+// (GUID may be NULL/empty; then player_gamepad_guid[player] is cleared).
 void launcher_model_set_source(LauncherModel* m, int player, int kind,
-                               uint32_t pad_id, const char* pad_name);
+                               uint32_t pad_id, const char* pad_name,
+                               const char* pad_guid);
 
 // ---- mouse controls (has_mouse_controls games only; no-op otherwise) --------
 // Select the player-0 keyboard source with mouse-aim on (enabled != 0) or off
@@ -558,7 +550,7 @@ void launcher_model_refresh_bios_status(LauncherModel* m);
 void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path);
 // Poll prepare job; call once per frame from the UI while setup_preparing.
 void launcher_model_poll_prepare_disc(LauncherModel* m);
-// Dismiss the wizard once can_finish_setup is true; persists ROM/BIOS first.
+// Dismiss the wizard once can_finish_setup is true (keeps dashboard).
 void launcher_model_finish_setup(LauncherModel* m);
 
 // ---- skip-on-boot (footer switch + confirm modal) ----

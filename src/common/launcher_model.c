@@ -23,7 +23,7 @@
 #endif
 
 // 32040 = the SNES S-DSP's native output rate; kept reachable in the cycle so
-// users chasing bit-exact SNES audio can pick it (matches the legacy launcher).
+// users chasing bit-exact SNES audio can pick it (matches the RmlUi launcher).
 static const int kFreqTable[] = { 32040, 32000, 44100, 48000 };
 static const int kFreqCount   = (int)(sizeof(kFreqTable) / sizeof(kFreqTable[0]));
 
@@ -69,34 +69,14 @@ static float clampf(float v, float lo, float hi) {
 
 static void run_verify(LauncherModel* m);   // fwd; defined below, called from launcher_model_set_rom
 static void update_msu1_patch_available(LauncherModel* m);   // fwd; called from launcher_model_set_rom
-/* Declared in header; needed before definition for init(). */
 static void lm_inspect_memcard(LauncherModel* m, int slot); // fwd; host memcard_inspect callback
 static void lm_inspect_tpak(LauncherModel* m, int slot);    // fwd; host tpak_inspect callback
 
-void launcher_model_persist_setup(LauncherModel* m) {
-    if (!m) return;
-    if (m->settings_io)
-        launcher_model_commit(m, m->settings_io);
-    if (m->rom_full[0]) {
-        const char* cache = (m->rom_cache_path && m->rom_cache_path[0])
-                                ? m->rom_cache_path
-                                : "rom.cfg";
-        FILE* f = fopen(cache, "w");
-        if (f) {
-            fprintf(f, "%s\n", m->rom_full);
-            fclose(f);
-        }
-    }
-    if (m->persist_setup_cb)
-        (void)m->persist_setup_cb(m->persist_setup_ctx, m->rom_full, m->s.bios_path);
-}
-
 void launcher_model_init(LauncherModel* m,
-                         RecompLauncherCSettings* io,
+                         const RecompLauncherCSettings* io,
                          const RecompLauncherCGameInfo* game,
                          const char* initial_rom) {
     memset(m, 0, sizeof(*m));
-    m->settings_io = io;
 
     if (game) {
         m->game_name            = game->name ? game->name : "Unknown Game";
@@ -152,9 +132,6 @@ void launcher_model_init(LauncherModel* m,
         m->prepare_disc_cb      = game->prepare_disc;
         m->prepare_disc_label   = game->prepare_disc_label;
         m->prepare_disc_note    = game->prepare_disc_note;
-        m->rom_cache_path       = game->rom_cache_path;
-        m->persist_setup_cb     = game->persist_setup;
-        m->persist_setup_ctx    = game->persist_setup_ctx;
         m->boxart_path          = game->boxart_path;      // NULL => default boxart.tga
         m->aspect_labels        = game->aspect_labels;    // NULL => built-in 4:3/16:9/21:9
         m->num_aspect_labels    = game->num_aspect_labels;
@@ -202,30 +179,31 @@ void launcher_model_init(LauncherModel* m,
     m->netplay_lan_only = false;
     m->netplay_list_fresh = false;
     m->netplay_selected_lobby = -1;
-    m->netplay_lobby_settings_open = false;
-    m->netplay_lobby_input_delay = 2;
     m->netplay_public_ip[0] = '\0';
     m->netplay_public_ip_resolved = false;
-    m->netplay_force_turn = false;
+    m->netplay_lobby_settings_open = false;
+    m->netplay_lobby_input_delay = 2;
+    m->netplay_force_input_relay = false;
+    {
+        int max_p = m->player_count > 0 ? m->player_count : 2;
+        if (max_p < 2) max_p = 2;
+        if (max_p > RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS)
+            max_p = RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS;
+        m->netplay_host_max_players = max_p;
+    }
+    m->netplay_lobby_max_slots = 0;
     m->s.adaptive_view =
         (m->adaptive_view_supported && m->s.adaptive_view) ? 1 : 0;
 
     // ---- memory-card slots default to enabled (0 == "unset": a host struct
     // that predates this field, or was zero-initialized, reads as both cards
-    // plugged in — matching the legacy launcher's default) ----
+    // plugged in — matching the RmlUi launcher's default) ----
     if (!m->s.memcard_enabled[0]) m->s.memcard_enabled[0] = 1;
     if (!m->s.memcard_enabled[1]) m->s.memcard_enabled[1] = 1;
 
     // ---- infer the SystemProfile this game belongs to (panel composition +
     // per-system specs) from the ABI caps launcher_profile_apply() already set ----
     m->profile = launcher_system_infer(game);
-    if (m->profile && m->profile->controller.max_players > 0) {
-        /* num_players is a per-game capability, while max_players is the
-         * console ceiling. Raising the ABI storage width must never make a
-         * two-player game/system expose extra controller or lobby seats. */
-        m->player_count = clampi(m->player_count, 1,
-                                 m->profile->controller.max_players);
-    }
 
     // ---- gate pad_mode per player ----
     if (m->pad_mode_supported) {
@@ -245,6 +223,10 @@ void launcher_model_init(LauncherModel* m,
             } else if (!m->allow_hybrid && m->s.pad_mode[p] == 0) {
                 m->s.pad_mode[p] = 1;   // snap Hybrid -> Analog
             }
+            /* Keyboard cannot drive Analog/Hybrid — force D-Pad. */
+            if (m->s.player_src[p] == 1 &&
+                !(pm_spec && pm_spec->modes && pm_spec->mode_count > 0))
+                m->s.pad_mode[p] = 2;
         }
     }
 
@@ -462,10 +444,6 @@ void launcher_model_set_rom(LauncherModel* m, const char* path) {
 
     run_verify(m);
     update_msu1_patch_available(m);
-    /* Dashboard "Change ROM" / wizard Browse: keep rom.cfg in sync even if the
-     * user quits without PLAY (Continue also persists via finish_setup). */
-    if (m->rom_full[0])
-        launcher_model_persist_setup(m);
 }
 
 // Disc-verdict (verify.mode==1 systems, e.g. PSX): run the SystemProfile's
@@ -555,77 +533,6 @@ void launcher_model_toggle_widescreen(LauncherModel* m) {
 void launcher_model_toggle_adaptive_view(LauncherModel* m) {
     if (!m->adaptive_view_supported) return;
     m->s.adaptive_view = !m->s.adaptive_view;
-}
-
-static int aspect_choice_count(const LauncherModel* m) {
-    if (m->aspect_labels && m->num_aspect_labels > 0)
-        return m->num_aspect_labels;
-    if (!m->aspect_mask) return 0;
-    int count = 0;
-    for (int i = 0; i < 3; ++i)
-        if (launcher_model_aspect_offered(m, i)) ++count;
-    return count;
-}
-
-static int first_offered_aspect(const LauncherModel* m) {
-    if (m->aspect_labels && m->num_aspect_labels > 0) return 0;
-    for (int i = 0; i < 3; ++i)
-        if (launcher_model_aspect_offered(m, i)) return i;
-    return 0;
-}
-
-static int next_offered_aspect(const LauncherModel* m, int current) {
-    if (m->aspect_labels && m->num_aspect_labels > 0) {
-        int next = current + 1;
-        return next < m->num_aspect_labels ? next : -1;
-    }
-    for (int i = current + 1; i < 3; ++i)
-        if (launcher_model_aspect_offered(m, i)) return i;
-    return -1;
-}
-
-void launcher_model_cycle_view_mode(LauncherModel* m) {
-    if (!m) return;
-    const int fixed_count = aspect_choice_count(m);
-
-    if (m->s.adaptive_view && m->adaptive_view_supported) {
-        m->s.adaptive_view = 0;
-        if (fixed_count) m->s.aspect_index = first_offered_aspect(m);
-        else m->s.widescreen = 0;
-        return;
-    }
-
-    if (fixed_count) {
-        int next = next_offered_aspect(m, m->s.aspect_index);
-        if (next >= 0) {
-            m->s.aspect_index = next;
-            return;
-        }
-        if (m->adaptive_view_supported) {
-            m->s.adaptive_view = 1;
-            return;
-        }
-        m->s.aspect_index = first_offered_aspect(m);
-        return;
-    }
-
-    if (m->widescreen_supported && !m->s.widescreen) {
-        m->s.widescreen = 1;
-        return;
-    }
-    if (m->adaptive_view_supported) {
-        m->s.widescreen = 0;
-        m->s.adaptive_view = 1;
-        return;
-    }
-    m->s.widescreen = 0;
-}
-
-const char* launcher_model_view_mode_label(const LauncherModel* m) {
-    if (!m) return "Native";
-    if (m->adaptive_view_supported && m->s.adaptive_view) return "Adaptive";
-    if (aspect_choice_count(m)) return launcher_model_aspect_label(m);
-    return m->s.widescreen ? "16:9 fixed" : "Native";
 }
 
 void launcher_model_ws_cells_delta(LauncherModel* m, int delta) {
@@ -827,7 +734,7 @@ void launcher_model_toggle_turbo_loads(LauncherModel* m) {
 // Fullscreen is a universal display setting: every console's runner applies
 // the committed tri-state (0 off / 1 borderless / 2 exclusive) to its window
 // at boot and persists it in its own config. The cycle walks all three
-// states, restoring the vocabulary of the original SNES launcher.
+// states, restoring the vocabulary of the original SNES RmlUi launcher.
 void launcher_model_cycle_fullscreen(LauncherModel* m) {
     m->s.fullscreen = (clampi(m->s.fullscreen, 0, 2) + 1) % 3;
 }
@@ -901,8 +808,6 @@ void launcher_model_refresh_bios_status(LauncherModel* m) {
 void launcher_model_set_bios_path(LauncherModel* m, const char* path) {
     safe_copy(m->s.bios_path, sizeof(m->s.bios_path), path ? path : "");
     launcher_model_refresh_bios_status(m);
-    /* Persist immediately so Quit without PLAY still keeps the BIOS path. */
-    launcher_model_persist_setup(m);
 }
 
 bool launcher_model_can_finish_setup(const LauncherModel* m) {
@@ -933,7 +838,6 @@ bool launcher_model_can_launch(const LauncherModel* m) {
 
 void launcher_model_finish_setup(LauncherModel* m) {
     if (!m || !launcher_model_can_finish_setup(m)) return;
-    launcher_model_persist_setup(m);
     m->setup_wizard_open = false;
     m->setup_status[0] = '\0';
     m->setup_error[0] = '\0';
@@ -1125,7 +1029,7 @@ const char* launcher_model_audio_device_label(const LauncherModel* m) {
     return m->s.audio_device[0] ? m->s.audio_device : "(system default)";
 }
 
-// ---- SRAM save management (mirrors the legacy launcher's Import/Clear) --------
+// ---- SRAM save management (mirrors the RmlUi launcher's Import/Clear) --------
 // Both back up any existing save to "<sram>.bak" first (never a destructive op
 // without a recoverable copy), matching the old launcher's behavior.
 static bool lm_copy_file(const char* src, const char* dst) {
@@ -1181,7 +1085,7 @@ void launcher_model_set_hdpack_dir(LauncherModel* m, const char* dir) {
 }
 
 // Password/mantra save: the file is one line of text (e.g. Faxanadu's mantra),
-// read/rewritten whole. Mirrors the legacy NES launcher's SAVES-panel variant.
+// read/rewritten whole. Mirrors the RmlUi NES launcher's SAVES-panel variant.
 void launcher_model_password_reload(LauncherModel* m) {
     m->password_text[0] = '\0';
     if (!m->password_save_path || !m->password_save_path[0]) return;
@@ -1223,7 +1127,7 @@ void launcher_model_toggle_zapper_crosshair(LauncherModel* m) {
     launcher_binds_set_zapper(m->zapper_mouse ? 1 : 0, m->zapper_crosshair ? 1 : 0);
 }
 
-// ---- MSU-1 IPS auto-patching (mirrors the legacy launcher's do_patch() /
+// ---- MSU-1 IPS auto-patching (mirrors the RmlUi launcher's do_patch() /
 // msu1_patch_available predicate in snesrecomp's launcher_gui.cpp) -----------
 
 // Recomputed on every ROM change: the dashboard prompt only makes sense when
@@ -1252,7 +1156,7 @@ static bool lm_read_whole_file(const char* path, uint8_t** out_data, size_t* out
     return true;
 }
 
-// Build "<dir>/<stem>.msu1.<ext>" beside `rom_path` (matches the legacy
+// Build "<dir>/<stem>.msu1.<ext>" beside `rom_path` (matches the RmlUi
 // launcher's std::filesystem stem()/extension() splice exactly).
 static void lm_msu1_target_path(const char* rom_path, char* out, size_t out_cap) {
     const char* base = rom_path;
@@ -1313,6 +1217,21 @@ void launcher_model_skip_msu1_patch(LauncherModel* m) {
     update_msu1_patch_available(m);
 }
 
+/* PSX Hybrid/Analog need sticks; keyboard players are forced to D-Pad. */
+static int pad_mode_is_psx_legacy(const LauncherModel* m) {
+    const SystemProfile* prof = (const SystemProfile*)m->profile;
+    const ControllerSpec* spec = prof ? &prof->controller : NULL;
+    return !(spec && spec->modes && spec->mode_count > 0);
+}
+
+static void force_digital_if_keyboard(LauncherModel* m, int player) {
+    if (!m->pad_mode_supported || !m->pad_mode_selectable) return;
+    player = clampi(player, 0, LNG_MAX_PLAYERS - 1);
+    if (m->s.player_src[player] != 1) return;
+    if (!pad_mode_is_psx_legacy(m)) return;
+    m->s.pad_mode[player] = 2;   // D-Pad / digital
+}
+
 void launcher_model_set_pad_mode(LauncherModel* m, int player, int mode) {
     if (!m->pad_mode_supported || !m->pad_mode_selectable) return;   // gated/locked
     player = clampi(player, 0, 1);
@@ -1324,6 +1243,8 @@ void launcher_model_set_pad_mode(LauncherModel* m, int player, int mode) {
             if (spec->modes[i].mode == mode) { m->s.pad_mode[player] = mode; return; }
         return;
     }
+    /* Keyboard has no sticks — Analog/Hybrid are unavailable. */
+    if (m->s.player_src[player] == 1 && mode != 2) return;
     mode = clampi(mode, 0, 2);
     if (mode == 0 && !m->allow_hybrid) mode = 1;   // Hybrid hidden -> snap to Analog
     m->s.pad_mode[player] = mode;
@@ -1348,6 +1269,7 @@ int launcher_model_active_button_count(const LauncherModel* m, int player) {
 void launcher_model_cycle_player_src(LauncherModel* m, int player) {
     player = clampi(player, 0, LNG_MAX_PLAYERS - 1);
     m->s.player_src[player] = (m->s.player_src[player] + 1) % 3;  // None/Kbd/Pad
+    force_digital_if_keyboard(m, player);
 }
 
 void launcher_model_deadzone_delta(LauncherModel* m, int player, int delta) {
@@ -1356,24 +1278,30 @@ void launcher_model_deadzone_delta(LauncherModel* m, int player, int delta) {
 }
 
 void launcher_model_set_source(LauncherModel* m, int player, int kind,
-                               uint32_t pad_id, const char* pad_name) {
+                               uint32_t pad_id, const char* pad_name,
+                               const char* pad_guid) {
     player = clampi(player, 0, LNG_MAX_PLAYERS - 1);
     m->s.player_src[player] = clampi(kind, 0, 2);
     if (kind == 2) {
         m->player_pad_id[player] = pad_id;
         safe_copy(m->player_pad_name[player], sizeof(m->player_pad_name[player]),
                   pad_name ? pad_name : "Gamepad");
+        safe_copy(m->s.player_gamepad_guid[player],
+                  sizeof(m->s.player_gamepad_guid[player]),
+                  pad_guid ? pad_guid : "");
     } else {
         m->player_pad_id[player] = 0;
         m->player_pad_name[player][0] = '\0';
+        m->s.player_gamepad_guid[player][0] = '\0';
     }
+    force_digital_if_keyboard(m, player);
 }
 
 // ---- mouse controls --------------------------------------------------------
 
 void launcher_model_set_mouse_source(LauncherModel* m, int enabled) {
     if (!m->has_mouse_controls) return;
-    launcher_model_set_source(m, 0, 1, 0, NULL);   // player 0 -> Keyboard
+    launcher_model_set_source(m, 0, 1, 0, NULL, NULL);   // player 0 -> Keyboard
     m->s.mouse_enabled = enabled ? 1 : 0;
 }
 
