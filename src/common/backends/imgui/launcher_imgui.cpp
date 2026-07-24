@@ -73,6 +73,11 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#if defined(_WIN32)
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 
 extern "C" const char* launcher_backend_name(void) { return "Dear ImGui"; }
 
