@@ -3879,6 +3879,11 @@ static bool set_all_mod_features(LauncherModel* m, bool enabled) {
         if ((feature.enabled != 0) == enabled) continue;
         if (!mods->feature_enable(mods->ctx, feature.package_id, feature.id,
                                   enabled ? 1 : 0)) {
+            char failure[sizeof(m->mod_status)] = {};
+            const char* error =
+                mods->last_error ? mods->last_error(mods->ctx) : nullptr;
+            if (error && error[0])
+                std::snprintf(failure, sizeof(failure), "%s", error);
             // Treat the bulk action as one edit. Best-effort rollback prevents
             // a failed feature from leaving an unexpected half-toggled set.
             for (auto rollback = changed.rbegin(); rollback != changed.rend();
@@ -3887,7 +3892,12 @@ static bool set_all_mod_features(LauncherModel* m, bool enabled) {
                 mods->feature_enable(mods->ctx, prior.package_id, prior.id,
                                      prior.enabled ? 1 : 0);
             }
-            mod_note_error(m);
+            if (failure[0]) {
+                std::snprintf(m->mod_status, sizeof(m->mod_status), "%s",
+                              failure);
+            } else {
+                mod_note_error(m);
+            }
             return false;
         }
         changed.push_back(index);
@@ -3937,8 +3947,11 @@ static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
     ImGui::InputTextWithHint("##mod_search", "Search features, groups, packages...",
                              m->mod_search, sizeof(m->mod_search));
     if (m->mod_status[0]) {
-        ImGui::SameLine();
-        ImGui::TextColored(col(th.warn), "%s", m->mod_status);
+        ImGui::PushStyleColor(ImGuiCol_Text, col(th.warn));
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x);
+        ImGui::TextWrapped("%s", m->mod_status);
+        ImGui::PopTextWrapPos();
+        ImGui::PopStyleColor();
     }
     ImGui::Spacing();
 
