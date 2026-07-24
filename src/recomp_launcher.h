@@ -48,6 +48,8 @@ typedef struct RecompLauncherCNetplayMember {
     char display_name[64];
     int  ready;
     int  is_host;
+    /* Round-trip ms to the lobby host; -1 when unknown or this row is host. */
+    int  latency_ms;
 } RecompLauncherCNetplayMember;
 
 typedef struct RecompLauncherCNetplayLaunch {
@@ -59,6 +61,8 @@ typedef struct RecompLauncherCNetplayLaunch {
     uint32_t session_id;
     int      input_delay;
     int      max_slots; /* session pad count (2..RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS) */
+    /* Host match_caps: force ICE TURN/relay for all peers (0/1). */
+    int      force_turn;
 } RecompLauncherCNetplayLaunch;
 
 typedef struct RecompLauncherCNetplayLocalAddress {
@@ -134,6 +138,12 @@ typedef struct RecompLauncherCNetplayCallbacks {
      * Cleared by the host after the UI reads it, or when a later op succeeds. */
     const char* (*last_error)(void* ctx);
     void (*clear_last_error)(void* ctx);
+    /* Optional host waiting-room settings. input_delay is frames, clamped 2..20. */
+    int  (*input_delay_get)(void* ctx);
+    int  (*input_delay_set)(void* ctx, int delay_frames);
+    /* Optional: host-authoritative Force TURN for server lobbies (0/1). */
+    int  (*force_turn_get)(void* ctx);
+    int  (*force_turn_set)(void* ctx, int force);
 } RecompLauncherCNetplayCallbacks;
 
 // Plain-C mirror of the launcher's internal settings (bools as int).
@@ -482,13 +492,21 @@ typedef struct RecompLauncherCGameInfo {
      * Blocking host callback; the UI shows a busy state while it runs.
      * Return 1 and write the playable .cue/.bin/.iso path into out_disc_path.
      * prepare_disc_label / prepare_disc_note are button + help text (NULL =>
-     * "Convert raw dump…" / default note). */
+     * "Convert raw dump…" / default note).
+     *
+     * Path persistence (Continue to launcher / Change ROM / BIOS browse):
+     * The launcher writes `rom_cache_path` (NULL => "rom.cfg") immediately so
+     * quitting without PLAY still remembers the ROM. Optional persist_setup
+     * lets the host also flush BIOS / config.ini (return 0 on success). */
     int needs_setup;
     int (*bios_verify)(const char* bios_path, RecompLauncherCBiosVerify* out);
     int (*prepare_disc)(const char* source_path, char* out_disc_path, size_t out_cap,
                         char* err_msg, size_t err_cap);
     const char* prepare_disc_label;
     const char* prepare_disc_note;
+    const char* rom_cache_path; /* NULL => "rom.cfg" next to cwd/exe */
+    int (*persist_setup)(void* ctx, const char* rom_path, const char* bios_path);
+    void* persist_setup_ctx;
 } RecompLauncherCGameInfo;
 
 // Returns: 0 = LAUNCH (boot out_rom_path with the edited *io),

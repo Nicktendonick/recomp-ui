@@ -163,6 +163,10 @@ typedef struct {
                            char* err_msg, size_t err_cap);
     const char* prepare_disc_label;   // borrowed; NULL => default button text
     const char* prepare_disc_note;    // borrowed; NULL => default help
+    const char* rom_cache_path;       // borrowed; NULL => "rom.cfg"
+    int (*persist_setup_cb)(void* ctx, const char* rom_path, const char* bios_path);
+    void* persist_setup_ctx;
+    RecompLauncherCSettings* settings_io; // live host settings (may be NULL)
     // Box-art path relative to the assets dir (GameInfo.boxart_path);
     // NULL => the default "assets/img/boxart.tga".
     const char* boxart_path;
@@ -317,9 +321,13 @@ typedef struct {
     char      netplay_direct_port[16];
     char      netplay_password[64];
     char      netplay_status[160];
+    bool      netplay_lobby_settings_open;
+    int       netplay_lobby_input_delay; /* UI cache; engine clamps 2..20 */
     /* STUN / host external_ip cache for LAN lobby Public IP field. */
     char      netplay_public_ip[64];
     bool      netplay_public_ip_resolved;
+    /* Lobby Settings cache: host Force TURN (server lobbies only). */
+    bool      netplay_force_turn;
 
     // Selected gamepad per player (when player_src == 2). pad_id is the live
     // SDL_JoystickID; name is cached for display if the device disconnects.
@@ -352,13 +360,18 @@ typedef struct {
 } LauncherModel;
 
 // Build the model from the inbound C ABI structs. `initial_rom` may be NULL.
+// `io` is retained for live commits when the setup wizard persists paths.
 void launcher_model_init(LauncherModel* m,
-                         const RecompLauncherCSettings* io,
+                         RecompLauncherCSettings* io,
                          const RecompLauncherCGameInfo* game,
                          const char* initial_rom);
 
-// Copy the working settings back into the caller's struct (on LAUNCH).
+// Copy the working settings back into the caller's struct (on LAUNCH / persist).
 void launcher_model_commit(const LauncherModel* m, RecompLauncherCSettings* io);
+
+// Write rom_cache_path (default rom.cfg), sync settings_io, and call the host
+// persist_setup callback when present. Used by Continue and path changes.
+void launcher_model_persist_setup(LauncherModel* m);
 
 // Adopt a newly-picked ROM path (from the native file dialog): updates the
 // displayed file name / verification state.
@@ -545,7 +558,7 @@ void launcher_model_refresh_bios_status(LauncherModel* m);
 void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path);
 // Poll prepare job; call once per frame from the UI while setup_preparing.
 void launcher_model_poll_prepare_disc(LauncherModel* m);
-// Dismiss the wizard once can_finish_setup is true (keeps dashboard).
+// Dismiss the wizard once can_finish_setup is true; persists ROM/BIOS first.
 void launcher_model_finish_setup(LauncherModel* m);
 
 // ---- skip-on-boot (footer switch + confirm modal) ----

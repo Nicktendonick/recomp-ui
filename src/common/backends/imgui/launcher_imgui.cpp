@@ -65,6 +65,7 @@
 #endif
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #if defined(_WIN32)
@@ -2594,6 +2595,7 @@ static void np_load_network_settings(LauncherModel* m) {
             std::snprintf(m->netplay_host_port, sizeof(m->netplay_host_port),
                           "%s", val);
         }
+        /* Legacy force_turn= lines are ignored — host Lobby Settings owns TURN. */
     }
     std::fclose(f);
     const auto* np = np_cb(m);
@@ -2666,15 +2668,21 @@ void draw_netplay_direct_modal(LauncherModel* m, const LauncherTheme& th) {
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopupModal("Join Direct", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextWrapped(
-            "Join a LAN/Direct IP lobby only. The host must have created the lobby "
-            "with LAN/Direct IP checked. For online lobbies, join from the server "
-            "list (same lobby server in Network Settings).");
+            "Join a LAN/Direct IP lobby by IP. The host must create with "
+            "LAN/Direct IP checked and keep the waiting room open. Use their "
+            "LAN IP on the same network, or their Public IP with UDP "
+            "port-forwarded to the host PC. Online (MotK) lobbies: join from "
+            "the server list instead.");
         ImGui::Spacing();
         ImGui::SetNextItemWidth(px(280));
         ImGui::InputText("Host IP", m->netplay_direct_ip, sizeof(m->netplay_direct_ip));
         ImGui::SetNextItemWidth(px(160));
         ImGui::InputText("Port", m->netplay_direct_port, sizeof(m->netplay_direct_port),
                          ImGuiInputTextFlags_CharsDecimal);
+        ImGui::SetNextItemWidth(px(280));
+        ImGui::InputText("Password (optional)", m->netplay_password,
+                         sizeof(m->netplay_password),
+                         ImGuiInputTextFlags_Password);
         ImGui::Spacing();
         if (m->netplay_status[0])
             ImGui::TextColored(col(th.warn), "%s", m->netplay_status);
@@ -2695,7 +2703,7 @@ void draw_netplay_direct_modal(LauncherModel* m, const LauncherTheme& th) {
                               m->netplay_direct_port[0] ? m->netplay_direct_port : "7777");
                 if (np_prepare_guest_bind(guest_bind, sizeof(guest_bind),
                                           m->netplay_status, sizeof(m->netplay_status))) {
-                const int rc = np->join(np->ctx, lobby_id, "", guest_bind);
+                const int rc = np->join(np->ctx, lobby_id, m->netplay_password, guest_bind);
                 if (rc == 0) {
                     m->netplay_local_room = true;
                     std::snprintf(m->netplay_host_endpoint, sizeof(m->netplay_host_endpoint),
@@ -2708,11 +2716,13 @@ void draw_netplay_direct_modal(LauncherModel* m, const LauncherTheme& th) {
                                   "Incorrect password.");
                 } else if (rc == -3) {
                     std::snprintf(m->netplay_status, sizeof(m->netplay_status),
-                                  "No LAN/Direct IP lobby at that address. If the host "
-                                  "is online, join their lobby from the server list.");
+                                  "No response from that IP:port. Check the host is in "
+                                  "the LAN waiting room, UDP is forwarded, and the "
+                                  "firewall allows the game port.");
                 } else {
                     std::snprintf(m->netplay_status, sizeof(m->netplay_status),
-                                  "Could not join LAN lobby (full or rejected).");
+                                  "Could not join (lobby full, already started, or "
+                                  "game/version mismatch).");
                 }
                 }
             }
@@ -3065,6 +3075,7 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                                      : m->netplay_local_room;
     if (!seated) {
         m->netplay_local_room = false;
+        m->netplay_lobby_settings_open = false;
         if (ImGui::BeginPopupModal("LOBBY", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
@@ -3075,7 +3086,7 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
     ImGui::OpenPopup("LOBBY");
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(px(580), 0), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(px(640), 0), ImGuiCond_Appearing);
     if (!ImGui::BeginPopupModal("LOBBY", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
 
     /* Only file-backed LAN/Direct rooms show IP/Port. Server-list joins always
@@ -3185,13 +3196,14 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
     int seated_players = 0;
     for (int slot = 0; slot < max_slots; ++slot)
         if (occupied[slot]) ++seated_players;
-    if (ImGui::BeginTable("lobby_players", 5,
+    if (ImGui::BeginTable("lobby_players", 6,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("##move", ImGuiTableColumnFlags_WidthFixed, px(32));
-        ImGui::TableSetupColumn("Slot", ImGuiTableColumnFlags_WidthFixed, px(90));
+        ImGui::TableSetupColumn("Slot", ImGuiTableColumnFlags_WidthFixed, px(40));
         ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, px(110));
+        ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, px(100));
+        ImGui::TableSetupColumn("Latency", ImGuiTableColumnFlags_WidthFixed, px(72));
         ImGui::TableSetupColumn("Kick", ImGuiTableColumnFlags_WidthFixed, px(56));
         ImGui::TableHeadersRow();
         const float text_h = ImGui::GetTextLineHeight();
@@ -3232,7 +3244,7 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                 if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
                     ImGui::SetDragDropPayload("NETPLAY_MEMBER_SLOT", &slot, sizeof(slot));
                     ImGui::BeginGroup();
-                    ImGui::Text("Player %d", slot + 1);
+                    ImGui::Text("P%d", slot + 1);
                     ImGui::SameLine(0, px(28));
                     ImGui::TextUnformatted(slots[slot].display_name);
                     ImGui::SameLine(0, px(28));
@@ -3244,7 +3256,7 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
             }
             ImGui::TableSetColumnIndex(1);
             table_row_vcenter(member_row_h, text_h);
-            ImGui::Text("Player %d", slot + 1);
+            ImGui::Text("P%d", slot + 1);
             ImGui::TableSetColumnIndex(2);
             table_row_vcenter(member_row_h, text_h);
             if (!occupied[slot]) ImGui::PushStyleColor(ImGuiCol_Text, col(th.text_muted));
@@ -3259,6 +3271,14 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
             else
                 ImGui::TextColored(col(th.text_muted), "Waiting");
             ImGui::TableSetColumnIndex(4);
+            table_row_vcenter(member_row_h, text_h);
+            if (occupied[slot] && !slots[slot].is_host &&
+                slots[slot].latency_ms >= 0) {
+                ImGui::Text("%d ms", slots[slot].latency_ms);
+            } else {
+                ImGui::TextColored(col(th.text_muted), "—");
+            }
+            ImGui::TableSetColumnIndex(5);
             {
                 const float kick_btn = px(34);
                 const bool can_kick = is_host && occupied[slot] &&
@@ -3322,7 +3342,9 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
     {
         const float btn_h = px(36);
         const float leave_w = px(130);
+        const float settings_w = px(110);
         const float play_w = px(150);
+        const float gap = px(10);
         const float row_w = ImGui::GetContentRegionAvail().x;
         const float row_x = ImGui::GetCursorPosX();
         const float row_y = ImGui::GetCursorPosY();
@@ -3338,12 +3360,28 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
         if (ImGui::Button("Leave Lobby", ImVec2(leave_w, btn_h))) {
             m->netplay_local_room = false;
+            m->netplay_lobby_settings_open = false;
             if (np->leave) (void)np->leave(np->ctx);
             ImGui::CloseCurrentPopup();
         }
         ImGui::PopStyleColor(4);
 
         if (is_host) {
+            ImGui::SetCursorPos(ImVec2(row_x + leave_w + gap, row_y));
+            if (ImGui::Button("Settings", ImVec2(settings_w, btn_h))) {
+                if (np->input_delay_get)
+                    m->netplay_lobby_input_delay = np->input_delay_get(np->ctx);
+                if (m->netplay_lobby_input_delay < 2)
+                    m->netplay_lobby_input_delay = 2;
+                if (m->netplay_lobby_input_delay > 20)
+                    m->netplay_lobby_input_delay = 20;
+                if (m->netplay_local_room)
+                    m->netplay_force_turn = false;
+                else if (np->force_turn_get)
+                    m->netplay_force_turn = np->force_turn_get(np->ctx) != 0;
+                m->netplay_lobby_settings_open = true;
+            }
+
             /* ▶ Play — green, pinned right. */
             const LngColor play_bg = th.good;
             auto clamp01 = [](float v) { return v > 1.0f ? 1.0f : v; };
@@ -3392,6 +3430,72 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
         /* Advance layout past the button row. */
         ImGui::SetCursorPos(ImVec2(row_x, row_y + btn_h));
         ImGui::Dummy(ImVec2(row_w, 0));
+    }
+
+    if (is_host && m->netplay_lobby_settings_open)
+        ImGui::OpenPopup("Lobby Settings");
+    if (ImGui::BeginPopupModal("Lobby Settings", &m->netplay_lobby_settings_open,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("Input Delay");
+        ImGui::SameLine();
+        ImGui::TextColored(col(th.text_muted), "(frames)");
+        ImGui::SetNextItemWidth(px(140));
+        int delay = m->netplay_lobby_input_delay;
+        if (ImGui::InputInt("##lobby_input_delay", &delay, 1, 1)) {
+            if (delay < 2) delay = 2;
+            if (delay > 20) delay = 20;
+            m->netplay_lobby_input_delay = delay;
+            if (np->input_delay_set)
+                (void)np->input_delay_set(np->ctx, delay);
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            delay = m->netplay_lobby_input_delay;
+            if (delay < 2) delay = 2;
+            if (delay > 20) delay = 20;
+            m->netplay_lobby_input_delay = delay;
+            if (np->input_delay_set)
+                (void)np->input_delay_set(np->ctx, delay);
+        }
+        ImGui::Spacing();
+        {
+            const bool lan_room = m->netplay_local_room;
+            bool force_turn = !lan_room && m->netplay_force_turn;
+            ImGui::BeginDisabled(lan_room || !np->force_turn_set);
+            if (ImGui::Checkbox("Force TURN/S UDP Relay", &force_turn)) {
+                m->netplay_force_turn = force_turn;
+                if (np->force_turn_set)
+                    (void)np->force_turn_set(np->ctx, force_turn ? 1 : 0);
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            const float help_sz = ImGui::GetFrameHeight();
+            if (ImGui::Button("?", ImVec2(help_sz, help_sz))) {
+                /* tooltip on hover */
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos(px(360));
+                ImGui::TextUnformatted(
+                    "Host-only: forces ICE to use a TURN/TURNS UDP relay for "
+                    "every peer in this lobby.\n\n"
+                    "Improves connectivity through difficult NATs and "
+                    "firewalls, but usually increases latency.\n\n"
+                    "Server-hosted lobbies only (not LAN/Direct IP). The lobby "
+                    "server must have TURN/TURNS configured.");
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
+            if (lan_room) {
+                ImGui::TextColored(col(th.text_muted),
+                                   "Not used for LAN/Direct IP lobbies.");
+            }
+        }
+        ImGui::Spacing();
+        if (ImGui::Button("Close", ImVec2(px(120), 0))) {
+            m->netplay_lobby_settings_open = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
     ImGui::EndPopup();
 }

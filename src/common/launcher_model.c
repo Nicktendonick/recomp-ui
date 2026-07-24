@@ -73,11 +73,30 @@ static void update_msu1_patch_available(LauncherModel* m);   // fwd; called from
 static void lm_inspect_memcard(LauncherModel* m, int slot); // fwd; host memcard_inspect callback
 static void lm_inspect_tpak(LauncherModel* m, int slot);    // fwd; host tpak_inspect callback
 
+void launcher_model_persist_setup(LauncherModel* m) {
+    if (!m) return;
+    if (m->settings_io)
+        launcher_model_commit(m, m->settings_io);
+    if (m->rom_full[0]) {
+        const char* cache = (m->rom_cache_path && m->rom_cache_path[0])
+                                ? m->rom_cache_path
+                                : "rom.cfg";
+        FILE* f = fopen(cache, "w");
+        if (f) {
+            fprintf(f, "%s\n", m->rom_full);
+            fclose(f);
+        }
+    }
+    if (m->persist_setup_cb)
+        (void)m->persist_setup_cb(m->persist_setup_ctx, m->rom_full, m->s.bios_path);
+}
+
 void launcher_model_init(LauncherModel* m,
-                         const RecompLauncherCSettings* io,
+                         RecompLauncherCSettings* io,
                          const RecompLauncherCGameInfo* game,
                          const char* initial_rom) {
     memset(m, 0, sizeof(*m));
+    m->settings_io = io;
 
     if (game) {
         m->game_name            = game->name ? game->name : "Unknown Game";
@@ -133,6 +152,9 @@ void launcher_model_init(LauncherModel* m,
         m->prepare_disc_cb      = game->prepare_disc;
         m->prepare_disc_label   = game->prepare_disc_label;
         m->prepare_disc_note    = game->prepare_disc_note;
+        m->rom_cache_path       = game->rom_cache_path;
+        m->persist_setup_cb     = game->persist_setup;
+        m->persist_setup_ctx    = game->persist_setup_ctx;
         m->boxart_path          = game->boxart_path;      // NULL => default boxart.tga
         m->aspect_labels        = game->aspect_labels;    // NULL => built-in 4:3/16:9/21:9
         m->num_aspect_labels    = game->num_aspect_labels;
@@ -180,8 +202,11 @@ void launcher_model_init(LauncherModel* m,
     m->netplay_lan_only = false;
     m->netplay_list_fresh = false;
     m->netplay_selected_lobby = -1;
+    m->netplay_lobby_settings_open = false;
+    m->netplay_lobby_input_delay = 2;
     m->netplay_public_ip[0] = '\0';
     m->netplay_public_ip_resolved = false;
+    m->netplay_force_turn = false;
     m->s.adaptive_view =
         (m->adaptive_view_supported && m->s.adaptive_view) ? 1 : 0;
 
@@ -437,6 +462,10 @@ void launcher_model_set_rom(LauncherModel* m, const char* path) {
 
     run_verify(m);
     update_msu1_patch_available(m);
+    /* Dashboard "Change ROM" / wizard Browse: keep rom.cfg in sync even if the
+     * user quits without PLAY (Continue also persists via finish_setup). */
+    if (m->rom_full[0])
+        launcher_model_persist_setup(m);
 }
 
 // Disc-verdict (verify.mode==1 systems, e.g. PSX): run the SystemProfile's
@@ -872,6 +901,8 @@ void launcher_model_refresh_bios_status(LauncherModel* m) {
 void launcher_model_set_bios_path(LauncherModel* m, const char* path) {
     safe_copy(m->s.bios_path, sizeof(m->s.bios_path), path ? path : "");
     launcher_model_refresh_bios_status(m);
+    /* Persist immediately so Quit without PLAY still keeps the BIOS path. */
+    launcher_model_persist_setup(m);
 }
 
 bool launcher_model_can_finish_setup(const LauncherModel* m) {
@@ -902,6 +933,7 @@ bool launcher_model_can_launch(const LauncherModel* m) {
 
 void launcher_model_finish_setup(LauncherModel* m) {
     if (!m || !launcher_model_can_finish_setup(m)) return;
+    launcher_model_persist_setup(m);
     m->setup_wizard_open = false;
     m->setup_status[0] = '\0';
     m->setup_error[0] = '\0';
