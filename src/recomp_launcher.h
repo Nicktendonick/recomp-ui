@@ -157,6 +157,10 @@ typedef struct RecompLauncherCNetplayCallbacks {
     /* Optional: current room seat ceiling (2..RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS).
      * 0 when not in a lobby / unknown. Prefer this over game num_players. */
     int  (*lobby_max_slots)(void* ctx);
+    /* Optional: host Force TURN / ICE relay-only (0/1). Server lobbies only;
+     * published in match_caps.force_turn so every peer uses typ relay. */
+    int  (*force_turn_get)(void* ctx);
+    int  (*force_turn_set)(void* ctx, int force);
 } RecompLauncherCNetplayCallbacks;
 
 // Plain-C mirror of the launcher's internal settings (bools as int).
