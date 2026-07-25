@@ -79,6 +79,8 @@ typedef struct RecompLauncherCNetplayLaunch {
     /* Host match_caps: opt into lobby-server UDP input relay (0/1).
      * 3+ defaults to host-as-relay unless this is set. */
     int      force_input_relay;
+    /* Host match_caps: ICE relay-only / Force TURN for UDP (0/1). */
+    int      force_turn;
 } RecompLauncherCNetplayLaunch;
 
 typedef struct RecompLauncherCNetplayLocalAddress {
@@ -166,6 +168,10 @@ typedef struct RecompLauncherCNetplayCallbacks {
     /* Optional: current room seat ceiling (2..RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS).
      * 0 when not in a lobby / unknown. Prefer this over game num_players. */
     int  (*lobby_max_slots)(void* ctx);
+    /* Optional: host Force TURN / ICE relay-only (0/1). Server lobbies only;
+     * published in match_caps.force_turn so every peer uses typ relay. */
+    int  (*force_turn_get)(void* ctx);
+    int  (*force_turn_set)(void* ctx, int force);
 } RecompLauncherCNetplayCallbacks;
 
 /* ---- schema-driven mods --------------------------------------------------

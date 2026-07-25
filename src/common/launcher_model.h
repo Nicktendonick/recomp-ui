@@ -331,6 +331,8 @@ typedef struct {
     bool      netplay_public_ip_resolved;
     /* Lobby Settings cache: Force Server Input Relay (server lobbies only). */
     bool      netplay_force_input_relay;
+    /* Lobby Settings cache: Force TURN / ICE relay-only (server lobbies only). */
+    bool      netplay_force_turn;
     /* Host Lobby: desired max seats (2..min(8, game player_count)). */
     int       netplay_host_max_players;
     /* Active room seat ceiling after create/join (0 = use game player_count). */
