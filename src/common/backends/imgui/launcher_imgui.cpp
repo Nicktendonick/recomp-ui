@@ -3583,9 +3583,16 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                     m->netplay_lobby_input_delay = 20;
                 if (m->netplay_local_room) {
                     m->netplay_force_input_relay = false;
-                } else if (np->force_input_relay_get) {
-                    m->netplay_force_input_relay =
-                        np->force_input_relay_get(np->ctx) != 0;
+                    m->netplay_force_turn = false;
+                } else {
+                    if (np->force_input_relay_get) {
+                        m->netplay_force_input_relay =
+                            np->force_input_relay_get(np->ctx) != 0;
+                    }
+                    if (np->force_turn_get) {
+                        m->netplay_force_turn =
+                            np->force_turn_get(np->ctx) != 0;
+                    }
                 }
                 m->netplay_lobby_settings_open = true;
             }
@@ -3676,6 +3683,40 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                     "worst peer RTT and raise if anyone hitching.");
                 ImGui::PopTextWrapPos();
                 ImGui::EndTooltip();
+            }
+        }
+        ImGui::Spacing();
+        {
+            const bool lan_room = m->netplay_local_room;
+            bool force_turn = !lan_room && m->netplay_force_turn;
+            ImGui::BeginDisabled(lan_room || !np->force_turn_set);
+            if (ImGui::Checkbox("Force TURN for UDP", &force_turn)) {
+                m->netplay_force_turn = force_turn;
+                if (np->force_turn_set)
+                    (void)np->force_turn_set(np->ctx, force_turn ? 1 : 0);
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            {
+                const float help_sz = ImGui::GetFrameHeight();
+                if (ImGui::Button("?##force_turn_help", ImVec2(help_sz, help_sz))) {
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+                    ImGui::BeginTooltip();
+                    ImGui::PushTextWrapPos(px(360));
+                    ImGui::TextUnformatted(
+                        "Forces ICE to use TURN relay candidates only "
+                        "(typ relay) for every peer in this lobby.\n\n"
+                        "Use this when a player is on carrier CGNAT / mobile "
+                        "hotspot, or when direct STUN hole-punch fails or "
+                        "stalls. Requires Coturn credentials from the lobby "
+                        "server (or console NET_TURN_* env overrides).\n\n"
+                        "Adds some latency versus a good direct path, but is "
+                        "much more reliable across hard NATs.\n\n"
+                        "Server-hosted lobbies only (not LAN/Direct IP).");
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndTooltip();
+                }
             }
         }
         ImGui::Spacing();
