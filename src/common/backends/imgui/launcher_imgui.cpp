@@ -3690,7 +3690,7 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
             const bool lan_room = m->netplay_local_room;
             bool force_turn = !lan_room && m->netplay_force_turn;
             ImGui::BeginDisabled(lan_room || !np->force_turn_set);
-            if (ImGui::Checkbox("Force TURN / UDP Relay", &force_turn)) {
+            if (ImGui::Checkbox("Force TURN for UDP", &force_turn)) {
                 m->netplay_force_turn = force_turn;
                 if (np->force_turn_set)
                     (void)np->force_turn_set(np->ctx, force_turn ? 1 : 0);
