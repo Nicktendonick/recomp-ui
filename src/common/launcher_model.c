@@ -184,6 +184,7 @@ void launcher_model_init(LauncherModel* m,
     m->netplay_lobby_settings_open = false;
     m->netplay_lobby_input_delay = 2;
     m->netplay_force_input_relay = false;
+    m->netplay_force_turn = false;
     {
         int max_p = m->player_count > 0 ? m->player_count : 2;
         if (max_p < 2) max_p = 2;
