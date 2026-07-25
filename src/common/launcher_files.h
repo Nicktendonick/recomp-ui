@@ -23,6 +23,14 @@ extern "C" {
 
 // Open the OS "choose a ROM" dialog (BLOCKING — returns when the user picks or
 // cancels). Returns true and fills `out_path` on success.
+//
+// CONSOLE-NEUTRAL by design: this is the last-resort fallback for a console
+// whose SystemProfile omits `rom_filter`, so it offers "All files" rather than
+// any one system's extensions. It used to hard-code the SNES set
+// ("Select SNES ROM", *.sfc/*.smc/*.fig/*.swc), which meant a PSX player who
+// hit this path was asked for a Super Nintendo cartridge — see the note on the
+// call site in launcher_imgui.cpp. Per-console extensions belong in that
+// console's profile (SystemProfile.rom_filter), never here.
 bool launcher_pick_rom(char* out_path, size_t out_cap);
 
 // Open the OS "choose a folder" dialog (for the MSU-1 music folder). Returns

@@ -740,8 +740,11 @@ void draw_game_panel(LauncherModel* m, const LauncherTheme& th, bool fill_h = fa
     snprintf(change_label, sizeof(change_label), "Change %s", noun);
     if (ImGui::Button(change_label, ImVec2(availw, px(34)))) {
         // Native file dialog filter comes from the active console's
-        // SystemProfile.rom_filter — never a hardcoded SNES set. Falls back
-        // to launcher_pick_rom's built-in filter only if a profile omits it.
+        // SystemProfile.rom_filter — never a hardcoded per-system set. Every
+        // shipped profile supplies one; the fallback is console-NEUTRAL (all
+        // files, titled with this console's own rom_noun) so a profile that
+        // forgets rom_filter degrades to "any file" rather than prompting for
+        // some other machine's media.
         const SystemProfile* prof = (const SystemProfile*)m->profile;
         char title[48];
         snprintf(title, sizeof(title), "Select %s", noun);
@@ -752,7 +755,8 @@ void draw_game_panel(LauncherModel* m, const LauncherTheme& th, bool fill_h = fa
                                         prof->rom_filter.desc,
                                         g_pick_buf, sizeof(g_pick_buf));
         else
-            picked = launcher_pick_rom(g_pick_buf, sizeof(g_pick_buf));
+            picked = launcher_pick_file(title, NULL, 0, NULL,
+                                        g_pick_buf, sizeof(g_pick_buf));
         if (picked) launcher_model_set_rom(m, g_pick_buf);
     }
 
