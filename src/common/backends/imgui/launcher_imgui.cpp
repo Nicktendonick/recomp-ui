@@ -1984,20 +1984,38 @@ int avail_system(const LauncherModel* m) { return m->has_bios; }
 void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
     eyebrow("SYSTEM");
     row_label("BIOS", th);
-    const float bw = px(78);
-    float avail = ImGui::GetContentRegionAvail().x - bw - px(th.spacing_sm);
+    // Empty means "use the BIOS this build ships with" — not "unset". Runtimes
+    // that bundle a redistributable BIOS (PSX/OpenBIOS, GBA) boot straight from
+    // it, so the row states that outcome instead of the old "(default)", which
+    // read as a missing setting the player still had to deal with.
+    const bool  has_pick = m->s.bios_path[0] != 0;
+    const float bw       = px(78);
+    // Clear is only meaningful once something has been picked; reserve its
+    // width only then so the path keeps the full row when there is nothing to
+    // clear.
+    const float cw       = has_pick ? px(58) : 0.0f;
+    const float gap      = has_pick ? px(th.spacing_sm) : 0.0f;
+    float avail = ImGui::GetContentRegionAvail().x - bw - cw - gap - px(th.spacing_sm);
     if (avail < px(50)) avail = px(50);
-    const char* bp = m->s.bios_path[0] ? m->s.bios_path : "(default)";
+    const char* bp = has_pick ? m->s.bios_path : "Bundled BIOS";
     char elided[192]; elide_left(bp, avail, elided, sizeof(elided));
     ImGui::AlignTextToFramePadding();
-    ImGui::TextColored(col(th.text), "%s", elided);
-    ImGui::SameLine(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - bw);
+    ImGui::TextColored(col(has_pick ? th.text : th.text_muted), "%s", elided);
+    ImGui::SameLine(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - bw - cw - gap);
     if (ImGui::Button("Browse", ImVec2(bw, px(28)))) {
         char buf[512];
         static const char* kBiosPatterns[] = { "*.bin", "*.rom" };
         if (launcher_pick_file("Select BIOS file", kBiosPatterns, 2,
                                "BIOS image (.bin .rom)", buf, sizeof(buf)))
             launcher_model_set_bios_path(m, buf);
+    }
+    if (has_pick) {
+        ImGui::SameLine(0.0f, gap);
+        if (ImGui::Button("Clear", ImVec2(cw, px(28))))
+            launcher_model_set_bios_path(m, "");   // back to the bundled BIOS
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Stop using this BIOS and go back to the one "
+                              "included with this build.");
     }
 }
 void panel_system_draw(LauncherModel* m, const LauncherTheme* th) {
