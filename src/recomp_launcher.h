@@ -12,6 +12,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Mod support is framework-available but developer opt-in. The integration
+ * helper defines this from its default-OFF RECOMP_UI_ENABLE_MODS CMake option.
+ * Keep a source-level default for hosts that compile the launcher sources
+ * without recomp_ui.cmake. The public provider ABI remains visible either way
+ * so enabling the option never changes C struct layouts. */
+#ifndef RECOMP_UI_ENABLE_MODS
+#define RECOMP_UI_ENABLE_MODS 0
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -594,9 +603,11 @@ typedef struct RecompLauncherCGameInfo {
     int resume_netplay_room;
     const char* resume_netplay_endpoint;
 
-    /* Optional schema-driven mod provider. Appended for ABI stability. NULL
-     * hides the Mods view completely. Features are the primary user-facing
-     * surface; packages are the secondary installation/maintenance surface. */
+    /* Optional schema-driven mod provider. Appended for ABI stability. The
+     * Mods view requires both RECOMP_UI_ENABLE_MODS=1 and a non-NULL provider;
+     * default builds therefore remain inert even if a caller populates this
+     * field. Features are the primary user-facing surface; packages are the
+     * secondary installation/maintenance surface. */
     const RecompLauncherCModProvider* mods;
 } RecompLauncherCGameInfo;
 

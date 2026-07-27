@@ -66,6 +66,12 @@ keybinds, tinyfiledialogs, an IPS applier, and a PS1 memcard formatter, and
 stages its fonts/images next to your exe. No network / FetchContent — builds
 offline. It defines `RECOMP_LAUNCHER` on the target and needs SDL2 + OpenGL.
 
+The schema-driven Mods view is developer opt-in and inert by default. Enable it
+with `-DRECOMP_UI_ENABLE_MODS=ON` and provide a non-null
+`RecompLauncherCGameInfo.mods` provider; both gates are required. The provider
+ABI remains available in the public header so toggling the build option does not
+change the game-info struct layout. The launcher never enables mods on its own.
+
 ### 3. Call it from your `main()`
 
 ```c
@@ -205,10 +211,11 @@ snesrecomp `docs/RECOMP_NET.md` → "Soft-return rematch checklist".
   `memcard_inspect` callback).
 - **MSU-1** — dashboard IPS auto-patching for SNES MSU-1 titles.
 - **Hotkeys** — per-console subset of the emulator hotkey catalog, editable.
-- **Mods** — optional host-provided package catalog with local `.psxmod`
+- **Mods** — default-off, host-provided package catalog with local archive
   installation, enable/disable, version rollback, removal, and schema-generated
-  boolean/choice/integer controls. The host resolves and commits changes before
-  launch; recomp-ui never executes package code.
+  boolean/choice/integer controls. The host owns package formats, defaults,
+  resolution, and committing changes before launch; recomp-ui never executes
+  package code.
 - **Footer** — PLAY, skip-launcher-on-boot (+ confirm modal), gamepad navigation.
 
 ---

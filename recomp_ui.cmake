@@ -34,6 +34,10 @@
 set(RECOMP_UI_ROOT "${CMAKE_CURRENT_LIST_DIR}" CACHE PATH
     "Root directory of the recomp-ui launcher repo")
 
+option(RECOMP_UI_ENABLE_MODS
+    "Enable the schema-driven Mods launcher view (still requires a host provider)"
+    OFF)
+
 set(RUI_SRC    ${RECOMP_UI_ROOT}/src)
 set(RUI_IMGUI  ${RUI_SRC}/third_party/imgui)
 set(RUI_ASSETS ${RECOMP_UI_ROOT}/assets)
@@ -143,6 +147,7 @@ function(recomp_target_launcher_ui TGT)
 
     target_compile_definitions(${TGT} PRIVATE
         RECOMP_LAUNCHER           # un-gate the GUI launcher block in the host's main()
+        RECOMP_UI_ENABLE_MODS=$<BOOL:${RECOMP_UI_ENABLE_MODS}>
         SDL_MAIN_HANDLED)         # our real main() is the entry point (no SDL_main redirect)
 
     # OpenGL: the ImGui GL3 backend + launcher_gl.c need the system GL library.

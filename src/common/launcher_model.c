@@ -137,7 +137,13 @@ void launcher_model_init(LauncherModel* m,
         m->has_mouse_controls   = game->has_mouse_controls != 0;
         m->netplay_supported    = game->netplay_supported != 0 && game->netplay != NULL;
         m->netplay              = game->netplay;
+#if RECOMP_UI_ENABLE_MODS
         m->mods                 = game->mods;
+#else
+        /* The provider ABI is always present for stable consumer structs, but
+         * a normal launcher build must not expose or mutate mods. */
+        m->mods                 = NULL;
+#endif
     } else {
         m->game_name    = "Unknown Game";
         m->region       = "";
