@@ -1749,7 +1749,7 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
 
     if (m->has_renderer) {
         row_label("Renderer", th);
-        if (ImGui::Button(launcher_model_renderer_label(m), ImVec2(px(120), px(30))))
+        if (ImGui::Button(launcher_model_renderer_label(m), ImVec2(px(220), px(30))))
             launcher_model_toggle_renderer(m);
     }
 
