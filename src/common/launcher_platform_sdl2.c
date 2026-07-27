@@ -14,13 +14,21 @@
 
 #include <stdlib.h>
 #include "launcher_platform.h"
+#include "launcher_boot_timing.h"
 
 #include <stdio.h>
+
+static bool s_quit_sdl = true;
+
+void launcher_platform_set_quit_sdl(bool quit_sdl) {
+    s_quit_sdl = quit_sdl;
+}
 
 bool launcher_platform_open(LauncherPlatform* p, const char* title,
                             int logical_w, int logical_h) {
     if (!p) return false;
     SDL_zerop(p);
+    launcher_boot_timing_mark("rui:platform_open:begin");
 
     SDL_SetMainReady();   // we built with SDL_MAIN_HANDLED (real main() is entry)
 #if defined(_WIN32)
@@ -78,7 +86,7 @@ bool launcher_platform_open(LauncherPlatform* p, const char* title,
                                  SDL_WINDOW_ALLOW_HIGHDPI);
     if (!p->window) {
         fprintf(stderr, "[launcher] SDL_CreateWindow failed: %s\n", SDL_GetError());
-        SDL_Quit();
+        if (s_quit_sdl) SDL_Quit();
         return false;
     }
 
@@ -87,7 +95,7 @@ bool launcher_platform_open(LauncherPlatform* p, const char* title,
         fprintf(stderr, "[launcher] SDL_GL_CreateContext failed: %s\n", SDL_GetError());
         SDL_DestroyWindow(p->window);
         p->window = NULL;
-        SDL_Quit();
+        if (s_quit_sdl) SDL_Quit();
         return false;
     }
 
@@ -97,6 +105,7 @@ bool launcher_platform_open(LauncherPlatform* p, const char* title,
     SDL_RaiseWindow(p->window);   // foreground + keyboard focus (gamepad/kbd nav)
 
     launcher_platform_refresh_metrics(p);
+    launcher_boot_timing_mark("rui:platform_open:window+gl_ready");
     return true;
 }
 
@@ -151,5 +160,6 @@ void launcher_platform_close(LauncherPlatform* p) {
     if (p->gl)     { SDL_GL_DeleteContext(p->gl); p->gl = NULL; }
     if (p->window) { SDL_DestroyWindow(p->window); p->window = NULL; }
     SDL_GL_ResetAttributes();   // leave a clean slate for the game's SDL usage
-    SDL_Quit();
+    if (s_quit_sdl)
+        SDL_Quit();
 }

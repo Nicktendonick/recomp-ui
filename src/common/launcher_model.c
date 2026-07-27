@@ -389,54 +389,64 @@ void launcher_model_set_rom(LauncherModel* m, const char* path) {
         if (*q == '/' || *q == '\\') base = q + 1;
     safe_copy(m->rom_file, sizeof(m->rom_file), m->rom_present ? base : "(none)");
 
-    /* Read the ROM once: real size, and real CRC32 + SHA-256 over the cartridge
-     * body (SMC copier header stripped) compared against the expected
-     * fingerprint. No faking — a wrong/corrupt ROM fails verification. */
+    /* Cartridge consoles: read the ROM once for size + CRC32/SHA over the
+     * body (SMC header stripped) vs expected fingerprints.
+     * Disc systems (verify.mode==1, e.g. PSX): only ftell for the size label.
+     * Full-image CRC/SHA would block launcher open on multi-hundred-MB BINs
+     * and is unused — identity is disc_verify / identify_disc instead. */
     m->rom_size[0] = '\0';
     m->crc_match = false;
     m->sha_match = false;
     m->sha1_match = false;
+    const int disc_verify = m->profile && m->profile->verify.mode == 1;
     if (m->rom_present) {
         FILE* f = fopen(m->rom_full, "rb");
         if (f) {
             fseek(f, 0, SEEK_END);
             long n = ftell(f);
-            fseek(f, 0, SEEK_SET);
             if (n > 0) {
                 snprintf(m->rom_size, sizeof(m->rom_size), "%.2f MB (%ld Mbit)",
                          (double)n / (1024.0 * 1024.0), (long)((n * 8) / (1024 * 1024)));
-                uint8_t* buf = (uint8_t*)malloc((size_t)n);
-                if (buf && fread(buf, 1, (size_t)n, f) == (size_t)n) {
-                    /* SMC copier header is present when (size % 1024 == 512). */
-                    size_t hdr  = ((size_t)n % 1024 == 512) ? 512 : 0;
-                    const uint8_t* body = buf + hdr;
-                    size_t blen = (size_t)n - hdr;
-                    uint32_t crc = recompui_crc32_compute(body, blen);
-                    uint8_t  sha[32];
-                    recompui_sha256_compute(body, blen, sha);
-                    m->crc_match = m->has_expected_crc && crc == m->expected_crc;
-                    for (size_t k = 0; k < m->num_known_sha256; ++k)
-                        if (memcmp(sha, m->known_sha256[k], 32) == 0) { m->sha_match = true; break; }
-                    // SHA-1: the cartridge-console identity gate (GBA/SNES).
-                    if (m->num_known_sha1 && m->known_sha1_hex) {
-                        uint8_t s1[20]; char s1hex[41];
-                        recompui_sha1_compute(body, blen, s1);
-                        recompui_sha1_hex(s1, s1hex);
-                        for (size_t k = 0; k < m->num_known_sha1; ++k) {
-                            const char* want = m->known_sha1_hex[k];
-                            if (!want) continue;
-                            /* case-insensitive 40-hex compare */
-                            int eq = 1;
-                            for (int c = 0; c < 40 && eq; ++c) {
-                                char a = s1hex[c], b = want[c];
-                                if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
-                                if (a != b) eq = 0;
+                if (!disc_verify) {
+                    fseek(f, 0, SEEK_SET);
+                    uint8_t* buf = (uint8_t*)malloc((size_t)n);
+                    if (buf && fread(buf, 1, (size_t)n, f) == (size_t)n) {
+                        /* SMC copier header is present when (size % 1024 == 512). */
+                        size_t hdr  = ((size_t)n % 1024 == 512) ? 512 : 0;
+                        const uint8_t* body = buf + hdr;
+                        size_t blen = (size_t)n - hdr;
+                        uint32_t crc = recompui_crc32_compute(body, blen);
+                        uint8_t  sha[32];
+                        recompui_sha256_compute(body, blen, sha);
+                        m->crc_match = m->has_expected_crc && crc == m->expected_crc;
+                        for (size_t k = 0; k < m->num_known_sha256; ++k)
+                            if (memcmp(sha, m->known_sha256[k], 32) == 0) {
+                                m->sha_match = true;
+                                break;
                             }
-                            if (eq && want[40] == '\0') { m->sha1_match = true; break; }
+                        /* SHA-1: cartridge identity gate (GBA/SNES). */
+                        if (m->num_known_sha1 && m->known_sha1_hex) {
+                            uint8_t s1[20]; char s1hex[41];
+                            recompui_sha1_compute(body, blen, s1);
+                            recompui_sha1_hex(s1, s1hex);
+                            for (size_t k = 0; k < m->num_known_sha1; ++k) {
+                                const char* want = m->known_sha1_hex[k];
+                                if (!want) continue;
+                                int eq = 1;
+                                for (int c = 0; c < 40 && eq; ++c) {
+                                    char a = s1hex[c], b = want[c];
+                                    if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+                                    if (a != b) eq = 0;
+                                }
+                                if (eq && want[40] == '\0') {
+                                    m->sha1_match = true;
+                                    break;
+                                }
+                            }
                         }
                     }
+                    free(buf);
                 }
-                free(buf);
             }
             fclose(f);
         }

@@ -1,13 +1,21 @@
 // launcher_platform_sdl3.c — SDL3 implementation of the shared platform layer.
 
 #include "launcher_platform.h"
+#include "launcher_boot_timing.h"
 
 #include <stdio.h>
+
+static bool s_quit_sdl = true;
+
+void launcher_platform_set_quit_sdl(bool quit_sdl) {
+    s_quit_sdl = quit_sdl;
+}
 
 bool launcher_platform_open(LauncherPlatform* p, const char* title,
                             int logical_w, int logical_h) {
     if (!p) return false;
     SDL_zerop(p);
+    launcher_boot_timing_mark("rui:platform_open:begin");
 
     SDL_SetMainReady();   // we built with SDL_MAIN_HANDLED (real main() is entry)
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
@@ -32,7 +40,7 @@ bool launcher_platform_open(LauncherPlatform* p, const char* title,
                                  logical_w, logical_h, flags);
     if (!p->window) {
         fprintf(stderr, "[launcher] SDL_CreateWindow failed: %s\n", SDL_GetError());
-        SDL_Quit();
+        if (s_quit_sdl) SDL_Quit();
         return false;
     }
 
@@ -41,7 +49,7 @@ bool launcher_platform_open(LauncherPlatform* p, const char* title,
         fprintf(stderr, "[launcher] SDL_GL_CreateContext failed: %s\n", SDL_GetError());
         SDL_DestroyWindow(p->window);
         p->window = NULL;
-        SDL_Quit();
+        if (s_quit_sdl) SDL_Quit();
         return false;
     }
 
@@ -49,6 +57,7 @@ bool launcher_platform_open(LauncherPlatform* p, const char* title,
     SDL_GL_SetSwapInterval(1);   // vsync — a launcher has no reason to spin
 
     launcher_platform_refresh_metrics(p);
+    launcher_boot_timing_mark("rui:platform_open:window+gl_ready");
     return true;
 }
 
@@ -71,5 +80,6 @@ void launcher_platform_close(LauncherPlatform* p) {
     if (!p) return;
     if (p->gl)     { SDL_GL_DestroyContext(p->gl); p->gl = NULL; }
     if (p->window) { SDL_DestroyWindow(p->window); p->window = NULL; }
-    SDL_Quit();
+    if (s_quit_sdl)
+        SDL_Quit();
 }
