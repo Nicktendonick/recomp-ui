@@ -12,12 +12,17 @@
 
 #include "launcher_backend.h"
 #include "launcher_binds.h"
+#include "launcher_boot_timing.h"
 #include "launcher_model.h"
 #include "launcher_platform.h"
 #include "launcher_theme.h"
 
 #include <stdio.h>
 #include <string.h>
+
+void recomp_launcher_set_preserve_sdl(int preserve) {
+    launcher_platform_set_quit_sdl(!preserve);
+}
 
 int recomp_launcher_run_window(const char* window_title,
                              RecompLauncherCSettings* io,
@@ -26,6 +31,8 @@ int recomp_launcher_run_window(const char* window_title,
                              const char* initial_rom,
                              char* out_rom_path, size_t out_rom_path_len) {
     (void)assets_dir;   // launcher_ng resolves assets next to the exe (SDL base path)
+
+    launcher_boot_timing_mark("rui:run_window:enter");
 
     LauncherPlatform plat;
     if (!launcher_platform_open(&plat, window_title ? window_title : "Launcher",
@@ -39,6 +46,7 @@ int recomp_launcher_run_window(const char* window_title,
     launcher_model_init(&model, io, game, initial_rom);
     launcher_binds_load(&model, game ? game->config_path : NULL,
                                 game ? game->keybinds_path : NULL);
+    launcher_boot_timing_mark("rui:model+binds_ready");
 
     LauncherTheme theme = launcher_theme_by_name(game ? game->theme : NULL);
 

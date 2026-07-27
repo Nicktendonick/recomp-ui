@@ -11,6 +11,7 @@
 //       breakpoint switches the dashboard between two columns and one column.
 
 #include "launcher_backend.h"
+#include "launcher_boot_timing.h"
 #include "launcher_gl.h"
 #include "launcher_input.h"
 #include "launcher_files.h"
@@ -5291,6 +5292,7 @@ extern "C" bool launcher_panel_available(const LauncherPanel* p, const LauncherM
 extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
                                           LauncherModel* m,
                                           const LauncherTheme* th) {
+    launcher_boot_timing_mark("rui:backend_run:begin");
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -5324,6 +5326,7 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
 #else
     ImGui_ImplOpenGL3_Init("#version 330");
 #endif
+    launcher_boot_timing_mark("rui:imgui_gl_ready");
 
     // Box art: per-game path from the ABI when given (multi-variant repos
     // stage one file per variant in a shared build dir), else the default.
@@ -5397,6 +5400,7 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
     // memcard.tga is already 32-bit with real alpha (no colorkey backdrop),
     // same as pad_analog.tga/pad_digital.tga above.
     g_memcard = launcher_texture_load(asset("assets/img/memcard.tga").c_str());
+    launcher_boot_timing_mark("rui:textures_loaded");
 
     std::string font_path = asset("assets/fonts/LatoLatin-Regular.ttf");
     // Optional Japanese subset, merged over the Latin base when present (PMS-J).
@@ -5420,6 +5424,7 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
     // Unset => stock ImGui behavior (the SDL/GL backend's own framebuffer scale).
     const char* force_scale_env = SDL_getenv("LNG_FORCE_SCALE");
     const bool force_dpi = force_scale_env && force_scale_env[0] && SDL_atof(force_scale_env) > 1.0;
+    bool first_present_marked = false;
 
     while (m->action == LNG_ACTION_NONE && !p->should_quit) {
         if (smoke_frames > 0 && ++frame > smoke_frames) { m->action = LNG_ACTION_QUIT; break; }
@@ -5438,6 +5443,8 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
                         jp_font_path.c_str(), symbols_font_path.c_str(),
                         emoji_font_path.c_str());
             applied_scale = p->display_scale;
+            if (!first_present_marked)
+                launcher_boot_timing_mark("rui:fonts_built");
         }
 
         // Re-poll connected gamepads every frame so hot-plugged pads (e.g. a
@@ -5462,6 +5469,10 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         launcher_debug_step(p, m);   // script/screenshot: after draw, before swap
         launcher_platform_present(p);
+        if (!first_present_marked) {
+            launcher_boot_timing_mark("rui:first_swap");
+            first_present_marked = true;
+        }
     }
 
     launcher_texture_free(&g_boxart);

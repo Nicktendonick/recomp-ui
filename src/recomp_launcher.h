@@ -695,6 +695,11 @@ int recomp_launcher_run_window(const char* window_title,
                              const char* initial_rom,
                              char* out_rom_path, size_t out_rom_path_len);
 
+/* When preserve != 0, the launcher tears down its window/GL context but does
+ * NOT call SDL_Quit(), so an in-process host can keep SDL subsystems across
+ * launcher → game (and rematch soft-return). Default is 0 (full Quit). */
+void recomp_launcher_set_preserve_sdl(int preserve);
+
 #ifdef __cplusplus
 }
 #endif
