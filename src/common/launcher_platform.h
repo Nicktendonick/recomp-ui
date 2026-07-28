@@ -11,12 +11,12 @@
 #ifndef LAUNCHER_NG_PLATFORM_H
 #define LAUNCHER_NG_PLATFORM_H
 
-// One switch selects the windowing backend for the whole launcher. SDL2 is the
-// shipping default (it matches the game runtime, so the launcher links
-// in-process with no migration); SDL3 is the follow-up that adds Wayland
-// fractional scaling. Everything above this header is identical either way.
+// One switch selects the windowing backend for the whole launcher. SDL3 is used
+// by current PSXRecomp hosts; SDL2 remains available to older consumers.
+// Everything above this header is identical either way.
 #if defined(LNG_SDL3)
   #include <SDL3/SDL.h>
+  #include <SDL3/SDL_main.h>
 #else
   #include <SDL.h>
 #endif

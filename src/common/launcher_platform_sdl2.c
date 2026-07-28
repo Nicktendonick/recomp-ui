@@ -1,16 +1,14 @@
 // launcher_platform_sdl2.c — SDL2 implementation of the shared platform layer.
 //
-// Ships today alongside the game runtime's SDL2, so the launcher integrates
-// in-process with zero migration risk. It implements the SAME launcher_platform.h
-// contract as launcher_platform_sdl3.c, so nothing above this file changes when
-// we later flip to SDL3 for Wayland fractional scaling.
+// Compatibility implementation for SDL2 hosts. It implements the same
+// launcher_platform.h contract as launcher_platform_sdl3.c.
 //
 // DPI on SDL2: SDL_WINDOW_ALLOW_HIGHDPI makes the window size logical (points)
 // while SDL_GL_GetDrawableSize reports physical pixels; their ratio is the
 // content scale. That covers Windows per-monitor, macOS Retina and X11.
 // It does NOT cover Wayland fractional scaling — SDL2 only supports integer
 // buffer scale, so at 125%/150% the compositor downscales and text softens.
-// That single gap is the entire reason for the SDL3 follow-up.
+// SDL3 is the preferred path for fractional Wayland scaling.
 
 #include <stdlib.h>
 #include "launcher_platform.h"

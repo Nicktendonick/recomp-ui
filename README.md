@@ -64,7 +64,9 @@ recomp_target_launcher_ui(my-game-runtime
 `recomp_ui.cmake` is fully self-contained: it bundles Dear ImGui, crc32/sha256/
 keybinds, tinyfiledialogs, an IPS applier, and a PS1 memcard formatter, and
 stages its fonts/images next to your exe. No network / FetchContent — builds
-offline. It defines `RECOMP_LAUNCHER` on the target and needs SDL2 + OpenGL.
+offline. It defines `RECOMP_LAUNCHER` on the target and needs SDL + OpenGL.
+It follows the host backend: set `RECOMP_UI_SDL3=ON` for SDL3; leave it off for
+the SDL2 compatibility path. The standalone example target remains SDL2.
 
 The schema-driven Mods view is developer opt-in and inert by default. Enable it
 with `-DRECOMP_UI_ENABLE_MODS=ON` and provide a non-null

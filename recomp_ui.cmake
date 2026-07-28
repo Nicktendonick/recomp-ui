@@ -53,8 +53,9 @@ function(recomp_target_launcher_ui TGT)
     # 3 & Knuckles builds three modes side by side) and each needs its own
     # box art file — pairs with GameInfo.boxart_path the runtime reads.
     # HOST_IMGUI: the host target already compiles Dear ImGui (imgui.cpp +
-    # imgui_impl_sdl2/opengl3) — reuse that ONE copy instead of linking a
-    # second, which would be a duplicate-symbol / ODR clash. IMGUI_DIR is the
+    # imgui_impl_sdl2 or imgui_impl_sdl3 plus opengl3) — reuse that ONE copy
+    # instead of linking a second, which would be a duplicate-symbol / ODR
+    # clash. IMGUI_DIR is the
     # host's ImGui source dir (must contain imgui.h + backends/imgui_impl_*.h)
     # that recomp-ui's own backend glue (launcher_imgui.cpp) compiles against.
     # Used by gb-recompiled, whose runtime already vendors + uses ImGui for its
@@ -85,6 +86,18 @@ function(recomp_target_launcher_ui TGT)
         set(_rui_host_imgui_include "${RUI_IMGUI_DIR}")
     endif()
 
+    if(RECOMP_UI_SDL3)
+        set(_rui_platform_source
+            ${RUI_SRC}/common/launcher_platform_sdl3.c)
+        set(_rui_imgui_platform_source
+            ${RUI_IMGUI}/backends/imgui_impl_sdl3.cpp)
+    else()
+        set(_rui_platform_source
+            ${RUI_SRC}/common/launcher_platform_sdl2.c)
+        set(_rui_imgui_platform_source
+            ${RUI_IMGUI}/backends/imgui_impl_sdl2.cpp)
+    endif()
+
     if(_rui_use_host_imgui)
         message(STATUS "recomp-ui: using HOST Dear ImGui (${_rui_host_imgui_include})")
         set(_rui_imgui_sources)   # host compiles imgui core + backends
@@ -94,14 +107,14 @@ function(recomp_target_launcher_ui TGT)
             ${RUI_IMGUI}/imgui_draw.cpp
             ${RUI_IMGUI}/imgui_tables.cpp
             ${RUI_IMGUI}/imgui_widgets.cpp
-            ${RUI_IMGUI}/backends/imgui_impl_sdl2.cpp
+            ${_rui_imgui_platform_source}
             ${RUI_IMGUI}/backends/imgui_impl_opengl3.cpp)
     endif()
 
     target_sources(${TGT} PRIVATE
         # console-agnostic launcher core (C) — src/common/
         ${RUI_SRC}/common/launcher_model.c
-        ${RUI_SRC}/common/launcher_platform_sdl2.c
+        ${_rui_platform_source}
         ${RUI_SRC}/common/launcher_gl.c
         ${RUI_SRC}/common/launcher_input.c
         ${RUI_SRC}/common/launcher_files.c
@@ -148,12 +161,13 @@ function(recomp_target_launcher_ui TGT)
     target_compile_definitions(${TGT} PRIVATE
         RECOMP_LAUNCHER           # un-gate the GUI launcher block in the host's main()
         RECOMP_UI_ENABLE_MODS=$<BOOL:${RECOMP_UI_ENABLE_MODS}>
+        $<$<BOOL:${RECOMP_UI_SDL3}>:LNG_SDL3=1>
         SDL_MAIN_HANDLED)         # our real main() is the entry point (no SDL_main redirect)
 
     # OpenGL: the ImGui GL3 backend + launcher_gl.c need the system GL library.
     # Link it here so a host gets it from this ONE call (self-contained) rather
     # than having to remember to link OpenGL itself — mirrors the standalone
-    # CMakeLists.txt. SDL2 is still the host's to provide (its provenance varies:
+    # CMakeLists.txt. SDL is still the host's to provide (its provenance varies:
     # vendored, find_package, etc.); GL is a uniform system lib, so it lives here.
     if(WIN32)
         # ws2_32: launcher_udp_port.c exclusive UDP bind probes for host lobby.
