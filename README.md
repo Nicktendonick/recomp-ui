@@ -64,7 +64,9 @@ recomp_target_launcher_ui(my-game-runtime
 `recomp_ui.cmake` is fully self-contained: it bundles Dear ImGui, crc32/sha256/
 keybinds, tinyfiledialogs, an IPS applier, and a PS1 memcard formatter, and
 stages its fonts/images next to your exe. No network / FetchContent — builds
-offline. It defines `RECOMP_LAUNCHER` on the target and needs SDL2 + OpenGL.
+offline. It defines `RECOMP_LAUNCHER` on the target and uses SDL3 + OpenGL by
+default. Consumers can explicitly select the SDL2 compatibility path with
+`-DSNESRECOMP_SDL_BACKEND=SDL2`.
 
 The schema-driven Mods view is developer opt-in and inert by default. Enable it
 with `-DRECOMP_UI_ENABLE_MODS=ON` and provide a non-null
@@ -236,7 +238,9 @@ LNG_VARIANT=genesis ./build/recomp-ui-launcher
 `LNG_SCRIPT="wait:40;view:settings;shot:out.png;quit"` (see
 [`src/launcher_debug.h`](src/launcher_debug.h)).
 
-Requires SDL2 (`find_package(SDL2)`), OpenGL, a C++17 compiler.
+Requires SDL3 (`find_package(SDL3 CONFIG)`) by default, OpenGL, and a C++17
+compiler. Configure with `-DSNESRECOMP_SDL_BACKEND=SDL2` to exercise the
+supported SDL2 fallback.
 
 ---
 

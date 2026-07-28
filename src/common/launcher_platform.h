@@ -17,6 +17,7 @@
 // fractional scaling. Everything above this header is identical either way.
 #if defined(LNG_SDL3)
   #include <SDL3/SDL.h>
+  #include <SDL3/SDL_main.h>
 #else
   #include <SDL.h>
 #endif
