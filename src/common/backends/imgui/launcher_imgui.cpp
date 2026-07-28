@@ -3542,11 +3542,24 @@ static void draw_mod_packages(LauncherModel* m, const LauncherTheme& th) {
         mods->feature_option_get && mods->feature_enable &&
         mods->feature_set_option;
 
-    if (ImGui::Button("Install .psxmod")) {
-        static const char* patterns[] = { "*.psxmod" };
+    const char* archive_extension =
+        mods->archive_extension && mods->archive_extension[0]
+            ? mods->archive_extension : ".psxmod";
+    const char* archive_description =
+        mods->archive_description && mods->archive_description[0]
+            ? mods->archive_description
+            : "PSXRecomp mod package (.psxmod)";
+    char install_label[96];
+    char archive_pattern[64];
+    std::snprintf(install_label, sizeof(install_label),
+                  "Install %s", archive_extension);
+    std::snprintf(archive_pattern, sizeof(archive_pattern),
+                  "*%s", archive_extension);
+    if (ImGui::Button(install_label)) {
+        const char* patterns[] = { archive_pattern };
         char path[1024];
-        if (launcher_pick_file("Install PSXRecomp Mod", patterns, 1,
-                               "PSXRecomp mod package (.psxmod)",
+        if (launcher_pick_file("Install Mod Package", patterns, 1,
+                               archive_description,
                                path, sizeof(path))) {
             if (!mods->install_archive || !mods->install_archive(mods->ctx, path))
                 mod_note_error(m);
@@ -3935,11 +3948,24 @@ static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
     }
 
     const int feature_count = mods->feature_count(mods->ctx);
-    if (ImGui::Button("Install .psxmod")) {
-        static const char* patterns[] = { "*.psxmod" };
+    const char* archive_extension =
+        mods->archive_extension && mods->archive_extension[0]
+            ? mods->archive_extension : ".psxmod";
+    const char* archive_description =
+        mods->archive_description && mods->archive_description[0]
+            ? mods->archive_description
+            : "PSXRecomp mod package (.psxmod)";
+    char install_label[96];
+    char archive_pattern[64];
+    std::snprintf(install_label, sizeof(install_label),
+                  "Install %s", archive_extension);
+    std::snprintf(archive_pattern, sizeof(archive_pattern),
+                  "*%s", archive_extension);
+    if (ImGui::Button(install_label)) {
+        const char* patterns[] = { archive_pattern };
         char path[1024];
-        if (launcher_pick_file("Install PSXRecomp Mod", patterns, 1,
-                               "PSXRecomp mod package (.psxmod)",
+        if (launcher_pick_file("Install Mod Package", patterns, 1,
+                               archive_description,
                                path, sizeof(path))) {
             if (!mods->install_archive ||
                 !mods->install_archive(mods->ctx, path)) {

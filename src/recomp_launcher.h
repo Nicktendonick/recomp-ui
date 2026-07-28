@@ -274,6 +274,10 @@ typedef struct RecompLauncherCModProvider {
     int (*diagnostic_get)(void* ctx, const char* package_id,
                           const char* feature_id, int index,
                           RecompLauncherCModDiagnostic* out);
+    /* Optional package vocabulary. NULL keeps the historical PSX defaults.
+     * extension includes its leading dot, e.g. ".gbamod". */
+    const char* archive_extension;
+    const char* archive_description;
 } RecompLauncherCModProvider;
 
 // Plain-C mirror of the launcher's internal settings (bools as int).
