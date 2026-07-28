@@ -58,10 +58,37 @@ if(WIN32 AND RUI_SDL_RUNTIME_TARGET)
 endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/recomp_ui.cmake)
-recomp_target_launcher_ui(recomp-ui-launcher)
+recomp_target_launcher_ui(recomp-ui-launcher CONSOLE all)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_test(
+        NAME recomp-ui-asset-manifests
+        COMMAND ${CMAKE_COMMAND}
+            "-DRECOMP_UI_ROOT=${CMAKE_CURRENT_SOURCE_DIR}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/asset_manifest_test.cmake)
+
+    add_executable(recomp-ui-psx-asset-stage-probe
+        tests/asset_stage_probe.c)
+    set_target_properties(
+        recomp-ui-psx-asset-stage-probe
+        PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY
+            "${CMAKE_CURRENT_BINARY_DIR}/asset-stage-psx")
+    add_custom_command(TARGET recomp-ui-psx-asset-stage-probe PRE_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_FILE_DIR:recomp-ui-psx-asset-stage-probe>/assets/img"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${RUI_ASSETS}/consoles/n64/img/cart_red.tga"
+                "$<TARGET_FILE_DIR:recomp-ui-psx-asset-stage-probe>/assets/img/"
+        VERBATIM)
+    _recomp_ui_stage_assets(recomp-ui-psx-asset-stage-probe psx)
+    add_test(
+        NAME recomp-ui-psx-asset-staging
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_DIR=$<TARGET_FILE_DIR:recomp-ui-psx-asset-stage-probe>/assets"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/asset_staging_test.cmake)
+
     # Compile the exact SDL_Renderer2 adapter through its public integration
     # helper. Calling the helper twice also guards its no-duplicate contract.
     find_package(SDL2 QUIET)

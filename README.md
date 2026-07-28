@@ -56,6 +56,7 @@ git submodule add https://github.com/mstan/recomp-ui.git recomp-ui
 ```cmake
 include(${CMAKE_SOURCE_DIR}/recomp-ui/recomp_ui.cmake)
 recomp_target_launcher_ui(my-game-runtime
+    CONSOLE psx                                  # required: psx/snes/n64/nes/...
     BOXART ${CMAKE_SOURCE_DIR}/art/boxart.tga   # optional: game box art
     PAD    ${CMAKE_SOURCE_DIR}/art/pad.tga       # optional: per-console controller image
     BRAND  ${CMAKE_SOURCE_DIR}/art/brand.tga)    # optional: per-console top-left mark
@@ -68,6 +69,13 @@ offline. It defines `RECOMP_LAUNCHER` on the target and uses SDL3 + OpenGL by
 default. SNESRecomp consumers select the SDL2 compatibility path with
 `-DSNESRECOMP_SDL_BACKEND=SDL2`; generic hosts that do not set that variable
 can select their platform backend directly with `RECOMP_UI_SDL3`.
+
+`CONSOLE` is required and selects the runtime asset manifest for that target:
+`psx`, `snes`, `n64`, `nes`, `gba`, `genesis`, `gb`, or `gbc`. Common fonts
+and launcher chrome are always included; controller, brand, memory-card, and
+cartridge art comes only from the selected console family. `CONSOLE all` is
+reserved for targets that intentionally switch between multiple console
+profiles, such as recomp-ui's standalone preview.
 
 The schema-driven Mods view is developer opt-in and inert by default. Enable it
 with `-DRECOMP_UI_ENABLE_MODS=ON` and provide a non-null

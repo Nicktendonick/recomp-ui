@@ -4,7 +4,8 @@
 #
 #     set(RECOMP_UI_ROOT <path-to-recomp-ui>)   # or add as a git submodule
 #     include(${RECOMP_UI_ROOT}/recomp_ui.cmake)
-#     recomp_target_launcher_ui(<host_target> [BOXART <path-to-boxart.tga>]
+#     recomp_target_launcher_ui(<host_target> CONSOLE <console-id>
+#                                              [BOXART <path-to-boxart.tga>]
 #                                              [BOXART_NAME <dest-basename.tga>]
 #                                              [PAD <pad.tga>] [BRAND <brand.tga>])
 #
@@ -55,6 +56,7 @@ endif()
 set(RUI_SRC    ${RECOMP_UI_ROOT}/src)
 set(RUI_IMGUI  ${RUI_SRC}/third_party/imgui)
 set(RUI_ASSETS ${RECOMP_UI_ROOT}/assets)
+include("${RECOMP_UI_ROOT}/cmake/recomp_ui_assets.cmake")
 
 # The ImGui backend is C++; the host project() is often C-only. enable_language
 # must run at directory scope (not inside the function, which executes during
@@ -74,7 +76,12 @@ function(recomp_target_launcher_ui TGT)
     # that recomp-ui's own backend glue (launcher_imgui.cpp) compiles against.
     # Used by gb-recompiled, whose runtime already vendors + uses ImGui for its
     # in-game menu. Omit both to keep the default self-contained vendored ImGui.
-    cmake_parse_arguments(RUI "HOST_IMGUI" "BOXART;BOXART_NAME;PAD;BRAND;IMGUI_DIR" "" ${ARGN})
+    cmake_parse_arguments(
+        RUI
+        "HOST_IMGUI"
+        "CONSOLE;BOXART;BOXART_NAME;PAD;BRAND;IMGUI_DIR"
+        ""
+        ${ARGN})
 
     set_target_properties(${TGT} PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 
@@ -201,49 +208,12 @@ function(recomp_target_launcher_ui TGT)
     endif()
 
     # ---- stage runtime assets next to the exe -----------------------------------
-    # Repo layout mirrors src/: assets/common/ (chrome shared by every
-    # console) + assets/consoles/<id>/ (per-console art). The RUNTIME layout
+    # Common chrome is always staged. CONSOLE selects exactly one validated
+    # assets/consoles/<id>/ manifest, so a PSX game cannot silently ship N64
+    # cartridges or NES/SNES controller art. The RUNTIME layout
     # next to the exe stays flat (assets/fonts + assets/img) — the launcher's
-    # load paths are unchanged; only the repo organization is per-console.
-    add_custom_command(TARGET ${TGT} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${TGT}>/assets/fonts
-        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${TGT}>/assets/img
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${RUI_ASSETS}/common/fonts/LatoLatin-Regular.ttf
-                ${RUI_ASSETS}/common/fonts/LatoLatin-Bold.ttf
-                ${RUI_ASSETS}/common/fonts/OpenMoji-black-glyf.ttf
-                ${RUI_ASSETS}/common/fonts/NotoSansSymbols2-Regular.ttf
-                $<TARGET_FILE_DIR:${TGT}>/assets/fonts/
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${RUI_ASSETS}/common/img/brand_mark.tga
-                ${RUI_ASSETS}/common/img/verdict_ok.tga
-                ${RUI_ASSETS}/common/img/verdict_warn.tga
-                ${RUI_ASSETS}/common/img/verdict_bad.tga
-                ${RUI_ASSETS}/common/img/verdict_none.tga
-                ${RUI_ASSETS}/consoles/snes/img/pad.tga
-                ${RUI_ASSETS}/consoles/psx/img/pad_analog.tga
-                ${RUI_ASSETS}/consoles/psx/img/pad_digital.tga
-                ${RUI_ASSETS}/consoles/psx/img/memcard.tga
-                ${RUI_ASSETS}/consoles/psx/img/brand_psx.tga
-                ${RUI_ASSETS}/consoles/gba/img/pad_gba.tga
-                ${RUI_ASSETS}/consoles/n64/img/pad_n64.tga
-                ${RUI_ASSETS}/consoles/n64/img/brand_n64.tga
-                ${RUI_ASSETS}/consoles/n64/img/cart_empty.tga
-                ${RUI_ASSETS}/consoles/n64/img/cart_red.tga
-                ${RUI_ASSETS}/consoles/n64/img/cart_blue.tga
-                ${RUI_ASSETS}/consoles/n64/img/cart_yellow.tga
-                ${RUI_ASSETS}/consoles/n64/img/cart_green.tga
-                ${RUI_ASSETS}/consoles/nes/img/pad_nes.tga
-                ${RUI_ASSETS}/consoles/nes/img/brand_nes.tga
-                ${RUI_ASSETS}/consoles/genesis/img/pad_genesis.tga
-                ${RUI_ASSETS}/consoles/genesis/img/brand_genesis.tga
-                ${RUI_ASSETS}/consoles/genesis/img/boxart_sonic1.tga
-                ${RUI_ASSETS}/consoles/gb/img/pad_gb.tga
-                ${RUI_ASSETS}/consoles/gb/img/pad_gbc.tga
-                ${RUI_ASSETS}/consoles/gb/img/brand_gb.tga
-                ${RUI_ASSETS}/consoles/gb/img/brand_gbc.tga
-                $<TARGET_FILE_DIR:${TGT}>/assets/img/
-        VERBATIM)
+    # load paths are unchanged. The standalone preview opts into all explicitly.
+    _recomp_ui_stage_assets(${TGT} "${RUI_CONSOLE}")
     # Per-console controller image: overrides the default pad.tga (e.g. a
     # PlayStation DualShock for PSX). 24-bit TGA, top-left pixel = colorkey.
     if(RUI_PAD AND EXISTS ${RUI_PAD})
@@ -299,38 +269,19 @@ function(recomp_target_runtime_ui_sdlrenderer2 TGT)
     set_property(TARGET ${TGT} PROPERTY RECOMP_UI_SDLRENDERER2_ADDED TRUE)
 endfunction()
 
-# recomp_stage_launcher_assets(<exe_target> [BOXART <path>] [BOXART_NAME <name>])
+# recomp_stage_launcher_assets(<exe_target> CONSOLE <console-id>
+#                              [BOXART <path>] [BOXART_NAME <name>])
 #
 # Staging-ONLY helper (no source compilation) for hosts that compile the
 # recomp-ui launcher into a SHARED runtime library (e.g. gb-recompiled's gbrt)
 # and therefore can't use recomp_target_launcher_ui() — its POST_BUILD asset
 # copy has to attach to the final EXE target, not the static lib. Call this on
-# the game exe from the generated project's CMake. Stages the shared chrome +
-# the Game Boy family controller/logo art + optional per-game box art next to
-# the exe (the flat assets/fonts + assets/img layout the launcher loads).
+# the game exe from the generated project's CMake. Stages the shared chrome,
+# the selected console family, and optional per-game box art next to the exe
+# (the flat assets/fonts + assets/img layout the launcher loads).
 function(recomp_stage_launcher_assets TGT)
-    cmake_parse_arguments(RSA "" "BOXART;BOXART_NAME" "" ${ARGN})
-    add_custom_command(TARGET ${TGT} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${TGT}>/assets/fonts
-        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${TGT}>/assets/img
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${RUI_ASSETS}/common/fonts/LatoLatin-Regular.ttf
-                ${RUI_ASSETS}/common/fonts/LatoLatin-Bold.ttf
-                ${RUI_ASSETS}/common/fonts/OpenMoji-black-glyf.ttf
-                ${RUI_ASSETS}/common/fonts/NotoSansSymbols2-Regular.ttf
-                $<TARGET_FILE_DIR:${TGT}>/assets/fonts/
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${RUI_ASSETS}/common/img/brand_mark.tga
-                ${RUI_ASSETS}/common/img/verdict_ok.tga
-                ${RUI_ASSETS}/common/img/verdict_warn.tga
-                ${RUI_ASSETS}/common/img/verdict_bad.tga
-                ${RUI_ASSETS}/common/img/verdict_none.tga
-                ${RUI_ASSETS}/consoles/gb/img/pad_gb.tga
-                ${RUI_ASSETS}/consoles/gb/img/pad_gbc.tga
-                ${RUI_ASSETS}/consoles/gb/img/brand_gb.tga
-                ${RUI_ASSETS}/consoles/gb/img/brand_gbc.tga
-                $<TARGET_FILE_DIR:${TGT}>/assets/img/
-        VERBATIM)
+    cmake_parse_arguments(RSA "" "CONSOLE;BOXART;BOXART_NAME" "" ${ARGN})
+    _recomp_ui_stage_assets(${TGT} "${RSA_CONSOLE}")
     # Per-game box art (24/32-bit TGA). The seam points GameInfo.boxart_path at
     # "assets/img/boxart.tga" (or BOXART_NAME) next to the exe.
     if(RSA_BOXART AND EXISTS ${RSA_BOXART})
