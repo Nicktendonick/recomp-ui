@@ -1,10 +1,6 @@
 #pragma once
 #include <stdint.h>
-#if defined(LNG_SDL3)
-#include <SDL3/SDL.h>
-#else
-#include <SDL.h>
-#endif
+#include "launcher_platform.h"
 
 #ifdef __cplusplus
 extern "C" {

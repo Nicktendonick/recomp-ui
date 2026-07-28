@@ -38,6 +38,20 @@ option(RECOMP_UI_ENABLE_MODS
     "Enable the schema-driven Mods launcher view (still requires a host provider)"
     OFF)
 
+if(DEFINED SNESRECOMP_SDL_BACKEND)
+    if(SNESRECOMP_SDL_BACKEND STREQUAL "SDL3")
+        set(RECOMP_UI_SDL3 ON CACHE BOOL
+            "Build recomp-ui against SDL3 instead of the SDL2 fallback" FORCE)
+    else()
+        set(RECOMP_UI_SDL3 OFF CACHE BOOL
+            "Build recomp-ui against SDL3 instead of the SDL2 fallback" FORCE)
+    endif()
+else()
+    option(RECOMP_UI_SDL3
+        "Build recomp-ui against SDL3 instead of the SDL2 fallback"
+        OFF)
+endif()
+
 set(RUI_SRC    ${RECOMP_UI_ROOT}/src)
 set(RUI_IMGUI  ${RUI_SRC}/third_party/imgui)
 set(RUI_ASSETS ${RECOMP_UI_ROOT}/assets)
@@ -89,12 +103,12 @@ function(recomp_target_launcher_ui TGT)
     if(RECOMP_UI_SDL3)
         set(_rui_platform_source
             ${RUI_SRC}/common/launcher_platform_sdl3.c)
-        set(_rui_imgui_platform_source
+        set(_rui_imgui_platform_backend
             ${RUI_IMGUI}/backends/imgui_impl_sdl3.cpp)
     else()
         set(_rui_platform_source
             ${RUI_SRC}/common/launcher_platform_sdl2.c)
-        set(_rui_imgui_platform_source
+        set(_rui_imgui_platform_backend
             ${RUI_IMGUI}/backends/imgui_impl_sdl2.cpp)
     endif()
 
@@ -107,7 +121,7 @@ function(recomp_target_launcher_ui TGT)
             ${RUI_IMGUI}/imgui_draw.cpp
             ${RUI_IMGUI}/imgui_tables.cpp
             ${RUI_IMGUI}/imgui_widgets.cpp
-            ${_rui_imgui_platform_source}
+            ${_rui_imgui_platform_backend}
             ${RUI_IMGUI}/backends/imgui_impl_opengl3.cpp)
     endif()
 
@@ -161,8 +175,13 @@ function(recomp_target_launcher_ui TGT)
     target_compile_definitions(${TGT} PRIVATE
         RECOMP_LAUNCHER           # un-gate the GUI launcher block in the host's main()
         RECOMP_UI_ENABLE_MODS=$<BOOL:${RECOMP_UI_ENABLE_MODS}>
-        $<$<BOOL:${RECOMP_UI_SDL3}>:LNG_SDL3=1>
         SDL_MAIN_HANDLED)         # our real main() is the entry point (no SDL_main redirect)
+    if(RECOMP_UI_SDL3)
+        target_compile_definitions(${TGT} PRIVATE LNG_SDL3=1)
+        message(STATUS "recomp-ui: SDL3 platform backend")
+    else()
+        message(STATUS "recomp-ui: SDL2 compatibility platform backend")
+    endif()
 
     # OpenGL: the ImGui GL3 backend + launcher_gl.c need the system GL library.
     # Link it here so a host gets it from this ONE call (self-contained) rather

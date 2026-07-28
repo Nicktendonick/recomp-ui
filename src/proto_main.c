@@ -15,8 +15,6 @@
 #include "launcher_profile.h"
 #include "launcher_theme.h"
 
-#include <SDL.h>
-
 #include <stdio.h>
 #include <string.h>
 
