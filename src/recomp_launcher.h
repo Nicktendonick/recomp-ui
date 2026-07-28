@@ -52,6 +52,8 @@ typedef struct RecompLauncherCNetplayLobby {
     int  player_count;
     int  max_slots;
     int  has_password;
+    /* Round-trip ms to the lobby host; -1 when unknown / timed out. */
+    int  latency_ms;
 } RecompLauncherCNetplayLobby;
 
 typedef struct RecompLauncherCNetplayMember {
