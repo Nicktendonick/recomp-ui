@@ -39,6 +39,8 @@ typedef enum {
     LNG_VIEW_DASHBOARD = 0,
     LNG_VIEW_SETTINGS,
     LNG_VIEW_CONTROLLER,
+    LNG_VIEW_ASSIST_TOOLS,
+    LNG_VIEW_CREDITS,
 } LngView;
 
 typedef enum {
@@ -197,6 +199,12 @@ typedef struct {
     int  num_aspect_labels;
     bool aspect_experimental;
     bool adaptive_view_supported;
+    bool has_assist_tools;
+    const char* assist_tools_note;
+    bool settings_bindings;
+    const char* const* assist_binding_labels;
+    int assist_binding_count;
+    const char* credits_text;
     // Number of players the GAME actually supports. Mega Man X is 1-player, so
     // the launcher must not show a dead Player 2 row. Games that support 2
     // report 2 and the second row appears. Driven by data, never hardcoded.
@@ -293,6 +301,7 @@ typedef struct {
     // ControllerSpec sets has_pad_binds (Genesis; the engine stores a gamepad
     // button/axis bind per logical button alongside the keyboard scancode).
     bool      capture_pad;
+    bool      capture_assist;      // capture_btn indexes assist bindings
     bool      hk_capturing;      // capturing a system hotkey
     LngHotkey capture_hk;
     // Per-player bind-label display strings, indexed like capture_btn.
@@ -505,6 +514,12 @@ void launcher_model_begin_capture_slot(LauncherModel* m, int b, int slot);
 // a keyboard scancode. Only meaningful on has_pad_binds consoles (Genesis) —
 // the UI never offers it elsewhere; a stray call is harmless (Esc cancels).
 void launcher_model_begin_pad_capture(LauncherModel* m, int b);
+void launcher_model_begin_assist_capture(LauncherModel* m, int action,
+                                         bool gamepad);
+void launcher_model_set_captured_key(LauncherModel* m, int scancode);
+void launcher_model_set_captured_pad(LauncherModel* m, int encoded_binding);
+void launcher_model_reset_player_bindings(LauncherModel* m, int player);
+void launcher_model_reset_assist_bindings(LauncherModel* m);
 void launcher_model_cancel_capture(LauncherModel* m);
 // ---- hotkey capture ----
 void launcher_model_begin_hk_capture(LauncherModel* m, LngHotkey h);

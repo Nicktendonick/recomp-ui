@@ -23,6 +23,19 @@ extern "C" {
 // consumer compiles this header from source (submodule pin), so the layout
 // change is absorbed by the consumer's normal rebuild on a pin bump.
 #define RECOMP_LAUNCHER_MAX_PLAYERS 4
+#define RECOMP_LAUNCHER_MAX_BINDINGS 24
+#define RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS 8
+
+/* Portable encoding used by host-owned controller bindings. Button and axis
+ * numbers are SDL's standard game-controller indices; zero remains unbound. */
+#define RECOMP_LAUNCHER_PAD_BUTTON(code) (1 + (code))
+#define RECOMP_LAUNCHER_PAD_AXIS(code, positive) \
+    (100 + ((code) * 2) + ((positive) ? 1 : 0))
+#define RECOMP_LAUNCHER_PAD_IS_BUTTON(value) ((value) > 0 && (value) < 100)
+#define RECOMP_LAUNCHER_PAD_IS_AXIS(value) ((value) >= 100)
+#define RECOMP_LAUNCHER_PAD_BUTTON_CODE(value) ((value) - 1)
+#define RECOMP_LAUNCHER_PAD_AXIS_CODE(value) (((value) - 100) / 2)
+#define RECOMP_LAUNCHER_PAD_AXIS_POSITIVE(value) (((value) - 100) & 1)
 
 // N64 Transfer Pak slots — one per controller port.
 #define RECOMP_LAUNCHER_MAX_TPAKS 4
@@ -126,6 +139,22 @@ typedef struct RecompLauncherCSettings {
     // In a window, the fixed aspect selects the initial size before live
     // resizing takes over. Adaptive + fullscreen ignores the fixed aspect.
     int  adaptive_view;       // bool: logical width follows host drawable aspect
+
+    // ---- optional host assist/cheat gate ---------------------------------
+    // A game that sets GameInfo.has_assist_tools exposes this value in a
+    // dedicated launcher view. The host decides which runtime actions it
+    // gates. Appended additively so existing consumers remain unchanged.
+    int  assist_tools;        // bool: host-defined assists/cheats are enabled
+
+    /* Optional host-consumed bindings. A GameInfo with settings_bindings=1
+     * exposes keyboard + standard-controller chips on the Controller page.
+     * Keyboard values are SDL scancodes; pad values use the encoding above. */
+    int player_key_bind[RECOMP_LAUNCHER_MAX_PLAYERS]
+                       [RECOMP_LAUNCHER_MAX_BINDINGS];
+    int player_pad_bind[RECOMP_LAUNCHER_MAX_PLAYERS]
+                       [RECOMP_LAUNCHER_MAX_BINDINGS];
+    int assist_key_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
+    int assist_pad_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
 } RecompLauncherCSettings;
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
@@ -339,6 +368,19 @@ typedef struct RecompLauncherCGameInfo {
      * copies the snapshot during initialization. ROM and save files are not
      * part of this structure and are never deleted. */
     const RecompLauncherCSettings* default_settings;
+
+    /* Optional top-level launcher sections. `has_assist_tools` exposes a
+     * dedicated opt-in page backed by Settings.assist_tools. `credits_text`
+     * exposes a read-only Credits page and remains host-owned UTF-8 text. */
+    int  has_assist_tools;
+    const char* assist_tools_note;
+    const char* credits_text;
+    /* Host-owned binding mode. The active console profile supplies player
+     * button names; assist_binding_labels supplies the optional global action
+     * names (for example Rewind and Fast-forward). */
+    int settings_bindings;
+    const char* const* assist_binding_labels;
+    int assist_binding_count;
 } RecompLauncherCGameInfo;
 
 // Returns: 0 = LAUNCH (boot out_rom_path with the edited *io),
