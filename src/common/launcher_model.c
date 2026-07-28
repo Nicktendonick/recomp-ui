@@ -135,6 +135,7 @@ void launcher_model_init(LauncherModel* m,
         m->num_renderers        = game->num_renderers;
         m->hide_rebind          = game->hide_rebind != 0;
         m->has_mouse_controls   = game->has_mouse_controls != 0;
+        m->has_gyro_controls    = game->has_gyro_controls != 0;
         m->netplay_supported    = game->netplay_supported != 0 && game->netplay != NULL;
         m->netplay              = game->netplay;
 #if RECOMP_UI_ENABLE_MODS
@@ -286,6 +287,12 @@ void launcher_model_init(LauncherModel* m,
         } else {
             m->s.mouse_sensitivity = clampf(m->s.mouse_sensitivity, 0.01f, 0.50f);
         }
+    }
+    if (m->has_gyro_controls) {
+        m->s.gyro_sensitivity =
+            m->s.gyro_sensitivity > 0.0f
+                ? clampf(m->s.gyro_sensitivity, 0.25f, 4.00f)
+                : 1.00f;
     }
     // ---- widescreen extra-cells (video.widescreen_cells consoles, e.g.
     // Genesis): 0 = unset host -> the engine default of 8; else clamp 1..16. ----
@@ -1194,6 +1201,11 @@ void launcher_model_toggle_mouse_invert_y(LauncherModel* m) {
 void launcher_model_set_mouse_bind(LauncherModel* m, int which, int button_index) {
     if (which < 0 || which > 2) return;
     m->s.mouse_bind[which] = (button_index < 0) ? -1 : button_index;
+}
+
+void launcher_model_set_gyro_sensitivity(LauncherModel* m, float value) {
+    if (!m || !m->has_gyro_controls) return;
+    m->s.gyro_sensitivity = clampf(value, 0.25f, 4.00f);
 }
 
 void launcher_model_request_skip_toggle(LauncherModel* m) {

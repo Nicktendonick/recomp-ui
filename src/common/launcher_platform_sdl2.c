@@ -27,6 +27,8 @@ bool launcher_platform_open(LauncherPlatform* p, const char* title,
     SDL_SetHint("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2");
     SDL_SetHint("SDL_WINDOWS_DPI_SCALING", "0");
 #endif
+    SDL_SetHintWithPriority("SDL_JOYSTICK_HIDAPI_PS5", "1",
+                            SDL_HINT_DEFAULT);
 #ifdef LNG_GLES2
     // The host links ANGLE's libGLESv2/libEGL; SDL must create the context
     // through that same ES library (via EGL), or the directly-linked ANGLE
@@ -34,7 +36,8 @@ bool launcher_platform_open(LauncherPlatform* p, const char* title,
     // Must be set BEFORE SDL_Init. Mirrors gb-recompiled's own platform init.
     SDL_SetHint(SDL_HINT_OPENGL_ES_DRIVER, "1");
 #endif
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {   // SDL2: 0 == success
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER |
+                 SDL_INIT_SENSOR) != 0) {   // SDL2: 0 == success
         fprintf(stderr, "[launcher] SDL_Init failed: %s\n", SDL_GetError());
         return false;
     }

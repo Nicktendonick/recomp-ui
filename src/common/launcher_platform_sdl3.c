@@ -10,7 +10,8 @@ bool launcher_platform_open(LauncherPlatform* p, const char* title,
     SDL_zerop(p);
 
     SDL_SetMainReady();   // we built with SDL_MAIN_HANDLED (real main() is entry)
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+    SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS5", "1");
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_SENSOR)) {
         fprintf(stderr, "[launcher] SDL_Init failed: %s\n", SDL_GetError());
         return false;
     }

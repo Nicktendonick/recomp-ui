@@ -385,6 +385,11 @@ struct RecompLauncherCSettings {
     // transient output and is cleared by the launcher when it initializes.
     char netplay_player_name[64];
     RecompLauncherCNetplayLaunch netplay_launch;
+
+    // ---- controller motion (GameInfo.has_gyro_controls games) ------------
+    // Multiplier applied by the host to a controller's angular-rate sensor.
+    // 0 means unset and is seeded to 1.0 by the launcher model.
+    float gyro_sensitivity;    // 0.25..4.00, 1.00 = game default
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
@@ -613,6 +618,12 @@ typedef struct RecompLauncherCGameInfo {
      * field. Features are the primary user-facing surface; packages are the
      * secondary installation/maintenance surface. */
     const RecompLauncherCModProvider* mods;
+
+    /* ---- controller motion ----------------------------------------------
+     * 1 adds a MOTION card to the Controller configuration page with a gyro
+     * sensitivity slider. The launcher only edits Settings.gyro_sensitivity;
+     * discovery, sensor selection, and axis mapping remain host-owned. */
+    int has_gyro_controls;
 } RecompLauncherCGameInfo;
 
 // Returns: 0 = LAUNCH (boot out_rom_path with the edited *io),

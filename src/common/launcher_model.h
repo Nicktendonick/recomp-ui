@@ -194,6 +194,7 @@ typedef struct {
     // _invert_x / _invert_y / _bind[]), like audio_device. False => none of
     // the mouse surface composes and behavior is unchanged for every game.
     bool has_mouse_controls;
+    bool has_gyro_controls;
     bool netplay_supported;
     const RecompLauncherCNetplayCallbacks* netplay;
     const RecompLauncherCModProvider* mods;
@@ -522,6 +523,10 @@ void launcher_model_toggle_mouse_invert_y(LauncherModel* m);
 // the active profile's ControllerSpec.buttons[] (0..button_count-1), or -1 for
 // none. Out-of-range `which` is a no-op.
 void launcher_model_set_mouse_bind(LauncherModel* m, int which, int button_index);
+
+// ---- controller motion (has_gyro_controls games only) ---------------------
+// Set the host-owned angular-rate multiplier; clamped to [0.25, 4.00].
+void launcher_model_set_gyro_sensitivity(LauncherModel* m, float value);
 
 // ---- skip-on-boot (footer switch + confirm modal) ----
 void launcher_model_request_skip_toggle(LauncherModel* m); // opens modal when enabling
