@@ -43,6 +43,8 @@ typedef enum {
     LNG_VIEW_CONTROLLER,
     LNG_VIEW_NETPLAY,
     LNG_VIEW_MODS,
+    LNG_VIEW_ASSIST_TOOLS,
+    LNG_VIEW_CREDITS,
 } LngView;
 
 typedef enum {
@@ -291,6 +293,12 @@ typedef struct {
     bool adaptive_view_supported;
     const char* const* display_layout_labels;
     int  num_display_layouts;
+    bool has_assist_tools;
+    const char* assist_tools_note;
+    bool settings_bindings;
+    const char* const* assist_binding_labels;
+    int assist_binding_count;
+    const char* credits_text;
     // Number of players the GAME actually supports. Mega Man X is 1-player, so
     // the launcher must not show a dead Player 2 row. Games that support 2
     // report 2 and the second row appears. Driven by data, never hardcoded.
@@ -483,6 +491,7 @@ typedef struct {
     bool      capture_mouse_armed;
     bool      camera_capturing;  // capturing an enabled Voxel camera key
     int       capture_camera;    // LNG_CAMERA_* index
+    bool      capture_assist;      // capture_btn indexes assist bindings
     bool      hk_capturing;      // capturing a system hotkey
     LngHotkey capture_hk;
     // Per-player bind-label display strings, indexed like capture_btn.
@@ -807,6 +816,12 @@ void launcher_model_begin_pad_capture(LauncherModel* m, int b);
 void launcher_model_begin_map_all(LauncherModel* m);
 // After a successful pad capture during Map All: advance or finish.
 void launcher_model_map_all_advance(LauncherModel* m);
+void launcher_model_begin_assist_capture(LauncherModel* m, int action,
+                                         bool gamepad);
+void launcher_model_set_captured_key(LauncherModel* m, int scancode);
+void launcher_model_set_captured_pad(LauncherModel* m, int encoded_binding);
+void launcher_model_reset_player_bindings(LauncherModel* m, int player);
+void launcher_model_reset_assist_bindings(LauncherModel* m);
 void launcher_model_cancel_capture(LauncherModel* m);
 // ---- hotkey capture ----
 void launcher_model_begin_hk_capture(LauncherModel* m, LngHotkey h);
