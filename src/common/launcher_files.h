@@ -8,8 +8,7 @@
 // nothing on Linux and macOS.
 //
 // Deliberately SDL-version agnostic: it does not depend on SDL3's
-// SDL_ShowOpenFileDialog, so it works identically on the SDL2 build we ship now
-// and the SDL3 build that follows.
+// SDL_ShowOpenFileDialog, so it works identically on SDL2 and SDL3.
 
 #ifndef LAUNCHER_NG_FILES_H
 #define LAUNCHER_NG_FILES_H

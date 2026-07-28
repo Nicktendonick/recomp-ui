@@ -65,8 +65,9 @@ recomp_target_launcher_ui(my-game-runtime
 keybinds, tinyfiledialogs, an IPS applier, and a PS1 memcard formatter, and
 stages its fonts/images next to your exe. No network / FetchContent — builds
 offline. It defines `RECOMP_LAUNCHER` on the target and uses SDL3 + OpenGL by
-default. Consumers can explicitly select the SDL2 compatibility path with
-`-DSNESRECOMP_SDL_BACKEND=SDL2`.
+default. SNESRecomp consumers select the SDL2 compatibility path with
+`-DSNESRECOMP_SDL_BACKEND=SDL2`; generic hosts that do not set that variable
+can select their platform backend directly with `RECOMP_UI_SDL3`.
 
 The schema-driven Mods view is developer opt-in and inert by default. Enable it
 with `-DRECOMP_UI_ENABLE_MODS=ON` and provide a non-null

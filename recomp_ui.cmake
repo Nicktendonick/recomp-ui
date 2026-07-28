@@ -67,8 +67,9 @@ function(recomp_target_launcher_ui TGT)
     # 3 & Knuckles builds three modes side by side) and each needs its own
     # box art file — pairs with GameInfo.boxart_path the runtime reads.
     # HOST_IMGUI: the host target already compiles Dear ImGui (imgui.cpp +
-    # imgui_impl_sdl2/opengl3) — reuse that ONE copy instead of linking a
-    # second, which would be a duplicate-symbol / ODR clash. IMGUI_DIR is the
+    # imgui_impl_sdl2 or imgui_impl_sdl3 plus opengl3) — reuse that ONE copy
+    # instead of linking a second, which would be a duplicate-symbol / ODR
+    # clash. IMGUI_DIR is the
     # host's ImGui source dir (must contain imgui.h + backends/imgui_impl_*.h)
     # that recomp-ui's own backend glue (launcher_imgui.cpp) compiles against.
     # Used by gb-recompiled, whose runtime already vendors + uses ImGui for its
@@ -185,7 +186,7 @@ function(recomp_target_launcher_ui TGT)
     # OpenGL: the ImGui GL3 backend + launcher_gl.c need the system GL library.
     # Link it here so a host gets it from this ONE call (self-contained) rather
     # than having to remember to link OpenGL itself — mirrors the standalone
-    # CMakeLists.txt. SDL2 is still the host's to provide (its provenance varies:
+    # CMakeLists.txt. SDL is still the host's to provide (its provenance varies:
     # vendored, find_package, etc.); GL is a uniform system lib, so it lives here.
     if(WIN32)
         # ws2_32: launcher_udp_port.c exclusive UDP bind probes for host lobby.
