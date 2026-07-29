@@ -309,6 +309,12 @@ typedef struct RecompLauncherCModProvider {
      * extension includes its leading dot, e.g. ".gbamod". */
     const char* archive_extension;
     const char* archive_description;
+    /* Optional. Netplay lobbies (hosted / LAN / direct) call this instead of
+     * commit() so matches stay vanilla. Must clear any in-session mod plan
+     * without mutating the user's persisted offline selection. NULL means
+     * "skip commit entirely" (no mods applied for that launch). Appended for
+     * ABI stability — zero-init leaves it NULL. */
+    int (*commit_netplay)(void* ctx, const char* image_path);
 } RecompLauncherCModProvider;
 
 // Plain-C mirror of the launcher's internal settings (bools as int).
@@ -657,7 +663,10 @@ typedef struct RecompLauncherCGameInfo {
      * dashboard. Cart-only games (has_bios=0) only prompt for a ROM.
      *
      * bios_verify (optional): host checks BIOS size/CRC. Return 1 and fill
-     * `out` (ok/warn/detail). NULL => path non-empty is enough.
+     * `out` (ok/warn/detail). Called with an empty path when the player has
+     * not chosen a dump — host should accept that when a bundled BIOS
+     * (e.g. OpenBIOS) is available, or set ok=0 when a retail dump is
+     * required. NULL => empty path = bundled OK; non-empty path must exist.
      *
      * prepare_disc (optional): convert a raw dump into a playable image.
      * Blocking host callback; the UI shows a busy state while it runs.

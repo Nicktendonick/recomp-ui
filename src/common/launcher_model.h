@@ -326,12 +326,14 @@ typedef struct {
     char      netplay_status[160];
     bool      netplay_lobby_settings_open;
     int       netplay_lobby_input_delay; /* UI cache; engine clamps 2..20 */
+    /* When false (default), host picks delay from max peer RTT at match start.
+     * When true, netplay_lobby_input_delay is used as-is. */
+    bool      netplay_manual_input_delay;
     /* STUN / host external_ip cache for LAN lobby Public IP field. */
     char      netplay_public_ip[64];
     bool      netplay_public_ip_resolved;
-    /* Lobby Settings cache: Force Server Input Relay (server lobbies only). */
+    /* Kept for host ABI / match_caps defaults (no longer exposed in Lobby Settings). */
     bool      netplay_force_input_relay;
-    /* Lobby Settings cache: Force TURN / ICE relay-only (server lobbies only). */
     bool      netplay_force_turn;
     /* Host Lobby: desired max seats (2..min(8, game player_count)). */
     int       netplay_host_max_players;
@@ -557,7 +559,8 @@ void launcher_model_set_mouse_bind(LauncherModel* m, int which, int button_index
 bool launcher_model_can_finish_setup(const LauncherModel* m);
 // True when BIOS (if required) and ROM/disc are ready to launch (incl. fingerprint).
 bool launcher_model_can_launch(const LauncherModel* m);
-// Re-run bios_verify_cb against m->s.bios_path (or clear ok when empty).
+// Re-run bios_verify_cb against m->s.bios_path. Empty path means "bundled
+// BIOS" — OK unless the host verifier refuses "".
 void launcher_model_refresh_bios_status(LauncherModel* m);
 // Kick a host prepare_disc job on a background thread. No-op if no callback
 // or a job is already running. On success adopts the resulting disc path.
