@@ -82,6 +82,9 @@ with `-DRECOMP_UI_ENABLE_MODS=ON` and provide a non-null
 `RecompLauncherCGameInfo.mods` provider; both gates are required. The provider
 ABI remains available in the public header so toggling the build option does not
 change the game-info struct layout. The launcher never enables mods on its own.
+Netplay launches (hosted lobby, LAN, and direct) never call `commit()`; they use
+optional `commit_netplay()` when provided, otherwise skip mods so matches stay
+vanilla.
 
 ### 3. Call it from your `main()`
 

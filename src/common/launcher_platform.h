@@ -58,7 +58,15 @@ void launcher_platform_present(LauncherPlatform* p);
 
 // Tear down GL context + window and reset GL attributes, so the game runtime's
 // SDL layer starts from a clean slate afterward.
+// By default this also calls SDL_Quit(). Hosts that already initialized SDL and
+// will continue using it after the launcher (typical in-process game boot)
+// should call launcher_platform_set_quit_sdl(false) first so subsystems stay up.
 void launcher_platform_close(LauncherPlatform* p);
+
+// When quit_sdl is false, launcher_platform_close destroys only the launcher
+// window/GL context and leaves SDL initialized for the host. Default is true
+// (standalone launcher harnesses expect a full teardown).
+void launcher_platform_set_quit_sdl(bool quit_sdl);
 
 #ifdef __cplusplus
 }

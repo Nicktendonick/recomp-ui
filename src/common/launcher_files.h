@@ -1,11 +1,10 @@
 // launcher_files.h — platform-agnostic ROM picker (shared core).
 //
-// Uses tinyfiledialogs (zlib) so ONE implementation gets a real native picker
-// on Windows (GetOpenFileName), macOS (NSOpenPanel/osascript) and Linux
-// (zenity / kdialog / yad / qarma). This replaces the old launcher's
-// pick_file(), which was a Win32-only implementation with a
-// `return false;` stub on every other platform — i.e. "Change ROM" silently did
-// nothing on Linux and macOS.
+// Native pickers:
+//   Windows / macOS — tinyfiledialogs (GetOpenFileName / osascript)
+//   Linux — posix_spawn of zenity or kdialog (avoids tinyfd's popen/vfork,
+//           which SIGSEGVs from the multithreaded SDL UI thread)
+// Falls back to tinyfd on Linux only if neither zenity nor kdialog is installed.
 //
 // Deliberately SDL-version agnostic: it does not depend on SDL3's
 // SDL_ShowOpenFileDialog, so it works identically on SDL2 and SDL3.

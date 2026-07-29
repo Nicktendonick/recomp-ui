@@ -19,6 +19,7 @@ extern "C" {
 typedef struct {
     uint32_t id;        // SDL_JoystickID (stable while connected)
     char     name[64];  // e.g. "PS5 Controller", "Xbox Series Controller"
+    char     guid[40];  // SDL_JoystickGetGUIDString (persists across reconnects)
     int      has_gyro;  // bool: angular-rate sensor opened and enabled
     float    gyro_z;    // radians/second around the controller face normal
 } LauncherPad;

@@ -71,6 +71,11 @@ int launcher_input_poll(LauncherPad* out, int max, int enable_gyro) {
             out[n].id = (uint32_t)ids[i];
             const char* nm = SDL_GetGamepadNameForID(ids[i]);
             snprintf(out[n].name, sizeof(out[n].name), "%s", nm ? nm : "Gamepad");
+            out[n].guid[0] = '\0';
+            {
+                SDL_GUID g = SDL_GetGamepadGUIDForID(ids[i]);
+                SDL_GUIDToString(g, out[n].guid, (int)sizeof(out[n].guid));
+            }
             OpenPad* opened = find_open(out[n].id);
             if (!opened) {
                 opened = free_open_slot();
@@ -124,6 +129,11 @@ int launcher_input_poll(LauncherPad* out, int max, int enable_gyro) {
         out[n].id = (uint32_t)inst;
         const char* nm = SDL_GameControllerNameForIndex(i);
         snprintf(out[n].name, sizeof(out[n].name), "%s", nm ? nm : "Gamepad");
+        out[n].guid[0] = '\0';
+        {
+            SDL_JoystickGUID g = SDL_JoystickGetDeviceGUID(i);
+            SDL_JoystickGetGUIDString(g, out[n].guid, (int)sizeof(out[n].guid));
+        }
         OpenPad* opened = find_open(out[n].id);
         if (!opened) {
             opened = free_open_slot();
