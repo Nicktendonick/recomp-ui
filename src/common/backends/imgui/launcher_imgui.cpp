@@ -2570,12 +2570,28 @@ void np_refresh_lobby_list(LauncherModel* m) {
 static void mod_note_error(LauncherModel* m);
 static bool mod_commit_launch(LauncherModel* m);
 
+/* Netplay must stay vanilla while mod sync is unproven. Prefer the optional
+ * provider commit_netplay hook (clears an in-session plan without touching
+ * offline selections); otherwise skip mod commit entirely. */
+static bool mod_commit_netplay_launch(LauncherModel* m) {
+    if (!m) return true;
+    const auto* mods = m->mods;
+    if (!mods) return true;
+    if (mods->commit_netplay) {
+        if (mods->commit_netplay(mods->ctx, launcher_model_rom_path(m)))
+            return true;
+        mod_note_error(m);
+        return false;
+    }
+    return true;
+}
+
 void np_try_launch(LauncherModel* m) {
     const auto* np = np_cb(m);
     if (!np || !np->fill_launch) return;
     RecompLauncherCNetplayLaunch launch{};
     if (!np->fill_launch(np->ctx, &launch) || !launch.enabled) return;
-    if (mod_commit_launch(m)) {
+    if (mod_commit_netplay_launch(m)) {
         m->s.netplay_launch = launch;
         if (np->clear_launch_pending) np->clear_launch_pending(np->ctx);
         m->action = LNG_ACTION_LAUNCH;
@@ -2789,6 +2805,22 @@ void draw_netplay_player_modal(LauncherModel* m) {
         ImGui::EndDisabled();
         ImGui::EndPopup();
     }
+}
+
+/* Delay-sync only (no rollback / prediction runway). At ~60 Hz, one frame is
+ * ~16.67 ms, so one-way RTT coverage is ceil(RTT_ms / 33.33) frames. Add a
+ * jitter/TURN pad — Battleship's lower tiers assume prediction absorbs the
+ * rest of the path and are too aggressive here. */
+static int np_delay_frames_from_rtt_ms(int rtt_ms) {
+    if (rtt_ms < 0) rtt_ms = 0;
+    /* ceil(rtt / 33.333) via integer ceil: (rtt + 32) / 33, floor at 1. */
+    int one_way_frames = (rtt_ms + 32) / 33;
+    if (one_way_frames < 1) one_way_frames = 1;
+    const int kJitterPad = 3; /* ICE/TURN variance + scheduling slack */
+    int delay = one_way_frames + kJitterPad;
+    if (delay < 3) delay = 3;   /* delay-only floor (above Battleship's D=2) */
+    if (delay > 20) delay = 20;
+    return delay;
 }
 
 static int np_game_max_players(const LauncherModel* m) {
@@ -3363,6 +3395,13 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
+#if RECOMP_UI_ENABLE_MODS
+    if (m->mods) {
+        ImGui::TextColored(col(th.text_muted),
+                           "Mods are disabled for netplay (vanilla match).");
+        ImGui::Spacing();
+    }
+#endif
     if (m->netplay_status[0]) {
         ImGui::TextColored(col(th.warn), "%s", m->netplay_status);
         ImGui::Spacing();
@@ -3612,6 +3651,23 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
             const bool can_start = seated_players >= 2;
             ImGui::BeginDisabled(!can_start);
             if (ImGui::Button(u8"\u25B6 Play", ImVec2(play_w, btn_h))) {
+                /* Auto input delay (default): host sets D from the highest
+                 * seated peer RTT before arming start. Manual mode keeps the
+                 * Lobby Settings value. See np_delay_frames_from_rtt_ms. */
+                if (!m->netplay_manual_input_delay && np->input_delay_set) {
+                    int max_rtt = 0;
+                    const int nmem = np->member_count ? np->member_count(np->ctx) : 0;
+                    for (int mi = 0; mi < nmem; ++mi) {
+                        RecompLauncherCNetplayMember mem{};
+                        if (!np->member_get || !np->member_get(np->ctx, mi, &mem))
+                            continue;
+                        if (mem.is_host) continue;
+                        if (mem.latency_ms > max_rtt) max_rtt = mem.latency_ms;
+                    }
+                    const int delay = np_delay_frames_from_rtt_ms(max_rtt);
+                    m->netplay_lobby_input_delay = delay;
+                    (void)np->input_delay_set(np->ctx, delay);
+                }
                 if (np->set_ready)
                     (void)np->set_ready(np->ctx, 1);
                 const int rc = np->request_start
@@ -3645,118 +3701,71 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::OpenPopup("Lobby Settings");
     if (ImGui::BeginPopupModal("Lobby Settings", &m->netplay_lobby_settings_open,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("Input Delay");
+        ImGui::TextUnformatted("Manual Input Delay");
         ImGui::SameLine();
         ImGui::TextColored(col(th.text_muted), "(frames)");
-        ImGui::SetNextItemWidth(px(140));
-        int delay = m->netplay_lobby_input_delay;
-        if (ImGui::InputInt("##lobby_input_delay", &delay, 1, 1)) {
-            if (delay < 2) delay = 2;
-            if (delay > 20) delay = 20;
-            m->netplay_lobby_input_delay = delay;
-            if (np->input_delay_set)
-                (void)np->input_delay_set(np->ctx, delay);
-        }
-        if (ImGui::IsItemDeactivatedAfterEdit()) {
-            delay = m->netplay_lobby_input_delay;
-            if (delay < 2) delay = 2;
-            if (delay > 20) delay = 20;
-            m->netplay_lobby_input_delay = delay;
-            if (np->input_delay_set)
-                (void)np->input_delay_set(np->ctx, delay);
-        }
-        ImGui::SameLine();
         {
-            const float help_sz = ImGui::GetFrameHeight();
-            if (ImGui::Button("?##input_delay_help", ImVec2(help_sz, help_sz))) {
-            }
+            bool manual = m->netplay_manual_input_delay;
+            if (ImGui::Checkbox("##manual_input_delay", &manual))
+                m->netplay_manual_input_delay = manual;
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
                 ImGui::BeginTooltip();
                 ImGui::PushTextWrapPos(px(360));
                 ImGui::TextUnformatted(
-                    "How many frames ahead every player must buffer inputs "
-                    "(delay-sync).\n\n"
-                    "Pick based on the highest peer latency shown in the lobby:\n"
-                    "  ~0–40 ms  → 2–3 frames\n"
-                    "  ~40–80 ms → 3–4 frames\n"
-                    "  ~80–120 ms → 4–6 frames\n"
-                    "  120+ ms → 6+ frames\n\n"
-                    "Too low causes stalls/rollback waits when packets arrive "
-                    "late. Too high adds input lag for everyone. Start from the "
-                    "worst peer RTT and raise if anyone hitching.");
+                    "Off (default): at match start the host sets input delay "
+                    "from the highest peer latency in the lobby.\n\n"
+                    "On: use the frame value to the right for every player.");
                 ImGui::PopTextWrapPos();
                 ImGui::EndTooltip();
             }
-        }
-        ImGui::Spacing();
-        {
-            const bool lan_room = m->netplay_local_room;
-            bool force_turn = !lan_room && m->netplay_force_turn;
-            ImGui::BeginDisabled(lan_room || !np->force_turn_set);
-            if (ImGui::Checkbox("Force TURN for UDP", &force_turn)) {
-                m->netplay_force_turn = force_turn;
-                if (np->force_turn_set)
-                    (void)np->force_turn_set(np->ctx, force_turn ? 1 : 0);
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!m->netplay_manual_input_delay);
+            ImGui::SetNextItemWidth(px(140));
+            int delay = m->netplay_lobby_input_delay;
+            if (ImGui::InputInt("##lobby_input_delay", &delay, 1, 1)) {
+                if (delay < 2) delay = 2;
+                if (delay > 20) delay = 20;
+                m->netplay_lobby_input_delay = delay;
+                if (np->input_delay_set)
+                    (void)np->input_delay_set(np->ctx, delay);
             }
-            ImGui::EndDisabled();
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                delay = m->netplay_lobby_input_delay;
+                if (delay < 2) delay = 2;
+                if (delay > 20) delay = 20;
+                m->netplay_lobby_input_delay = delay;
+                if (np->input_delay_set)
+                    (void)np->input_delay_set(np->ctx, delay);
+            }
             ImGui::SameLine();
             {
                 const float help_sz = ImGui::GetFrameHeight();
-                if (ImGui::Button("?##force_turn_help", ImVec2(help_sz, help_sz))) {
+                if (ImGui::Button("?##input_delay_help", ImVec2(help_sz, help_sz))) {
                 }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
                     ImGui::BeginTooltip();
                     ImGui::PushTextWrapPos(px(360));
                     ImGui::TextUnformatted(
-                        "Forces ICE to use TURN relay candidates only "
-                        "(typ relay) for every peer in this lobby.\n\n"
-                        "On by default for online lobbies (CGNAT / mobile "
-                        "hotspot). Uncheck only on a known-good direct path.\n\n"
-                        "Requires Coturn credentials from the lobby server "
-                        "(or PSX_NET_TURN_* env overrides).\n\n"
-                        "Adds some latency versus a good direct path, but is "
-                        "much more reliable across hard NATs.\n\n"
-                        "Server-hosted lobbies only (not LAN/Direct IP).");
+                        "How many frames ahead every player must buffer inputs "
+                        "(delay-sync). There is no rollback or prediction "
+                        "runahead — delay is the only lever against latency.\n\n"
+                        "Auto (checkbox off) covers one-way RTT at 60 Hz plus a "
+                        "3-frame jitter/TURN pad:\n"
+                        "  D = ceil(RTT_ms / 33.3) + 3  (min 3, max 20)\n\n"
+                        "Examples (highest peer RTT):\n"
+                        "  ~40 ms  → 5 frames\n"
+                        "  ~80 ms  → 6 frames\n"
+                        "  ~120 ms → 7 frames\n"
+                        "  ~160 ms → 8 frames\n"
+                        "  ~200 ms → 10 frames\n"
+                        "  ~280 ms → 12 frames\n\n"
+                        "Too low causes stalls when packets arrive late. Too "
+                        "high adds input lag for everyone.");
                     ImGui::PopTextWrapPos();
                     ImGui::EndTooltip();
                 }
             }
-        }
-        ImGui::Spacing();
-        {
-            const bool lan_room = m->netplay_local_room;
-            bool force_relay = !lan_room && m->netplay_force_input_relay;
-            ImGui::BeginDisabled(lan_room || !np->force_input_relay_set);
-            if (ImGui::Checkbox("Enable Server Input Relay", &force_relay)) {
-                m->netplay_force_input_relay = force_relay;
-                if (np->force_input_relay_set)
-                    (void)np->force_input_relay_set(np->ctx, force_relay ? 1 : 0);
-            }
             ImGui::EndDisabled();
-            ImGui::SameLine();
-            const float help_sz = ImGui::GetFrameHeight();
-            if (ImGui::Button("?##input_relay_help", ImVec2(help_sz, help_sz))) {
-            }
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-                ImGui::BeginTooltip();
-                ImGui::PushTextWrapPos(px(360));
-                ImGui::TextUnformatted(
-                    "Routes controller inputs through the lobby server "
-                    "(recomp-net-server) instead of a direct link.\n\n"
-                    "P2P is only available for 2-player lobbies. For 3+ players "
-                    "host-as-relay is the default: the game host fans inputs "
-                    "out to every guest.\n\n"
-                    "Enable this on any lobby size if NAT/firewall blocks "
-                    "direct or host-as-relay links. It usually adds a little "
-                    "latency versus a good direct connection.\n\n"
-                    "Server-hosted lobbies only (not LAN/Direct IP).");
-                ImGui::PopTextWrapPos();
-                ImGui::EndTooltip();
-            }
-            if (lan_room) {
-                ImGui::TextColored(col(th.text_muted),
-                                   "Not used for LAN/Direct IP lobbies.");
-            }
         }
         ImGui::Spacing();
         if (ImGui::Button("Close", ImVec2(px(120), 0))) {
@@ -4813,9 +4822,8 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
         if (mod_commit_launch(m))
             m->action = LNG_ACTION_LAUNCH;
     } else if (!can_play && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Select a valid %s%s first",
-                          m->rom_noun ? m->rom_noun : "ROM",
-                          m->has_bios ? " and BIOS" : "");
+        ImGui::SetTooltip("Select a valid %s first",
+                          m->rom_noun ? m->rom_noun : "ROM");
     }
     if (!can_play && ImGui::IsItemClicked())
         m->setup_wizard_open = true;
@@ -4839,31 +4847,41 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     const char* game = (m->game_name && m->game_name[0]) ? m->game_name : "this game";
     ImGui::TextColored(col(th.accent), "Setup required");
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
-    ImGui::TextColored(col(th.text_muted),
-        "%s needs a playable %s%s before you can launch. Pick your files below "
-        "(you must legally own these dumps).",
-        game, noun, m->has_bios ? " and PlayStation BIOS" : "");
+    if (m->has_bios) {
+        ImGui::TextColored(col(th.text_muted),
+            "%s needs a playable %s before you can launch. This build includes "
+            "a bundled BIOS (OpenBIOS) by default — a retail SCPH1001.BIN dump "
+            "is optional. Pick your %s below (you must legally own these dumps).",
+            game, noun, noun);
+    } else {
+        ImGui::TextColored(col(th.text_muted),
+            "%s needs a playable %s before you can launch. Pick your file below "
+            "(you must legally own this dump).",
+            game, noun);
+    }
     ImGui::PopTextWrapPos();
     ImGui::Dummy(ImVec2(0, px(10)));
 
     const bool busy = m->setup_preparing;
     if (busy) ImGui::BeginDisabled();
 
-    /* ---- BIOS (PSX / GBA) ---- */
+    /* ---- BIOS (PSX / GBA): empty = bundled; Browse for optional retail ---- */
     if (m->has_bios) {
-        ImGui::TextUnformatted("1. PlayStation BIOS");
+        const bool has_pick = m->s.bios_path[0] != 0;
+        ImGui::TextUnformatted("1. PlayStation BIOS (optional)");
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
         ImGui::TextColored(col(th.text_muted),
-            "Usually SCPH1001.BIN — exactly 512 KB. Dump from your own console.");
+            "Default: bundled OpenBIOS. Optionally browse for your own "
+            "SCPH1001.BIN (exactly 512 KB, dumped from your console).");
         ImGui::PopTextWrapPos();
-        const char* bp = m->s.bios_path[0] ? m->s.bios_path : "(none selected)";
+        const char* bp = has_pick ? m->s.bios_path : "Bundled BIOS (OpenBIOS)";
         char belided[220];
-        elide_left(bp, px(360), belided, sizeof(belided));
+        elide_left(bp, px(300), belided, sizeof(belided));
         ImGui::AlignTextToFramePadding();
         ImGui::TextColored(col(m->setup_bios_ok ? th.good : th.warn), "%s",
                            m->setup_bios_ok ? "OK" : "Needed");
         ImGui::SameLine();
-        ImGui::TextColored(col(th.text), "%s", belided);
+        ImGui::TextColored(col(has_pick ? th.text : th.text_muted), "%s", belided);
         ImGui::SameLine();
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(12), px(6)));
         if (ImGui::Button("Browse BIOS##setup", ImVec2(px(120), px(32)))) {
@@ -4873,6 +4891,14 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
                                    kBiosPatterns, 2, "BIOS image (.bin .rom)",
                                    buf, sizeof(buf)))
                 launcher_model_set_bios_path(m, buf);
+        }
+        if (has_pick) {
+            ImGui::SameLine();
+            if (ImGui::Button("Use bundled##setup", ImVec2(px(120), px(32))))
+                launcher_model_set_bios_path(m, "");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Clear the retail BIOS path and use the "
+                                  "bundled OpenBIOS included with this build.");
         }
         ImGui::PopStyleVar();
         if (m->setup_bios_detail[0]) {

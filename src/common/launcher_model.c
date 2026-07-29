@@ -190,8 +190,9 @@ void launcher_model_init(LauncherModel* m,
     m->netplay_public_ip_resolved = false;
     m->netplay_lobby_settings_open = false;
     m->netplay_lobby_input_delay = 2;
+    m->netplay_manual_input_delay = false; /* auto from max peer RTT at launch */
     m->netplay_force_input_relay = false;
-    /* Default on for online lobbies (CGNAT); host can uncheck in Lobby Settings. */
+    /* Default on for online lobbies (CGNAT); not exposed in Lobby Settings. */
     m->netplay_force_turn = true;
     {
         int max_p = m->player_count > 0 ? m->player_count : 2;
@@ -884,7 +885,33 @@ void launcher_model_refresh_bios_status(LauncherModel* m) {
         m->setup_bios_ok = true;
         return;
     }
-    if (!m->s.bios_path[0]) return;
+    /* Empty path = use the BIOS this build ships with (OpenBIOS / bundled).
+     * Host bios_verify("", ...) may refuse that for titles that require a
+     * retail dump; otherwise empty is OK — matching Settings → BIOS. */
+    if (!m->s.bios_path[0]) {
+        if (m->bios_verify_cb) {
+            RecompLauncherCBiosVerify bv;
+            memset(&bv, 0, sizeof(bv));
+            if (!m->bios_verify_cb("", &bv)) {
+                safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
+                          "BIOS verification failed.");
+                return;
+            }
+            m->setup_bios_ok = bv.ok != 0;
+            m->setup_bios_warn = bv.warn != 0;
+            if (bv.detail[0])
+                safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
+                          bv.detail);
+            else if (m->setup_bios_ok)
+                safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
+                          "Using bundled BIOS.");
+            return;
+        }
+        m->setup_bios_ok = true;
+        safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
+                  "Using bundled BIOS.");
+        return;
+    }
     if (!m->bios_verify_cb) {
         /* No host verifier: path non-empty is enough. */
         FILE* f = fopen(m->s.bios_path, "rb");
