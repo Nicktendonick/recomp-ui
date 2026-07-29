@@ -234,6 +234,10 @@ void apply_scale(const LauncherTheme& th, float scale, const char* font_path,
     style.WindowPadding  = ImVec2(th.spacing_lg, th.spacing_lg);
     style.FramePadding   = ImVec2(th.spacing_md, th.spacing_sm);
     style.ItemSpacing    = ImVec2(th.spacing_md, th.spacing_sm);
+#if defined(__ANDROID__)
+    style.TouchExtraPadding = ImVec2(5.0f, 5.0f);
+    style.ScrollbarSize = 24.0f;
+#endif
     style.ChildBorderSize = 1.0f;
     style.FrameBorderSize = 1.0f;   // controls get a visible outline
     style.Colors[ImGuiCol_WindowBg]        = col(th.background);
@@ -2354,6 +2358,99 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
                 }
                 ImGui::PopID();
             }
+        } end_panel();
+    }
+
+    // MOTION card (opt-in): the host owns controller discovery and axis
+    // mapping; recomp-ui owns only the portable sensitivity setting.
+    if (m->has_gyro_controls && p == 0) {
+        if (begin_panel("cfg_motion", 0)) {
+            eyebrow("MOTION");
+            row_label("Gyro sensitivity", th);
+            ImGui::SetNextItemWidth(px(200));
+            float sens = m->s.gyro_sensitivity;
+            if (ImGui::SliderFloat("##gyrosens", &sens, 0.25f, 4.00f, "%.2fx"))
+                launcher_model_set_gyro_sensitivity(m, sens);
+
+            // Prefer the explicitly selected Player 1 pad; while the source
+            // is still Keyboard, preview the first connected gyro-capable pad
+            // so motion can be verified before changing the source dropdown.
+            const LauncherPad* motion_pad = nullptr;
+            if (m->s.player_src[p] == 2 && m->player_pad_id[p]) {
+                for (int i = 0; i < g_pad_count; ++i)
+                    if (g_pads[i].id == m->player_pad_id[p]) {
+                        motion_pad = &g_pads[i];
+                        break;
+                    }
+            } else {
+                for (int i = 0; i < g_pad_count; ++i)
+                    if (g_pads[i].has_gyro) {
+                        motion_pad = &g_pads[i];
+                        break;
+                    }
+            }
+
+            const float rate = motion_pad && motion_pad->has_gyro
+                                 ? motion_pad->gyro_z : 0.0f;
+            // Match gbarecomp's PC mapping exactly: negate face-normal Z,
+            // apply the gentler 128-units/rad/s DualSense base gain, then the
+            // launcher multiplier, and clamp to the cartridge's +/-0x600.
+            const float cartridge = std::clamp(
+                -rate * 128.0f * m->s.gyro_sensitivity,
+                -1536.0f, 1536.0f);
+            const float level = cartridge / 1536.0f;
+
+            ImGui::Spacing();
+            ImGui::TextUnformatted(
+                motion_pad
+                    ? (motion_pad->has_gyro
+                           ? motion_pad->name
+                           : "Selected controller has no gyro sensor")
+                    : "No gyro controller detected");
+
+            // Centered live gauge. The moving needle and colored fill show the
+            // exact signed value the host will send to the cartridge; reaching
+            // either edge means the configured sensitivity is saturating.
+            const float meter_w = std::min(px(360.0f),
+                                           ImGui::GetContentRegionAvail().x);
+            const ImVec2 meter_min = ImGui::GetCursorScreenPos();
+            const ImVec2 meter_max(meter_min.x + meter_w,
+                                   meter_min.y + px(26.0f));
+            ImGui::InvisibleButton("##gyro_meter",
+                                   ImVec2(meter_w, px(26.0f)));
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            dl->AddRectFilled(meter_min, meter_max, imcol(th.control),
+                              px(th.radius_sm));
+            dl->AddRect(meter_min, meter_max, imcol(th.border),
+                        px(th.radius_sm));
+            const float center = (meter_min.x + meter_max.x) * 0.5f;
+            for (int tick = -2; tick <= 2; ++tick) {
+                const float x = center + tick * meter_w * 0.20f;
+                dl->AddLine(ImVec2(x, meter_min.y + px(7.0f)),
+                            ImVec2(x, meter_max.y - px(7.0f)),
+                            imcol(tick == 0 ? th.text_muted : th.border),
+                            tick == 0 ? px(2.0f) : px(1.0f));
+            }
+            const float needle = center + level * meter_w * 0.5f;
+            if (level != 0.0f) {
+                dl->AddRectFilled(
+                    ImVec2(std::min(center, needle), meter_min.y + px(9.0f)),
+                    ImVec2(std::max(center, needle), meter_max.y - px(9.0f)),
+                    imcol(th.accent), px(3.0f));
+            }
+            dl->AddLine(ImVec2(needle, meter_min.y + px(3.0f)),
+                        ImVec2(needle, meter_max.y - px(3.0f)),
+                        imcol(motion_pad && motion_pad->has_gyro
+                                  ? th.good : th.warn),
+                        px(3.0f));
+            ImGui::Text("Output %+.0f / 1536   Sensor %+.2f rad/s",
+                        cartridge, rate);
+
+            ImGui::PushStyleColor(ImGuiCol_Text, col(th.text_muted));
+            ImGui::TextWrapped(
+                "A compatible controller motion sensor is used automatically. "
+                "Mouse drag remains available as a fallback.");
+            ImGui::PopStyleColor();
         } end_panel();
     }
 
@@ -5323,7 +5420,11 @@ std::string asset(const char* rel) {
     std::string path = normalized_path(rel);
     if (is_absolute_path(path)) return path;
 
+#if defined(__ANDROID__)
+    const char* base = SDL_AndroidGetInternalStoragePath();
+#else
     const char* base = SDL_GetBasePath();
+#endif
     std::string out = normalized_path(base ? base : "");
     if (!out.empty() && !path.empty() && out.back() != '/')
         out.push_back('/');
@@ -5361,6 +5462,9 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+#if defined(__ANDROID__)
+    io.ConfigFlags |= ImGuiConfigFlags_IsTouchScreen;
+#endif
     io.IniFilename = nullptr;
     // Test hook: force the focus ring always-on so scripted screenshots can
     // verify nav rendering without a physical pad. Off => normal auto behaviour
@@ -5512,7 +5616,8 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
 
         // Re-poll connected gamepads every frame so hot-plugged pads (e.g. a
         // DualSense powered on after launch) appear without a relaunch.
-        g_pad_count = launcher_input_poll(g_pads, LNG_MAX_PADS);
+        g_pad_count = launcher_input_poll(
+            g_pads, LNG_MAX_PADS, m->has_gyro_controls ? 1 : 0);
 
         ImGui_ImplOpenGL3_NewFrame();
         LNG_ImplSDL_NewFrame();
@@ -5538,6 +5643,7 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
         }
     }
 
+    launcher_input_shutdown();
     launcher_texture_free(&g_boxart);
     launcher_texture_free(&g_pad);
     launcher_texture_free(&g_pad_analog);

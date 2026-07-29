@@ -35,6 +35,11 @@ bool launcher_platform_open(LauncherPlatform* p, const char* title,
     SDL_SetHint("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2");
     SDL_SetHint("SDL_WINDOWS_DPI_SCALING", "0");
 #endif
+#if defined(__ANDROID__)
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
+    SDL_SetHintWithPriority("SDL_JOYSTICK_HIDAPI_PS5", "1",
+                            SDL_HINT_DEFAULT);
 #ifdef LNG_GLES2
     // The host links ANGLE's libGLESv2/libEGL; SDL must create the context
     // through that same ES library (via EGL), or the directly-linked ANGLE
@@ -42,7 +47,8 @@ bool launcher_platform_open(LauncherPlatform* p, const char* title,
     // Must be set BEFORE SDL_Init. Mirrors gb-recompiled's own platform init.
     SDL_SetHint(SDL_HINT_OPENGL_ES_DRIVER, "1");
 #endif
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {   // SDL2: 0 == success
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER |
+                 SDL_INIT_SENSOR) != 0) {   // SDL2: 0 == success
         fprintf(stderr, "[launcher] SDL_Init failed: %s\n", SDL_GetError());
         return false;
     }
@@ -77,11 +83,15 @@ bool launcher_platform_open(LauncherPlatform* p, const char* title,
             if (v > 1.0f && v <= 4.0f) { win_w = (int)(logical_w * v); win_h = (int)(logical_h * v); }
         }
     }
+    Uint32 window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
+                          SDL_WINDOW_ALLOW_HIGHDPI;
+#if defined(__ANDROID__)
+    window_flags |= SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_BORDERLESS;
+#endif
     p->window = SDL_CreateWindow(title ? title : "Launcher",
                                  SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                  win_w, win_h,
-                                 SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
-                                 SDL_WINDOW_ALLOW_HIGHDPI);
+                                 window_flags);
     if (!p->window) {
         fprintf(stderr, "[launcher] SDL_CreateWindow failed: %s\n", SDL_GetError());
         if (s_quit_sdl) SDL_Quit();

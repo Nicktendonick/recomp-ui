@@ -184,6 +184,11 @@ function(recomp_target_launcher_ui TGT)
         RECOMP_LAUNCHER           # un-gate the GUI launcher block in the host's main()
         RECOMP_UI_ENABLE_MODS=$<BOOL:${RECOMP_UI_ENABLE_MODS}>
         SDL_MAIN_HANDLED)         # our real main() is the entry point (no SDL_main redirect)
+    if(ANDROID)
+        target_compile_definitions(${TGT} PRIVATE
+            LNG_GLES2=1
+            IMGUI_IMPL_OPENGL_ES2=1)
+    endif()
     if(RECOMP_UI_SDL3)
         target_compile_definitions(${TGT} PRIVATE LNG_SDL3=1)
         message(STATUS "recomp-ui: SDL3 platform backend")
@@ -196,7 +201,13 @@ function(recomp_target_launcher_ui TGT)
     # than having to remember to link OpenGL itself — mirrors the standalone
     # CMakeLists.txt. SDL is still the host's to provide (its provenance varies:
     # vendored, find_package, etc.); GL is a uniform system lib, so it lives here.
-    if(WIN32)
+    if(ANDROID)
+        find_library(RUI_GLES2_LIBRARY GLESv2 REQUIRED)
+        find_library(RUI_EGL_LIBRARY EGL REQUIRED)
+        find_library(RUI_LOG_LIBRARY log REQUIRED)
+        target_link_libraries(${TGT} PRIVATE
+            ${RUI_GLES2_LIBRARY} ${RUI_EGL_LIBRARY} ${RUI_LOG_LIBRARY})
+    elseif(WIN32)
         # ws2_32: launcher_udp_port.c exclusive UDP bind probes for host lobby.
         target_link_libraries(${TGT} PRIVATE opengl32 ws2_32)
     else()
@@ -214,7 +225,9 @@ function(recomp_target_launcher_ui TGT)
     # cartridges or NES/SNES controller art. The RUNTIME layout
     # next to the exe stays flat (assets/fonts + assets/img) — the launcher's
     # load paths are unchanged. The standalone preview opts into all explicitly.
-    _recomp_ui_stage_assets(${TGT} "${RUI_CONSOLE}")
+    if(NOT ANDROID)
+        _recomp_ui_stage_assets(${TGT} "${RUI_CONSOLE}")
+    endif()
     # Per-console controller image: overrides the default pad.tga (e.g. a
     # PlayStation DualShock for PSX). 24-bit TGA, top-left pixel = colorkey.
     if(RUI_PAD AND EXISTS ${RUI_PAD})

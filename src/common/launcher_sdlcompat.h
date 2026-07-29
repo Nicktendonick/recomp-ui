@@ -11,8 +11,12 @@
 #if !defined(LNG_SDL3)
 // ---- map SDL3 spellings onto SDL2 -----------------------------------------
 
-// GL header (SDL3 ships <SDL3/SDL_opengl.h>; SDL2 ships <SDL_opengl.h>)
+// GL header (Android uses GLES; desktop SDL2 uses the system OpenGL header).
+#if defined(__ANDROID__)
+#include <SDL_opengles2.h>
+#else
 #include <SDL_opengl.h>
+#endif
 
 // Event type enum values
 #define SDL_EVENT_QUIT                  SDL_QUIT

@@ -52,6 +52,7 @@ enum {
 #define RECOMP_RUNTIME_UI_KEY_LCD_GHOSTING     "graphics.lcd_ghosting"
 #define RECOMP_RUNTIME_UI_KEY_AUDIO            "audio.enabled"
 #define RECOMP_RUNTIME_UI_KEY_VOLUME           "audio.volume"
+#define RECOMP_RUNTIME_UI_KEY_GYRO_SENSITIVITY "input.gyro_sensitivity"
 #define RECOMP_RUNTIME_UI_KEY_RESUME            "system.resume"
 #define RECOMP_RUNTIME_UI_KEY_SAVE_STATE        "system.save_state"
 #define RECOMP_RUNTIME_UI_KEY_LOAD_STATE        "system.load_state"

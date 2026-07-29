@@ -20,12 +20,18 @@ typedef struct {
     uint32_t id;        // SDL_JoystickID (stable while connected)
     char     name[64];  // e.g. "PS5 Controller", "Xbox Series Controller"
     char     guid[40];  // SDL_JoystickGetGUIDString (persists across reconnects)
+    int      has_gyro;  // bool: angular-rate sensor opened and enabled
+    float    gyro_z;    // radians/second around the controller face normal
 } LauncherPad;
 
 // Fill `out` (capacity `max`) with the gamepads SDL currently sees. Returns the
-// count. Cheap enough to call once per frame; reflects hot-plug because SDL's
-// device list is refreshed by the event pump the backend already runs.
-int launcher_input_poll(LauncherPad* out, int max);
+// count. `enable_gyro` is a game/build capability: when 0, sensors are neither
+// enabled nor read and the gyro fields remain zero.
+int launcher_input_poll(LauncherPad* out, int max, int enable_gyro);
+
+// Close controller handles retained for live input/sensor polling. Call before
+// the launcher tears down SDL.
+void launcher_input_shutdown(void);
 
 #ifdef __cplusplus
 }
