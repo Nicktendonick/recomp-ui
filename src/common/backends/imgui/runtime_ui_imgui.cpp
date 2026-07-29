@@ -7,6 +7,7 @@
 #include "imgui.h"
 
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -42,6 +43,11 @@ void value_text(RecompRuntimeUi *ui, const RecompRuntimeUiItem *item,
             std::snprintf(out, out_size, "%s", item->choices[index]);
         else
             std::snprintf(out, out_size, "Unavailable");
+    } else if (item->key &&
+               std::strcmp(item->key,
+                           RECOMP_RUNTIME_UI_KEY_GYRO_SENSITIVITY) == 0) {
+        std::snprintf(out, out_size, "%.2fx",
+                      static_cast<float>(value) / 100.0f);
     } else {
         std::snprintf(out, out_size, "%d", value);
     }
@@ -81,10 +87,15 @@ void draw_items(RecompRuntimeUi *ui, const LauncherTheme &theme) {
         const float row_h = item->description && item->description[0]
                                 ? theme.row_height + theme.spacing_sm
                                 : theme.row_height;
-        if (ImGui::Selectable("##setting", selected, 0, ImVec2(0.0f, row_h))) {
+        const ImGuiSelectableFlags row_flags =
+            item->type == RECOMP_RUNTIME_UI_INT
+                ? ImGuiSelectableFlags_AllowOverlap : 0;
+        if (ImGui::Selectable("##setting", selected, row_flags,
+                              ImVec2(0.0f, row_h))) {
             ui->row_index = index;
             ui->in_section = 1;
-            recomp_runtime_ui_adjust_current(ui, 1, 1, 0);
+            if (item->type != RECOMP_RUNTIME_UI_INT)
+                recomp_runtime_ui_adjust_current(ui, 1, 1, 0);
         }
         if (ImGui::IsItemHovered()) {
             ui->row_index = index;
@@ -93,13 +104,17 @@ void draw_items(RecompRuntimeUi *ui, const LauncherTheme &theme) {
 
         ImDrawList *draw = ImGui::GetWindowDrawList();
         const ImVec2 end = ImGui::GetItemRectMax();
+        const ImVec2 next = ImGui::GetCursorScreenPos();
         const ImU32 label_color = u32(enabled ? theme.text : theme.text_muted,
                                       enabled ? 1.0f : 0.65f);
         draw->AddText(ImVec2(start.x + theme.spacing_md,
                             start.y + theme.spacing_sm),
                       label_color, item->label ? item->label : "");
+        const bool stepped_value = item->type == RECOMP_RUNTIME_UI_INT;
+        const float step_controls_w = stepped_value ? 96.0f : 0.0f;
         const ImVec2 value_size = ImGui::CalcTextSize(value);
-        draw->AddText(ImVec2(end.x - theme.spacing_md - value_size.x,
+        draw->AddText(ImVec2(end.x - theme.spacing_md - value_size.x -
+                                step_controls_w,
                             start.y + theme.spacing_sm),
                       u32(selected && enabled ? theme.accent2 : theme.text_muted),
                       value);
@@ -108,6 +123,25 @@ void draw_items(RecompRuntimeUi *ui, const LauncherTheme &theme) {
                                 start.y + theme.spacing_sm +
                                     ImGui::GetTextLineHeight() + 2.0f),
                           u32(theme.text_muted), item->description);
+        }
+        if (stepped_value && enabled) {
+            const float button_h = ImGui::GetFrameHeight();
+            const float button_w = 38.0f;
+            ImGui::SetCursorScreenPos(
+                ImVec2(end.x - theme.spacing_sm - button_w * 2.0f - 6.0f,
+                       start.y + (row_h - button_h) * 0.5f));
+            if (ImGui::Button("-", ImVec2(button_w, button_h))) {
+                ui->row_index = index;
+                ui->in_section = 1;
+                recomp_runtime_ui_adjust_current(ui, -1, 1, 0);
+            }
+            ImGui::SameLine(0.0f, 6.0f);
+            if (ImGui::Button("+", ImVec2(button_w, button_h))) {
+                ui->row_index = index;
+                ui->in_section = 1;
+                recomp_runtime_ui_adjust_current(ui, 1, 1, 0);
+            }
+            ImGui::SetCursorScreenPos(next);
         }
         if (!enabled) ImGui::EndDisabled();
         ImGui::PopID();
@@ -145,7 +179,7 @@ void pop_runtime_style() {
 extern "C" void recomp_runtime_ui_render_imgui(RecompRuntimeUi *ui) {
     if (!ui || !ui->open || ImGui::GetCurrentContext() == nullptr) return;
 
-    const LauncherTheme theme = launcher_theme_by_name(ui->config.theme);
+    LauncherTheme theme = launcher_theme_by_name(ui->config.theme);
     ImGuiIO &io = ImGui::GetIO();
     const ImVec2 display = io.DisplaySize;
     if (display.x <= 0.0f || display.y <= 0.0f) return;
@@ -153,13 +187,25 @@ extern "C" void recomp_runtime_ui_render_imgui(RecompRuntimeUi *ui) {
     ImGui::GetBackgroundDrawList()->AddRectFilled(
         ImVec2(0.0f, 0.0f), display, IM_COL32(0, 0, 0, 150));
 
+#if defined(__ANDROID__)
+    theme.row_height *= 1.25f;
+    theme.spacing_sm *= 1.2f;
+    theme.spacing_md *= 1.2f;
+    theme.spacing_lg *= 1.2f;
+    const float margin = 16.0f;
+    const float max_width = 1100.0f;
+    const float max_height = 720.0f;
+#else
     const float margin = 24.0f;
-    const float width = display.x - margin * 2.0f < 780.0f
+    const float max_width = 780.0f;
+    const float max_height = 680.0f;
+#endif
+    const float width = display.x - margin * 2.0f < max_width
                             ? display.x - margin * 2.0f
-                            : 780.0f;
-    const float height = display.y - margin * 2.0f < 680.0f
+                            : max_width;
+    const float height = display.y - margin * 2.0f < max_height
                              ? display.y - margin * 2.0f
-                             : 680.0f;
+                             : max_height;
     const bool wide = width >= 640.0f;
     ImGui::SetNextWindowPos(ImVec2(display.x * 0.5f, display.y * 0.5f),
                             ImGuiCond_Always, ImVec2(0.5f, 0.5f));

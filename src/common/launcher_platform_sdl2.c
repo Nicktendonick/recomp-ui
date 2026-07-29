@@ -27,6 +27,9 @@ bool launcher_platform_open(LauncherPlatform* p, const char* title,
     SDL_SetHint("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2");
     SDL_SetHint("SDL_WINDOWS_DPI_SCALING", "0");
 #endif
+#if defined(__ANDROID__)
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
     SDL_SetHintWithPriority("SDL_JOYSTICK_HIDAPI_PS5", "1",
                             SDL_HINT_DEFAULT);
 #ifdef LNG_GLES2
@@ -72,11 +75,15 @@ bool launcher_platform_open(LauncherPlatform* p, const char* title,
             if (v > 1.0f && v <= 4.0f) { win_w = (int)(logical_w * v); win_h = (int)(logical_h * v); }
         }
     }
+    Uint32 window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
+                          SDL_WINDOW_ALLOW_HIGHDPI;
+#if defined(__ANDROID__)
+    window_flags |= SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_BORDERLESS;
+#endif
     p->window = SDL_CreateWindow(title ? title : "Launcher",
                                  SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                  win_w, win_h,
-                                 SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
-                                 SDL_WINDOW_ALLOW_HIGHDPI);
+                                 window_flags);
     if (!p->window) {
         fprintf(stderr, "[launcher] SDL_CreateWindow failed: %s\n", SDL_GetError());
         SDL_Quit();

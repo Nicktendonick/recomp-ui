@@ -228,6 +228,10 @@ void apply_scale(const LauncherTheme& th, float scale, const char* font_path,
     style.WindowPadding  = ImVec2(th.spacing_lg, th.spacing_lg);
     style.FramePadding   = ImVec2(th.spacing_md, th.spacing_sm);
     style.ItemSpacing    = ImVec2(th.spacing_md, th.spacing_sm);
+#if defined(__ANDROID__)
+    style.TouchExtraPadding = ImVec2(5.0f, 5.0f);
+    style.ScrollbarSize = 24.0f;
+#endif
     style.ChildBorderSize = 1.0f;
     style.FrameBorderSize = 1.0f;   // controls get a visible outline
     style.Colors[ImGuiCol_WindowBg]        = col(th.background);
@@ -4685,7 +4689,11 @@ std::string asset(const char* rel) {
     std::string path = normalized_path(rel);
     if (is_absolute_path(path)) return path;
 
+#if defined(__ANDROID__)
+    const char* base = SDL_AndroidGetInternalStoragePath();
+#else
     const char* base = SDL_GetBasePath();
+#endif
     std::string out = normalized_path(base ? base : "");
     if (!out.empty() && !path.empty() && out.back() != '/')
         out.push_back('/');
@@ -4722,6 +4730,9 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+#if defined(__ANDROID__)
+    io.ConfigFlags |= ImGuiConfigFlags_IsTouchScreen;
+#endif
     io.IniFilename = nullptr;
     // Test hook: force the focus ring always-on so scripted screenshots can
     // verify nav rendering without a physical pad. Off => normal auto behaviour
