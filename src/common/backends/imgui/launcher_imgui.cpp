@@ -2875,7 +2875,6 @@ void draw_netplay_direct_modal(LauncherModel* m, const LauncherTheme& th) {
                                   "game/version mismatch).");
                 }
                 }
-                }
             }
         }
         ImGui::EndDisabled();
