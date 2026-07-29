@@ -50,7 +50,11 @@ static const int kGbaKbIndex[LNG_GBA_PAD_BUTTON_COUNT] = {
 // card like SNES — one .sav per cartridge, no slot grid). Settings adds the
 // "system" panel: GBA needs a BIOS image (LLE by default; the panel's BIOS
 // path picker replaces the runtime's blocking Win32 file dialog).
-static const char* const kPanelsSettingsGba[] = { "video", "audio", "system", "hotkeys", NULL };
+// "solar" composes only for a cartridge that actually has the photodiode
+// (avail_solar gates on GameInfo.has_solar_sensor), so listing it here costs
+// nothing for the other GBA titles.
+static const char* const kPanelsSettingsGba[] = { "video", "audio", "system",
+                                                  "solar", "hotkeys", NULL };
 
 // ---- screen-model vocabulary ----------------------------------------------------
 // Mirrors the gbarecomp runtime's screen filters (host_window GBARECOMP_SCREEN

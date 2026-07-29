@@ -123,6 +123,7 @@ typedef struct {
     const char* sram_path;           // borrowed; NULL when the game has no SRAM
 
     // ---- NES-style capabilities (borrowed from RecompLauncherCGameInfo) ----
+    bool        has_solar_sensor;    // Solar sensor panel in Settings
     bool        has_integer_scale;   // Integer-scale checkbox in Display settings
     bool        hdpack_supported;    // HD-texture-pack toggle + folder picker
     // Password/mantra save (e.g. Faxanadu): non-NULL path swaps the SAVES row
@@ -504,6 +505,16 @@ void launcher_model_set_msu1_dir(LauncherModel* m, const char* dir);
 
 // ---- NES-style settings (capability-gated like the PSX deep set) ----
 void launcher_model_toggle_integer_scale(LauncherModel* m);   // gated has_integer_scale
+
+// ---- cartridge light sensor (all gated on has_solar_sensor) ----------------
+// The postal code is stored verbatim apart from trimming: validating which
+// codes exist is the host's job (it owns the geocoder), and rejecting them here
+// would just mean two places disagreeing about what is valid.
+void launcher_model_set_solar_zip(LauncherModel* m, const char* zip);
+void launcher_model_set_solar_country(LauncherModel* m, const char* country);
+void launcher_model_set_solar_source(LauncherModel* m, int source);     // 0 live, 1 manual
+void launcher_model_set_solar_manual_step(LauncherModel* m, int step);  // clamped 0..8
+void launcher_model_set_solar_full_sun(LauncherModel* m, int wm2);      // clamped 300..1200
 void launcher_model_toggle_hdpack(LauncherModel* m);          // gated hdpack_supported
 void launcher_model_set_hdpack_dir(LauncherModel* m, const char* dir);
 // Password/mantra save: reload m->password_text from password_save_path, and
