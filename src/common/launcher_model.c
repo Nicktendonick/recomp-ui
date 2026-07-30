@@ -166,6 +166,13 @@ void launcher_model_init(LauncherModel* m,
     }
 
     if (io) m->s = *io;
+    if (m->has_sharp_filter) {
+        m->s.linear_filter = m->s.linear_filter ? 1 : 0;
+        m->s.sharp_filter = m->s.sharp_filter ? 1 : 0;
+        // Preserve an existing explicit linear-filter preference when a host
+        // first gains the three-state scaler control.
+        if (m->s.linear_filter) m->s.sharp_filter = 0;
+    }
     memset(&m->s.netplay_launch, 0, sizeof(m->s.netplay_launch));
     if (!m->s.netplay_player_name[0] && m->netplay && m->netplay->player_name) {
         safe_copy(m->s.netplay_player_name, sizeof(m->s.netplay_player_name),
@@ -566,10 +573,24 @@ void launcher_model_toggle_filter(LauncherModel* m) {
         m->s.sharp_filter = 0;
 }
 
-void launcher_model_toggle_sharp_filter(LauncherModel* m) {
+void launcher_model_cycle_scaling_filter(LauncherModel* m) {
     if (!m || !m->has_sharp_filter) return;
-    m->s.sharp_filter = !m->s.sharp_filter;
-    if (m->s.sharp_filter) m->s.linear_filter = 0;
+    if (m->s.sharp_filter) {
+        m->s.sharp_filter = 0;
+        m->s.linear_filter = 0;
+    } else if (m->s.linear_filter) {
+        m->s.linear_filter = 0;
+        m->s.sharp_filter = 1;
+    } else {
+        m->s.linear_filter = 1;
+    }
+}
+
+const char* launcher_model_scaling_filter_label(const LauncherModel* m) {
+    if (!m) return "Nearest";
+    if (m->s.sharp_filter) return "Sharp fractional";
+    if (m->s.linear_filter) return "Linear";
+    return "Nearest";
 }
 
 void launcher_model_toggle_affine_filter(LauncherModel* m) {

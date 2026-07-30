@@ -1774,7 +1774,7 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         // ---- legacy minimal surface (SNES/NES etc.) — aligned label grid -------
         float cw = ImGui::CalcTextSize("Linear filtering").x;
         if (m->has_sharp_filter) {
-            float t = ImGui::CalcTextSize("Sharp fractional scaling").x;
+            float t = ImGui::CalcTextSize("Scaling filter").x;
             if (t > cw) cw = t;
         }
         if (m->has_affine_filter) {
@@ -1798,14 +1798,16 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
             bool is = m->s.integer_scale != 0;
             if (ImGui::Checkbox("##intscale", &is)) launcher_model_toggle_integer_scale(m);
         }
-        row_label("Linear filtering", th, cw);
-        bool filter = m->s.linear_filter != 0;
-        if (ImGui::Checkbox("##filter", &filter)) launcher_model_toggle_filter(m);
         if (m->has_sharp_filter) {
-            row_label("Sharp fractional scaling", th, cw);
-            bool sharp = m->s.sharp_filter != 0;
-            if (ImGui::Checkbox("##sharp_filter", &sharp))
-                launcher_model_toggle_sharp_filter(m);
+            row_label("Scaling filter", th, cw);
+            if (ImGui::Button(launcher_model_scaling_filter_label(m),
+                              ImVec2(px(180), px(30))))
+                launcher_model_cycle_scaling_filter(m);
+        } else {
+            row_label("Linear filtering", th, cw);
+            bool filter = m->s.linear_filter != 0;
+            if (ImGui::Checkbox("##filter", &filter))
+                launcher_model_toggle_filter(m);
         }
         if (m->has_affine_filter) {
             row_label("Affine background smoothing", th, cw);
@@ -1907,7 +1909,12 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         experimental_tag(th);
     }
 
-    if (m->has_texture_filter) {
+    if (m->has_sharp_filter) {
+        row_label("Scaling filter", th);
+        if (ImGui::Button(launcher_model_scaling_filter_label(m),
+                          ImVec2(px(180), px(30))))
+            launcher_model_cycle_scaling_filter(m);
+    } else if (m->has_texture_filter) {
         row_label("Texture filtering", th);
         if (ImGui::Button(launcher_model_texture_filter_label(m), ImVec2(px(120), px(30))))
             launcher_model_toggle_texture_filter(m);
@@ -1921,13 +1928,6 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         row_label("Antialiasing", th);
         if (ImGui::Button(launcher_model_aa_label(m), ImVec2(px(90), px(30))))
             launcher_model_cycle_aa(m);
-    }
-
-    if (m->has_sharp_filter) {
-        row_label("Sharp fractional scaling", th);
-        bool sharp = m->s.sharp_filter != 0;
-        if (ImGui::Checkbox("##sharp_filter", &sharp))
-            launcher_model_toggle_sharp_filter(m);
     }
 
     if (m->has_affine_filter) {

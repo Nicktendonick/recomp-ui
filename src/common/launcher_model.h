@@ -401,7 +401,8 @@ void launcher_model_open_config(LauncherModel* m, int player);  // -> Controller
 // ---- display settings ----
 void launcher_model_cycle_scale(LauncherModel* m);   // 1..6 wrap
 void launcher_model_toggle_filter(LauncherModel* m);
-void launcher_model_toggle_sharp_filter(LauncherModel* m);
+void launcher_model_cycle_scaling_filter(LauncherModel* m);
+const char* launcher_model_scaling_filter_label(const LauncherModel* m);
 void launcher_model_toggle_affine_filter(LauncherModel* m);
 void launcher_model_toggle_widescreen(LauncherModel* m);  // gated
 void launcher_model_toggle_adaptive_view(LauncherModel* m);  // gated; fixed aspect is retained
