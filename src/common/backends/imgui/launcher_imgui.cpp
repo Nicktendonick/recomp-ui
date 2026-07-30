@@ -2285,7 +2285,11 @@ void panel_solar_draw(LauncherModel* m, const LauncherTheme* th) {
 void draw_hotkeys_controls(LauncherModel* m, const LauncherTheme& th) {
     eyebrow("HOTKEYS");
     const SystemProfile* prof = (const SystemProfile*)m->profile;
-    const uint32_t mask = prof ? prof->hotkeys_mask : LNG_HOTKEYS_ALL;
+    uint32_t mask = prof ? prof->hotkeys_mask : LNG_HOTKEYS_ALL;
+    // Solar controls are a per-cartridge capability, not part of the GBA-wide
+    // catalog. They remain absent for every existing game and have no default
+    // binding when the capability is enabled.
+    if (m->has_solar_sensor) mask |= LNG_HOTKEYS_SOLAR;
     // Same responsive grid treatment as the bindings list.
     const float cell_w = px(280.0f);
     int cols = (int)(ImGui::GetContentRegionAvail().x / cell_w);
