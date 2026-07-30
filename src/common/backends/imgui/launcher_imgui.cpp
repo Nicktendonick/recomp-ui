@@ -3865,6 +3865,27 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
             ImGui::EndDisabled();
         }
         ImGui::Spacing();
+        {
+            bool rb = m->netplay_rollback;
+            if (np->rollback_get)
+                rb = np->rollback_get(np->ctx) != 0;
+            if (ImGui::Checkbox("Rollback (experimental)", &rb)) {
+                m->netplay_rollback = rb;
+                if (np->rollback_set)
+                    (void)np->rollback_set(np->ctx, rb ? 1 : 0);
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos(px(360));
+                ImGui::TextUnformatted(
+                    "Predict missing remote inputs and correct with rollback "
+                    "episodes instead of stalling on delay-sync admit. Both "
+                    "peers must enable this (match_caps.rollback).");
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
+        }
+        ImGui::Spacing();
         if (ImGui::Button("Close", ImVec2(px(120), 0))) {
             m->netplay_lobby_settings_open = false;
             ImGui::CloseCurrentPopup();

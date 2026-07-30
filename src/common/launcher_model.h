@@ -336,6 +336,7 @@ typedef struct {
     /* Kept for host ABI / match_caps defaults (no longer exposed in Lobby Settings). */
     bool      netplay_force_input_relay;
     bool      netplay_force_turn;
+    bool      netplay_rollback;
     /* Host Lobby: desired max seats (2..min(8, game player_count)). */
     int       netplay_host_max_players;
     /* Active room seat ceiling after create/join (0 = use game player_count). */

@@ -83,6 +83,8 @@ typedef struct RecompLauncherCNetplayLaunch {
     int      force_input_relay;
     /* Host match_caps: ICE relay-only / Force TURN for UDP (0/1). */
     int      force_turn;
+    /* Host match_caps: rollback invent/episode path (0/1, experimental). */
+    int      rollback;
 } RecompLauncherCNetplayLaunch;
 
 typedef struct RecompLauncherCNetplayLocalAddress {
@@ -174,6 +176,10 @@ typedef struct RecompLauncherCNetplayCallbacks {
      * published in match_caps.force_turn so every peer uses typ relay. */
     int  (*force_turn_get)(void* ctx);
     int  (*force_turn_set)(void* ctx, int force);
+    /* Optional: host Rollback (experimental) (0/1). Published in
+     * match_caps.rollback; peers apply via PSX_NET_MODE / launch.rollback. */
+    int  (*rollback_get)(void* ctx);
+    int  (*rollback_set)(void* ctx, int enable);
 } RecompLauncherCNetplayCallbacks;
 
 /* ---- schema-driven mods --------------------------------------------------
