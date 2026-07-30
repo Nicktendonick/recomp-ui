@@ -2180,6 +2180,149 @@ void panel_system_draw(LauncherModel* m, const LauncherTheme* th) {
     end_panel();
 }
 
+// SOLAR SENSOR module: a few GBA cartridges carry a photodiode the game reads
+// as gameplay input (Boktai's Gun del Sol charges from real sunlight), so the
+// player has to be able to say WHERE that brightness is measured. Composed only
+// for a system whose profile lists "solar" AND a game that has the hardware.
+//
+// The postal code is edited behind an Edit/Save step, the same shape as the
+// password-save row, so a half-typed code never reaches the host mid-keystroke
+// and the row still shows the working value while editing is abandoned.
+int avail_solar(const LauncherModel* m) { return m->has_solar_sensor; }
+
+void draw_solar_controls(LauncherModel* m, const LauncherTheme& th) {
+    eyebrow("SOLAR SENSOR");
+
+    // Light source first: it decides whether the rest of the card is live.
+    row_label("Light source", th);
+    {
+        const bool manual = m->s.solar_source != 0;
+        const float bw = px(96);
+        ImGui::SameLine(ImGui::GetCursorPosX() +
+                        ImGui::GetContentRegionAvail().x - bw * 2 -
+                        px(th.spacing_sm));
+        if (ImGui::Button(manual ? "Live" : "Live ✓", ImVec2(bw, px(28))))
+            launcher_model_set_solar_source(m, 0);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Read the current sunlight where you are.");
+        ImGui::SameLine(0.0f, px(th.spacing_sm));
+        if (ImGui::Button(manual ? "Fixed ✓" : "Fixed", ImVec2(bw, px(28))))
+            launcher_model_set_solar_source(m, 1);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Hold a chosen level. Makes no network request.");
+    }
+
+    if (m->s.solar_source != 0) {
+        // Fixed level: the location rows below would be inert, so offer the
+        // level instead of greying out three rows the player cannot use.
+        ImGui::Dummy(ImVec2(0, px(4)));
+        row_label("Level", th);
+        int step = m->s.solar_manual_step;
+        const float sw = px(200);
+        ImGui::SameLine(ImGui::GetCursorPosX() +
+                        ImGui::GetContentRegionAvail().x - sw);
+        ImGui::SetNextItemWidth(sw);
+        if (ImGui::SliderInt("##solarlevel", &step, 0, 8, "%d / 8"))
+            launcher_model_set_solar_manual_step(m, step);
+        return;
+    }
+
+    ImGui::Dummy(ImVec2(0, px(4)));
+    row_label("Postal code", th);
+    {
+        static bool s_zip_editing = false;
+        static char s_zip_buf[16];
+        const float bw = px(78);
+        if (!s_zip_editing) {
+            ImGui::AlignTextToFramePadding();
+            const bool set = m->s.solar_zip[0] != 0;
+            ImGui::TextColored(col(set ? th.text : th.text_muted), "%s",
+                               set ? m->s.solar_zip : "(not set — sensor stays dark)");
+            ImGui::SameLine(ImGui::GetCursorPosX() +
+                            ImGui::GetContentRegionAvail().x - bw);
+            if (ImGui::Button("Edit", ImVec2(bw, px(28)))) {
+                snprintf(s_zip_buf, sizeof(s_zip_buf), "%s", m->s.solar_zip);
+                s_zip_editing = true;
+            }
+        } else {
+            float avail = ImGui::GetContentRegionAvail().x - bw * 2 -
+                          px(th.spacing_sm) * 2;
+            if (avail < px(80)) avail = px(80);
+            ImGui::SetNextItemWidth(avail);
+            const bool submitted =
+                ImGui::InputText("##solarzip", s_zip_buf, sizeof(s_zip_buf),
+                                 ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGui::SameLine(0, px(th.spacing_sm));
+            if (submitted || ImGui::Button("Save", ImVec2(bw, px(28)))) {
+                launcher_model_set_solar_zip(m, s_zip_buf);
+                s_zip_editing = false;
+            }
+            ImGui::SameLine(0, px(th.spacing_sm));
+            if (ImGui::Button("Cancel", ImVec2(bw, px(28))))
+                s_zip_editing = false;
+        }
+    }
+
+    ImGui::Dummy(ImVec2(0, px(4)));
+    row_label("Country", th);
+    {
+        static bool s_cc_editing = false;
+        static char s_cc_buf[8];
+        const float bw = px(78);
+        if (!s_cc_editing) {
+            ImGui::AlignTextToFramePadding();
+            const bool set = m->s.solar_country[0] != 0;
+            ImGui::TextColored(col(set ? th.text : th.text_muted), "%s",
+                               set ? m->s.solar_country : "us");
+            ImGui::SameLine(ImGui::GetCursorPosX() +
+                            ImGui::GetContentRegionAvail().x - bw);
+            if (ImGui::Button("Edit##cc", ImVec2(bw, px(28)))) {
+                snprintf(s_cc_buf, sizeof(s_cc_buf), "%s", m->s.solar_country);
+                s_cc_editing = true;
+            }
+        } else {
+            float avail = ImGui::GetContentRegionAvail().x - bw * 2 -
+                          px(th.spacing_sm) * 2;
+            if (avail < px(60)) avail = px(60);
+            ImGui::SetNextItemWidth(avail);
+            const bool submitted =
+                ImGui::InputText("##solarcc", s_cc_buf, sizeof(s_cc_buf),
+                                 ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGui::SameLine(0, px(th.spacing_sm));
+            if (submitted || ImGui::Button("Save##cc", ImVec2(bw, px(28)))) {
+                launcher_model_set_solar_country(m, s_cc_buf);
+                s_cc_editing = false;
+            }
+            ImGui::SameLine(0, px(th.spacing_sm));
+            if (ImGui::Button("Cancel##cc", ImVec2(bw, px(28))))
+                s_cc_editing = false;
+        }
+    }
+
+    ImGui::Dummy(ImVec2(0, px(4)));
+    row_label("Full sun", th);
+    {
+        // Clear-sky midday is ~900 W/m^2 at mid latitudes but far less in
+        // winter or at high latitude, where leaving this at 900 would mean the
+        // gauge could never fill on a genuinely sunny day.
+        int wm2 = m->s.solar_full_sun > 0 ? m->s.solar_full_sun : 900;
+        const float sw = px(200);
+        ImGui::SameLine(ImGui::GetCursorPosX() +
+                        ImGui::GetContentRegionAvail().x - sw);
+        ImGui::SetNextItemWidth(sw);
+        if (ImGui::SliderInt("##solarfullsun", &wm2, 300, 1200, "%d W/m²"))
+            launcher_model_set_solar_full_sun(m, wm2);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Irradiance that reads as a full gauge. Lower it "
+                              "in winter or at high latitude.");
+    }
+}
+
+void panel_solar_draw(LauncherModel* m, const LauncherTheme* th) {
+    if (begin_panel("solar", 0)) draw_solar_controls(m, *th);
+    end_panel();
+}
+
 // Hotkeys module: the universal emulator-hotkeys catalog, opt-in per system
 // via SystemProfile.hotkeys_mask. SNES opts into LNG_HOTKEYS_ALL — the full
 // catalog, grid byte-identical to the original hardcoded panel. PSX opts into
@@ -2188,7 +2331,11 @@ void panel_system_draw(LauncherModel* m, const LauncherTheme* th) {
 void draw_hotkeys_controls(LauncherModel* m, const LauncherTheme& th) {
     eyebrow("HOTKEYS");
     const SystemProfile* prof = (const SystemProfile*)m->profile;
-    const uint32_t mask = prof ? prof->hotkeys_mask : LNG_HOTKEYS_ALL;
+    uint32_t mask = prof ? prof->hotkeys_mask : LNG_HOTKEYS_ALL;
+    // Solar controls are a per-cartridge capability, not part of the GBA-wide
+    // catalog. They remain absent for every existing game and have no default
+    // binding when the capability is enabled.
+    if (m->has_solar_sensor) mask |= LNG_HOTKEYS_SOLAR;
     // Same responsive grid treatment as the bindings list.
     const float cell_w = px(280.0f);
     int cols = (int)(ImGui::GetContentRegionAvail().x / cell_w);
@@ -4823,6 +4970,7 @@ const LauncherPanel kPanelRegistry[] = {
     { "video",             LNG_VIEW_SETTINGS,   LNG_SLOT_MAIN, nullptr,      panel_video_draw },
     { "audio",             LNG_VIEW_SETTINGS,   LNG_SLOT_SIDE, nullptr,      panel_audio_draw },
     { "system",            LNG_VIEW_SETTINGS,   LNG_SLOT_SIDE, avail_system, panel_system_draw },
+    { "solar",             LNG_VIEW_SETTINGS,   LNG_SLOT_SIDE, avail_solar,  panel_solar_draw },
     { "hotkeys",           LNG_VIEW_SETTINGS,   LNG_SLOT_WIDE, nullptr,      panel_hotkeys_draw },
     { "controller_config", LNG_VIEW_CONTROLLER, LNG_SLOT_WIDE, nullptr,      panel_controller_config_draw },
     { nullptr,              LNG_VIEW_DASHBOARD,  0,             nullptr,      nullptr },   // sentinel

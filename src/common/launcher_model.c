@@ -41,11 +41,12 @@ static const char* kButtonNames[LNG_BTN_COUNT] = {
 static const char* kP1Defaults[LNG_BTN_COUNT] = {
     "Up", "Down", "Left", "Right", "X", "Z", "S", "A", "D", "C", "Enter", "RShift"
 };
-// Display labels for the 11 engine hotkeys (order == LngHotkey == [KeyMap] keys).
+// Display labels for engine hotkeys (order == LngHotkey == [KeyMap] keys).
 static const char* kHotkeyNames[LNG_HK_COUNT] = {
     "Fullscreen", "Reset", "Pause", "Pause (dimmed)", "Fast-forward",
     "Window bigger", "Window smaller", "Volume up", "Volume down",
-    "FPS readout", "Toggle renderer"
+    "FPS readout", "Toggle renderer",
+    "Solar level up", "Solar level down", "Resume live solar"
 };
 static const char* kViewNames[5] = { "Dashboard", "Settings", "Controller", "Netplay", "Mods" };
 static const char* kSrcNames[3]  = { "None", "Keyboard", "Gamepad" };
@@ -88,6 +89,7 @@ void launcher_model_init(LauncherModel* m,
         m->msu1_patch_path      = game->msu1_patch_path;
         m->saves_supported      = game->sram_path != NULL;
         m->sram_path            = game->sram_path;
+        m->has_solar_sensor     = game->has_solar_sensor != 0;
         m->has_integer_scale    = game->has_integer_scale != 0;
         m->hdpack_supported     = game->hdpack_supported != 0;
         m->password_save_path   = game->password_save_path;
@@ -1236,6 +1238,50 @@ void launcher_model_toggle_msu1(LauncherModel* m) {
 
 void launcher_model_set_msu1_dir(LauncherModel* m, const char* dir) {
     safe_copy(m->s.msu1_dir, sizeof(m->s.msu1_dir), dir ? dir : "");
+}
+
+// ---- cartridge light sensor --------------------------------------------------
+
+/* Trims surrounding whitespace; a code pasted with a stray space should still
+ * work. Case and existence are the host's business -- it owns the geocoder. */
+static void copy_trimmed(char* dst, size_t cap, const char* src) {
+    if (!dst || cap == 0) return;
+    if (!src) { dst[0] = '\0'; return; }
+    while (*src == ' ' || *src == '\t') ++src;
+    size_t n = strlen(src);
+    while (n > 0 && (src[n - 1] == ' ' || src[n - 1] == '\t')) --n;
+    if (n >= cap) n = cap - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
+void launcher_model_set_solar_zip(LauncherModel* m, const char* zip) {
+    if (!m->has_solar_sensor) return;    /* gated: no-op when unsupported */
+    copy_trimmed(m->s.solar_zip, sizeof(m->s.solar_zip), zip);
+}
+
+void launcher_model_set_solar_country(LauncherModel* m, const char* country) {
+    if (!m->has_solar_sensor) return;
+    copy_trimmed(m->s.solar_country, sizeof(m->s.solar_country), country);
+}
+
+void launcher_model_set_solar_source(LauncherModel* m, int source) {
+    if (!m->has_solar_sensor) return;
+    m->s.solar_source = (source != 0) ? 1 : 0;
+}
+
+void launcher_model_set_solar_manual_step(LauncherModel* m, int step) {
+    if (!m->has_solar_sensor) return;
+    if (step < 0) step = 0;
+    if (step > 8) step = 8;
+    m->s.solar_manual_step = step;
+}
+
+void launcher_model_set_solar_full_sun(LauncherModel* m, int wm2) {
+    if (!m->has_solar_sensor) return;
+    if (wm2 < 300)  wm2 = 300;
+    if (wm2 > 1200) wm2 = 1200;
+    m->s.solar_full_sun = wm2;
 }
 
 // ---- NES-style settings ------------------------------------------------------

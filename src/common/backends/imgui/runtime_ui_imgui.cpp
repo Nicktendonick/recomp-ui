@@ -25,6 +25,12 @@ void value_text(RecompRuntimeUi *ui, const RecompRuntimeUiItem *item,
         std::snprintf(out, out_size, "OPEN");
         return;
     }
+    if (item->type == RECOMP_RUNTIME_UI_TEXT) {
+        char buf[128];
+        recomp_runtime_ui_current_text(ui, item, buf, sizeof(buf));
+        std::snprintf(out, out_size, "%s", buf[0] ? buf : "(not set)");
+        return;
+    }
     int value = 0;
     if (!recomp_runtime_ui_current_value(ui, item, &value)) {
         std::snprintf(out, out_size, "Unavailable");
@@ -87,8 +93,12 @@ void draw_items(RecompRuntimeUi *ui, const LauncherTheme &theme) {
         const float row_h = item->description && item->description[0]
                                 ? theme.row_height + theme.spacing_sm
                                 : theme.row_height;
+        // INT rows carry -/+ buttons and TEXT rows an edit field, both drawn on
+        // top of the row selectable; without AllowOverlap the selectable would
+        // swallow the clicks meant for them.
         const ImGuiSelectableFlags row_flags =
-            item->type == RECOMP_RUNTIME_UI_INT
+            (item->type == RECOMP_RUNTIME_UI_INT ||
+             item->type == RECOMP_RUNTIME_UI_TEXT)
                 ? ImGuiSelectableFlags_AllowOverlap : 0;
         if (ImGui::Selectable("##setting", selected, row_flags,
                               ImVec2(0.0f, row_h))) {
@@ -111,18 +121,50 @@ void draw_items(RecompRuntimeUi *ui, const LauncherTheme &theme) {
                             start.y + theme.spacing_sm),
                       label_color, item->label ? item->label : "");
         const bool stepped_value = item->type == RECOMP_RUNTIME_UI_INT;
+        const bool editing_this = item->type == RECOMP_RUNTIME_UI_TEXT &&
+                                  ui->editing_text && selected;
         const float step_controls_w = stepped_value ? 96.0f : 0.0f;
-        const ImVec2 value_size = ImGui::CalcTextSize(value);
-        draw->AddText(ImVec2(end.x - theme.spacing_md - value_size.x -
-                                step_controls_w,
-                            start.y + theme.spacing_sm),
-                      u32(selected && enabled ? theme.accent2 : theme.text_muted),
-                      value);
+        if (!editing_this) {
+            const ImVec2 value_size = ImGui::CalcTextSize(value);
+            draw->AddText(ImVec2(end.x - theme.spacing_md - value_size.x -
+                                    step_controls_w,
+                                start.y + theme.spacing_sm),
+                          u32(selected && enabled ? theme.accent2
+                                                  : theme.text_muted),
+                          value);
+        }
         if (item->description && item->description[0]) {
             draw->AddText(ImVec2(start.x + theme.spacing_md,
                                 start.y + theme.spacing_sm +
                                     ImGui::GetTextLineHeight() + 2.0f),
                           u32(theme.text_muted), item->description);
+        }
+        if (editing_this && enabled) {
+            const float field_w = 200.0f;
+            const float field_h = ImGui::GetFrameHeight();
+            ImGui::SetCursorScreenPos(
+                ImVec2(end.x - theme.spacing_md - field_w,
+                       start.y + (row_h - field_h) * 0.5f));
+            ImGui::SetNextItemWidth(field_w);
+            // Nothing is active on the first frame of an edit, which is exactly
+            // when focus should land in the field.
+            if (!ImGui::IsAnyItemActive()) ImGui::SetKeyboardFocusHere();
+            const bool submitted = ImGui::InputText(
+                "##edit", ui->edit_buffer, sizeof(ui->edit_buffer),
+                ImGuiInputTextFlags_EnterReturnsTrue |
+                    ImGuiInputTextFlags_AutoSelectAll);
+            const bool cancelled = ImGui::IsKeyPressed(ImGuiKey_Escape);
+            if (submitted) {
+                recomp_runtime_ui_commit_text(ui, item, ui->edit_buffer);
+                ui->editing_text = 0;
+            } else if (cancelled) {
+                ui->editing_text = 0;
+            } else if (!ImGui::IsItemActive() && ImGui::IsAnyItemActive()) {
+                // Focus moved elsewhere (a click on another row): treat it as
+                // abandoning the edit rather than silently committing.
+                ui->editing_text = 0;
+            }
+            ImGui::SetCursorScreenPos(next);
         }
         if (stepped_value && enabled) {
             const float button_h = ImGui::GetFrameHeight();
