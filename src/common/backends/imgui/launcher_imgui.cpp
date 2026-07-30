@@ -2095,6 +2095,8 @@ int avail_system(const LauncherModel* m) { return m->has_bios; }
 void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
     eyebrow("SYSTEM");
     row_label("BIOS", th);
+    const SystemProfile* prof = (const SystemProfile*)m->profile;
+    const bool is_gba = prof && prof->id && std::strcmp(prof->id, "gba") == 0;
     // Empty means "use the BIOS this build ships with" — not "unset". Runtimes
     // that bundle a redistributable BIOS (PSX/OpenBIOS, GBA) boot straight from
     // it, so the row states that outcome instead of the old "(default)", which
@@ -2108,7 +2110,9 @@ void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
     const float gap      = has_pick ? px(th.spacing_sm) : 0.0f;
     float avail = ImGui::GetContentRegionAvail().x - bw - cw - gap - px(th.spacing_sm);
     if (avail < px(50)) avail = px(50);
-    const char* bp = has_pick ? m->s.bios_path : "Bundled BIOS";
+    const char* bp = has_pick ? m->s.bios_path
+                              : (is_gba ? "Retail GBA BIOS required"
+                                        : "Bundled BIOS");
     char elided[192]; elide_left(bp, avail, elided, sizeof(elided));
     ImGui::AlignTextToFramePadding();
     ImGui::TextColored(col(has_pick ? th.text : th.text_muted), "%s", elided);
@@ -2116,17 +2120,24 @@ void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
     if (ImGui::Button("Browse", ImVec2(bw, px(28)))) {
         char buf[512];
         static const char* kBiosPatterns[] = { "*.bin", "*.rom" };
-        if (launcher_pick_file("Select BIOS file", kBiosPatterns, 2,
+        if (launcher_pick_file(is_gba ? "Select Game Boy Advance BIOS (gba_bios.bin)"
+                                      : "Select BIOS file",
+                               kBiosPatterns, 2,
                                "BIOS image (.bin .rom)", buf, sizeof(buf)))
             launcher_model_set_bios_path(m, buf);
     }
     if (has_pick) {
         ImGui::SameLine(0.0f, gap);
         if (ImGui::Button("Clear", ImVec2(cw, px(28))))
-            launcher_model_set_bios_path(m, "");   // back to the bundled BIOS
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Stop using this BIOS and go back to the one "
-                              "included with this build.");
+            launcher_model_set_bios_path(m, "");
+        if (ImGui::IsItemHovered()) {
+            if (is_gba)
+                ImGui::SetTooltip("Remove this selection. A retail GBA BIOS "
+                                  "is required before the game can launch.");
+            else
+                ImGui::SetTooltip("Stop using this BIOS and go back to the one "
+                                  "included with this build.");
+        }
     }
 }
 void panel_system_draw(LauncherModel* m, const LauncherTheme* th) {
@@ -4942,9 +4953,18 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
 
     const char* noun = (m->rom_noun && m->rom_noun[0]) ? m->rom_noun : "ROM";
     const char* game = (m->game_name && m->game_name[0]) ? m->game_name : "this game";
+    const SystemProfile* prof = (const SystemProfile*)m->profile;
+    const bool is_gba = prof && prof->id && std::strcmp(prof->id, "gba") == 0;
+    const bool is_disc = prof && prof->verify.mode == 1;
     ImGui::TextColored(col(th.accent), "Setup required");
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
-    if (m->has_bios) {
+    if (is_gba) {
+        ImGui::TextColored(col(th.text_muted),
+            "%s requires both a playable %s and a retail Game Boy Advance "
+            "BIOS dump. This build does not include or substitute a BIOS. "
+            "Select the files below (you must legally own these dumps).",
+            game, noun);
+    } else if (m->has_bios) {
         ImGui::TextColored(col(th.text_muted),
             "%s needs a playable %s before you can launch. This build includes "
             "a bundled BIOS (OpenBIOS) by default — a retail SCPH1001.BIN dump "
@@ -4965,13 +4985,21 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     /* ---- BIOS (PSX / GBA): empty = bundled; Browse for optional retail ---- */
     if (m->has_bios) {
         const bool has_pick = m->s.bios_path[0] != 0;
-        ImGui::TextUnformatted("1. PlayStation BIOS (optional)");
+        ImGui::TextUnformatted(is_gba ? "1. Game Boy Advance BIOS (required)"
+                                      : "1. PlayStation BIOS (optional)");
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
-        ImGui::TextColored(col(th.text_muted),
-            "Default: bundled OpenBIOS. Optionally browse for your own "
-            "SCPH1001.BIN (exactly 512 KB, dumped from your console).");
+        if (is_gba)
+            ImGui::TextColored(col(th.text_muted),
+                "Select gba_bios.bin (exactly 16 KB, dumped from your console). "
+                "The canonical retail BIOS is SHA-1 verified before launch.");
+        else
+            ImGui::TextColored(col(th.text_muted),
+                "Default: bundled OpenBIOS. Optionally browse for your own "
+                "SCPH1001.BIN (exactly 512 KB, dumped from your console).");
         ImGui::PopTextWrapPos();
-        const char* bp = has_pick ? m->s.bios_path : "Bundled BIOS (OpenBIOS)";
+        const char* bp = has_pick ? m->s.bios_path
+                                  : (is_gba ? "(none selected)"
+                                            : "Bundled BIOS (OpenBIOS)");
         char belided[220];
         elide_left(bp, px(300), belided, sizeof(belided));
         ImGui::AlignTextToFramePadding();
@@ -4984,12 +5012,15 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         if (ImGui::Button("Browse BIOS##setup", ImVec2(px(120), px(32)))) {
             char buf[512];
             static const char* kBiosPatterns[] = { "*.bin", "*.rom" };
-            if (launcher_pick_file("Select PlayStation BIOS (SCPH1001.BIN)",
+            if (launcher_pick_file(
+                                   is_gba
+                                       ? "Select Game Boy Advance BIOS (gba_bios.bin)"
+                                       : "Select PlayStation BIOS (SCPH1001.BIN)",
                                    kBiosPatterns, 2, "BIOS image (.bin .rom)",
                                    buf, sizeof(buf)))
                 launcher_model_set_bios_path(m, buf);
         }
-        if (has_pick) {
+        if (has_pick && !is_gba) {
             ImGui::SameLine();
             if (ImGui::Button("Use bundled##setup", ImVec2(px(120), px(32))))
                 launcher_model_set_bios_path(m, "");
@@ -5011,7 +5042,7 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     ImGui::Text("%s. %s image", m->has_bios ? "2" : "1", noun);
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
     ImGui::TextColored(col(th.text_muted),
-        m->has_bios
+        is_disc
             ? "Prefer a .cue with its .bin beside it (MODE2/2352). Raw dumps may need conversion."
             : "Select your game ROM file.");
     ImGui::PopTextWrapPos();
