@@ -2904,10 +2904,10 @@ void draw_netplay_player_modal(LauncherModel* m) {
     }
 }
 
-/* Delay-sync only (no rollback / prediction runway). At ~60 Hz, one frame is
- * ~16.67 ms, so one-way RTT coverage is ceil(RTT_ms / 33.33) frames. Add a
- * jitter/TURN pad — Battleship's lower tiers assume prediction absorbs the
- * rest of the path and are too aggressive here. */
+/* Delay-sync only (no invent runway). At ~60 Hz, one frame is ~16.67 ms, so
+ * one-way RTT coverage is ceil(RTT_ms / 33.33) frames. Add a jitter/TURN pad —
+ * BattleShip's feel-first D tiers assume prediction absorbs the rest and are
+ * too aggressive for pure delay-sync. */
 static int np_delay_frames_from_rtt_ms(int rtt_ms) {
     if (rtt_ms < 0) rtt_ms = 0;
     /* ceil(rtt / 33.333) via integer ceil: (rtt + 32) / 33, floor at 1. */
@@ -2918,6 +2918,56 @@ static int np_delay_frames_from_rtt_ms(int rtt_ms) {
     if (delay < 3) delay = 3;   /* delay-only floor (above Battleship's D=2) */
     if (delay > 20) delay = 20;
     return delay;
+}
+
+/* BattleShip rollback-first D tiers (feel cost in D; invent covers the rest). */
+static int np_rb_delay_frames_from_rtt_ms(int rtt_ms) {
+    if (rtt_ms < 0) rtt_ms = 0;
+    int d;
+    if (rtt_ms < 100) d = 2;
+    else if (rtt_ms < 150) d = 3;
+    else if (rtt_ms < 200) d = 5;
+    else if (rtt_ms < 280) d = 7;
+    else d = 8;
+    if (d < 2) d = 2;
+    if (d > 10) d = 10;
+    return d;
+}
+
+/* BattleShip phase_lock / invent runway P:
+ *   P = clamp(max(D+2, one_way+margin), 2..7) with runway floor 4. */
+static int np_rb_prediction_frames_from_rtt_ms(int rtt_ms, int delay_frames) {
+    if (rtt_ms < 0) rtt_ms = 0;
+    if (delay_frames < 2) delay_frames = 2;
+    /* one-way ticks at 60 Hz ≈ ceil(RTT/2 / 16.67) = ceil(RTT / 33.33) */
+    int one_way = (rtt_ms + 32) / 33;
+    if (one_way < 1) one_way = 1;
+    const int kMargin = 2;
+    const int kRunwayMin = 4;
+    const int kPredMax = 7;
+    int runway = one_way + kMargin;
+    if (runway < kRunwayMin) runway = kRunwayMin;
+    int p = delay_frames + 2;
+    if (p < runway) p = runway;
+    if (p > kPredMax) p = kPredMax;
+    if (p < 2) p = 2;
+    if (p > 16) p = 16;
+    return p;
+}
+
+static int np_lobby_max_peer_rtt_ms(LauncherModel* m,
+                                    const RecompLauncherCNetplayCallbacks* np) {
+    int max_rtt = 0;
+    if (!np || !np->member_count || !np->member_get) return 0;
+    const int nmem = np->member_count(np->ctx);
+    for (int mi = 0; mi < nmem; ++mi) {
+        RecompLauncherCNetplayMember mem{};
+        if (!np->member_get(np->ctx, mi, &mem)) continue;
+        if (mem.is_host) continue;
+        if (mem.latency_ms > max_rtt) max_rtt = mem.latency_ms;
+    }
+    (void)m;
+    return max_rtt;
 }
 
 static int np_game_max_players(const LauncherModel* m) {
@@ -3220,6 +3270,16 @@ void draw_netplay_host_modal(LauncherModel* m, const LauncherTheme& th) {
                     const char* lobby = m->netplay_host_name[0]
                         ? m->netplay_host_name : "Netplay Lobby";
                     const int max_slots = np_clamp_host_max_players(m);
+                    /* Seed host match_caps from UI defaults before create. */
+                    if (np->rollback_set)
+                        (void)np->rollback_set(np->ctx,
+                                               m->netplay_rollback ? 1 : 0);
+                    if (np->input_prediction_set)
+                        (void)np->input_prediction_set(
+                            np->ctx, m->netplay_lobby_input_prediction);
+                    if (np->input_delay_set)
+                        (void)np->input_delay_set(np->ctx,
+                                                  m->netplay_lobby_input_delay);
                     const int rc = np->create(np->ctx, lobby, endpoint,
                                               m->netplay_host_password, &m->s,
                                               m->netplay_lan_only ? 1 : 0,
@@ -3711,6 +3771,15 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                     m->netplay_lobby_input_delay = 2;
                 if (m->netplay_lobby_input_delay > 20)
                     m->netplay_lobby_input_delay = 20;
+                if (np->input_prediction_get)
+                    m->netplay_lobby_input_prediction =
+                        np->input_prediction_get(np->ctx);
+                if (m->netplay_lobby_input_prediction < 2)
+                    m->netplay_lobby_input_prediction = 2;
+                if (m->netplay_lobby_input_prediction > 16)
+                    m->netplay_lobby_input_prediction = 16;
+                if (np->rollback_get)
+                    m->netplay_rollback = np->rollback_get(np->ctx) != 0;
                 if (m->netplay_local_room) {
                     m->netplay_force_input_relay = false;
                     m->netplay_force_turn = false;
@@ -3748,22 +3817,27 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
             const bool can_start = seated_players >= 2;
             ImGui::BeginDisabled(!can_start);
             if (ImGui::Button(u8"\u25B6 Play", ImVec2(play_w, btn_h))) {
-                /* Auto input delay (default): host sets D from the highest
-                 * seated peer RTT before arming start. Manual mode keeps the
-                 * Lobby Settings value. See np_delay_frames_from_rtt_ms. */
+                /* Ensure engine match_caps.rollback matches UI before start. */
+                if (np->rollback_set)
+                    (void)np->rollback_set(np->ctx, m->netplay_rollback ? 1 : 0);
+                const bool use_rb = m->netplay_rollback;
+                const int max_rtt = np_lobby_max_peer_rtt_ms(m, np);
+                /* Auto D: rollback uses BattleShip feel tiers; delay-sync uses
+                 * the padded one-way formula. Manual keeps Lobby Settings. */
                 if (!m->netplay_manual_input_delay && np->input_delay_set) {
-                    int max_rtt = 0;
-                    const int nmem = np->member_count ? np->member_count(np->ctx) : 0;
-                    for (int mi = 0; mi < nmem; ++mi) {
-                        RecompLauncherCNetplayMember mem{};
-                        if (!np->member_get || !np->member_get(np->ctx, mi, &mem))
-                            continue;
-                        if (mem.is_host) continue;
-                        if (mem.latency_ms > max_rtt) max_rtt = mem.latency_ms;
-                    }
-                    const int delay = np_delay_frames_from_rtt_ms(max_rtt);
+                    const int delay = use_rb
+                        ? np_rb_delay_frames_from_rtt_ms(max_rtt)
+                        : np_delay_frames_from_rtt_ms(max_rtt);
                     m->netplay_lobby_input_delay = delay;
                     (void)np->input_delay_set(np->ctx, delay);
+                }
+                /* Auto P (rollback only): invent runway from RTT + committed D. */
+                if (use_rb && !m->netplay_manual_input_prediction &&
+                    np->input_prediction_set) {
+                    const int pred = np_rb_prediction_frames_from_rtt_ms(
+                        max_rtt, m->netplay_lobby_input_delay);
+                    m->netplay_lobby_input_prediction = pred;
+                    (void)np->input_prediction_set(np->ctx, pred);
                 }
                 if (np->set_ready)
                     (void)np->set_ready(np->ctx, 1);
@@ -3798,6 +3872,29 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::OpenPopup("Lobby Settings");
     if (ImGui::BeginPopupModal("Lobby Settings", &m->netplay_lobby_settings_open,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
+        /* Disable Rollback first — gates Manual Input Prediction below. */
+        {
+            bool disable_rb = !m->netplay_rollback;
+            if (np->rollback_get)
+                disable_rb = np->rollback_get(np->ctx) == 0;
+            if (ImGui::Checkbox("Disable Rollback", &disable_rb)) {
+                m->netplay_rollback = !disable_rb;
+                if (np->rollback_set)
+                    (void)np->rollback_set(np->ctx, m->netplay_rollback ? 1 : 0);
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos(px(360));
+                ImGui::TextUnformatted(
+                    "Off (default): invent missing remote inputs and correct "
+                    "with rollback episodes (match_caps.rollback=1).\n\n"
+                    "On: force delay-sync for the match. Manual Input "
+                    "Prediction is locked out; only Input Delay applies.");
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
+        }
+        ImGui::Spacing();
         ImGui::TextUnformatted("Manual Input Delay");
         ImGui::SameLine();
         ImGui::TextColored(col(th.text_muted), "(frames)");
@@ -3843,21 +3940,15 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                     ImGui::BeginTooltip();
                     ImGui::PushTextWrapPos(px(360));
                     ImGui::TextUnformatted(
-                        "How many frames ahead every player must buffer inputs "
-                        "(delay-sync). There is no rollback or prediction "
-                        "runahead — delay is the only lever against latency.\n\n"
-                        "Auto (checkbox off) covers one-way RTT at 60 Hz plus a "
-                        "3-frame jitter/TURN pad:\n"
+                        "Committed input delay D (send lead / buffer).\n\n"
+                        "With rollback (Disable Rollback off), auto D uses "
+                        "BattleShip feel tiers:\n"
+                        "  <100 ms → 2, <150 → 3, <200 → 5, <280 → 7, else 8\n\n"
+                        "With delay-sync (Disable Rollback on), auto D covers "
+                        "one-way RTT at 60 Hz plus a 3-frame jitter pad:\n"
                         "  D = ceil(RTT_ms / 33.3) + 3  (min 3, max 20)\n\n"
-                        "Examples (highest peer RTT):\n"
-                        "  ~40 ms  → 5 frames\n"
-                        "  ~80 ms  → 6 frames\n"
-                        "  ~120 ms → 7 frames\n"
-                        "  ~160 ms → 8 frames\n"
-                        "  ~200 ms → 10 frames\n"
-                        "  ~280 ms → 12 frames\n\n"
-                        "Too low causes stalls when packets arrive late. Too "
-                        "high adds input lag for everyone.");
+                        "Too low stalls when packets arrive late. Too high adds "
+                        "input lag for everyone.");
                     ImGui::PopTextWrapPos();
                     ImGui::EndTooltip();
                 }
@@ -3865,25 +3956,69 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
             ImGui::EndDisabled();
         }
         ImGui::Spacing();
+        ImGui::TextUnformatted("Manual Input Prediction");
+        ImGui::SameLine();
+        ImGui::TextColored(col(th.text_muted), "(frames)");
         {
-            bool rb = m->netplay_rollback;
-            if (np->rollback_get)
-                rb = np->rollback_get(np->ctx) != 0;
-            if (ImGui::Checkbox("Rollback (experimental)", &rb)) {
-                m->netplay_rollback = rb;
-                if (np->rollback_set)
-                    (void)np->rollback_set(np->ctx, rb ? 1 : 0);
-            }
+            const bool rb_on = m->netplay_rollback;
+            ImGui::BeginDisabled(!rb_on);
+            bool manual_p = m->netplay_manual_input_prediction;
+            if (ImGui::Checkbox("##manual_input_prediction", &manual_p))
+                m->netplay_manual_input_prediction = manual_p;
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
                 ImGui::BeginTooltip();
                 ImGui::PushTextWrapPos(px(360));
                 ImGui::TextUnformatted(
-                    "Predict missing remote inputs and correct with rollback "
-                    "episodes instead of stalling on delay-sync admit. Both "
-                    "peers must enable this (match_caps.rollback).");
+                    "Rollback invent runway P. Off (default): host sets P from "
+                    "peer RTT at match start. On: use the frame value to the "
+                    "right.\n\n"
+                    "Locked when Disable Rollback is on (delay-sync).");
                 ImGui::PopTextWrapPos();
                 ImGui::EndTooltip();
             }
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!rb_on || !m->netplay_manual_input_prediction);
+            ImGui::SetNextItemWidth(px(140));
+            int pred = m->netplay_lobby_input_prediction;
+            if (ImGui::InputInt("##lobby_input_prediction", &pred, 1, 1)) {
+                if (pred < 2) pred = 2;
+                if (pred > 16) pred = 16;
+                m->netplay_lobby_input_prediction = pred;
+                if (np->input_prediction_set)
+                    (void)np->input_prediction_set(np->ctx, pred);
+            }
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                pred = m->netplay_lobby_input_prediction;
+                if (pred < 2) pred = 2;
+                if (pred > 16) pred = 16;
+                m->netplay_lobby_input_prediction = pred;
+                if (np->input_prediction_set)
+                    (void)np->input_prediction_set(np->ctx, pred);
+            }
+            ImGui::SameLine();
+            {
+                const float help_sz = ImGui::GetFrameHeight();
+                if (ImGui::Button("?##input_prediction_help",
+                                 ImVec2(help_sz, help_sz))) {
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+                    ImGui::BeginTooltip();
+                    ImGui::PushTextWrapPos(px(360));
+                    ImGui::TextUnformatted(
+                        "How far ahead of the remote tip a peer may invent "
+                        "hold-last inputs before stalling (BattleShip "
+                        "phase_lock).\n\n"
+                        "Auto (checkbox off):\n"
+                        "  P = max(D+2, ceil(RTT/33.3)+2)  clamped 2..7\n"
+                        "  (runway floor 4)\n\n"
+                        "Outside this window the fast peer waits — same "
+                        "cadence contract as delay-sync, with invent inside.");
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndTooltip();
+                }
+            }
+            ImGui::EndDisabled();
+            ImGui::EndDisabled();
         }
         ImGui::Spacing();
         if (ImGui::Button("Close", ImVec2(px(120), 0))) {

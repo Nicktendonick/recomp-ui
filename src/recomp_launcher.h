@@ -75,6 +75,8 @@ typedef struct RecompLauncherCNetplayLaunch {
     char     peer_hostport[64];
     uint32_t session_id;
     int      input_delay;
+    /* Rollback invent runway (P). Unused when rollback == 0. Clamped 2..16. */
+    int      input_prediction;
     int      max_slots; /* lobby seat ceiling (2..RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS) */
     /* Seated players at launch — delay-sync slot_count. 0 = unknown / use max_slots. */
     int      player_count;
@@ -83,7 +85,7 @@ typedef struct RecompLauncherCNetplayLaunch {
     int      force_input_relay;
     /* Host match_caps: ICE relay-only / Force TURN for UDP (0/1). */
     int      force_turn;
-    /* Host match_caps: rollback invent/episode path (0/1, experimental). */
+    /* Host match_caps: rollback invent/episode path (0/1; lobby default on). */
     int      rollback;
 } RecompLauncherCNetplayLaunch;
 
@@ -176,10 +178,13 @@ typedef struct RecompLauncherCNetplayCallbacks {
      * published in match_caps.force_turn so every peer uses typ relay. */
     int  (*force_turn_get)(void* ctx);
     int  (*force_turn_set)(void* ctx, int force);
-    /* Optional: host Rollback (experimental) (0/1). Published in
-     * match_caps.rollback; peers apply via PSX_NET_MODE / launch.rollback. */
+    /* Optional: host Rollback (0/1). Published in match_caps.rollback;
+     * peers apply via PSX_NET_MODE / launch.rollback. Lobby default on. */
     int  (*rollback_get)(void* ctx);
     int  (*rollback_set)(void* ctx, int enable);
+    /* Optional host invent runway (P), frames, clamped 2..16. Rollback only. */
+    int  (*input_prediction_get)(void* ctx);
+    int  (*input_prediction_set)(void* ctx, int prediction_frames);
 } RecompLauncherCNetplayCallbacks;
 
 /* ---- schema-driven mods --------------------------------------------------

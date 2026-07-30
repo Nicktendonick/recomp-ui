@@ -330,12 +330,17 @@ typedef struct {
     /* When false (default), host picks delay from max peer RTT at match start.
      * When true, netplay_lobby_input_delay is used as-is. */
     bool      netplay_manual_input_delay;
+    /* Invent runway P (rollback). Engine clamps 2..16. */
+    int       netplay_lobby_input_prediction;
+    /* When false (default), host picks P from RTT at match start (rollback). */
+    bool      netplay_manual_input_prediction;
     /* STUN / host external_ip cache for LAN lobby Public IP field. */
     char      netplay_public_ip[64];
     bool      netplay_public_ip_resolved;
     /* Kept for host ABI / match_caps defaults (no longer exposed in Lobby Settings). */
     bool      netplay_force_input_relay;
     bool      netplay_force_turn;
+    /* True = rollback invent path (lobby default). UI exposes “Disable Rollback”. */
     bool      netplay_rollback;
     /* Host Lobby: desired max seats (2..min(8, game player_count)). */
     int       netplay_host_max_players;

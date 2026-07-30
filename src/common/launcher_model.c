@@ -192,9 +192,13 @@ void launcher_model_init(LauncherModel* m,
     m->netplay_lobby_settings_open = false;
     m->netplay_lobby_input_delay = 2;
     m->netplay_manual_input_delay = false; /* auto from max peer RTT at launch */
+    m->netplay_lobby_input_prediction = 4;
+    m->netplay_manual_input_prediction = false; /* auto P from RTT when rollback */
     m->netplay_force_input_relay = false;
     /* Default on for online lobbies (CGNAT); not exposed in Lobby Settings. */
     m->netplay_force_turn = true;
+    /* Rollback on by default; Lobby Settings “Disable Rollback” opts out. */
+    m->netplay_rollback = true;
     {
         int max_p = m->player_count > 0 ? m->player_count : 2;
         if (max_p < 2) max_p = 2;
