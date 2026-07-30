@@ -433,6 +433,12 @@ struct RecompLauncherCSettings {
     // Multiplier applied by the host to a controller's angular-rate sensor.
     // 0 means unset and is seeded to 1.0 by the launcher model.
     float gyro_sensitivity;    // 0.25..4.00, 1.00 = game default
+
+    // ---- optional presentation enhancements (capability-gated) -----------
+    // Appended additively so zero-initialized existing consumers keep their
+    // current settings surface and behavior.
+    int sharp_filter;           // integer prescale + fractional linear finish
+    int affine_filter;          // selective game-authorized affine smoothing
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
@@ -705,6 +711,11 @@ typedef struct RecompLauncherCGameInfo {
      * sensitivity slider. The launcher only edits Settings.gyro_sensitivity;
      * discovery, sensor selection, and axis mapping remain host-owned. */
     int has_gyro_controls;
+
+    /* Add independent checkboxes to Display settings. The host maps their
+     * committed Settings values onto renderer configuration. */
+    int has_sharp_filter;
+    int has_affine_filter;
 } RecompLauncherCGameInfo;
 
 // Returns: 0 = LAUNCH (boot out_rom_path with the edited *io),

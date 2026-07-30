@@ -1748,6 +1748,7 @@ bool any_deep_display(const LauncherModel* m) {
 bool video_card_grows(const LauncherModel* m) {
     if (any_deep_display(m)) return true;
     if (m->adaptive_view_supported) return true;
+    if (m->has_sharp_filter || m->has_affine_filter) return true;
     // NES legacy-surface additions (Integer scaling row, HD texture pack block)
     // add extra rows the fixed no_scroll band wasn't sized for.
     if (m->has_integer_scale || m->hdpack_supported) return true;
@@ -1771,7 +1772,15 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
 
     if (!any_deep_display(m)) {
         // ---- legacy minimal surface (SNES/NES etc.) — aligned label grid -------
-        float cw = ImGui::CalcTextSize("Linear filtering").x;   // widest legacy label
+        float cw = ImGui::CalcTextSize("Linear filtering").x;
+        if (m->has_sharp_filter) {
+            float t = ImGui::CalcTextSize("Sharp fractional scaling").x;
+            if (t > cw) cw = t;
+        }
+        if (m->has_affine_filter) {
+            float t = ImGui::CalcTextSize("Affine background smoothing").x;
+            if (t > cw) cw = t;
+        }
         { float t = ImGui::CalcTextSize("View mode").x; if (t > cw) cw = t; }
         if (m->has_integer_scale) { float t = ImGui::CalcTextSize("Integer scaling").x; if (t > cw) cw = t; }
         cw += px(18.0f);
@@ -1792,6 +1801,18 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         row_label("Linear filtering", th, cw);
         bool filter = m->s.linear_filter != 0;
         if (ImGui::Checkbox("##filter", &filter)) launcher_model_toggle_filter(m);
+        if (m->has_sharp_filter) {
+            row_label("Sharp fractional scaling", th, cw);
+            bool sharp = m->s.sharp_filter != 0;
+            if (ImGui::Checkbox("##sharp_filter", &sharp))
+                launcher_model_toggle_sharp_filter(m);
+        }
+        if (m->has_affine_filter) {
+            row_label("Affine background smoothing", th, cw);
+            bool affine = m->s.affine_filter != 0;
+            if (ImGui::Checkbox("##affine_filter", &affine))
+                launcher_model_toggle_affine_filter(m);
+        }
         if (m->aspect_mask || m->num_aspect_labels > 0 ||
             m->widescreen_supported || m->adaptive_view_supported) {
             row_label("View mode", th, cw);
@@ -1900,6 +1921,20 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         row_label("Antialiasing", th);
         if (ImGui::Button(launcher_model_aa_label(m), ImVec2(px(90), px(30))))
             launcher_model_cycle_aa(m);
+    }
+
+    if (m->has_sharp_filter) {
+        row_label("Sharp fractional scaling", th);
+        bool sharp = m->s.sharp_filter != 0;
+        if (ImGui::Checkbox("##sharp_filter", &sharp))
+            launcher_model_toggle_sharp_filter(m);
+    }
+
+    if (m->has_affine_filter) {
+        row_label("Affine background smoothing", th);
+        bool affine = m->s.affine_filter != 0;
+        if (ImGui::Checkbox("##affine_filter", &affine))
+            launcher_model_toggle_affine_filter(m);
     }
 
     if (m->has_screen_kind) {

@@ -146,6 +146,8 @@ void launcher_model_init(LauncherModel* m,
         m->hide_rebind          = game->hide_rebind != 0;
         m->has_mouse_controls   = game->has_mouse_controls != 0;
         m->has_gyro_controls    = game->has_gyro_controls != 0;
+        m->has_sharp_filter     = game->has_sharp_filter != 0;
+        m->has_affine_filter    = game->has_affine_filter != 0;
         m->netplay_supported    = game->netplay_supported != 0 && game->netplay != NULL;
         m->netplay              = game->netplay;
 #if RECOMP_UI_ENABLE_MODS
@@ -560,6 +562,19 @@ void launcher_model_cycle_scale(LauncherModel* m) {
 
 void launcher_model_toggle_filter(LauncherModel* m) {
     m->s.linear_filter = !m->s.linear_filter;
+    if (m->s.linear_filter && m->has_sharp_filter)
+        m->s.sharp_filter = 0;
+}
+
+void launcher_model_toggle_sharp_filter(LauncherModel* m) {
+    if (!m || !m->has_sharp_filter) return;
+    m->s.sharp_filter = !m->s.sharp_filter;
+    if (m->s.sharp_filter) m->s.linear_filter = 0;
+}
+
+void launcher_model_toggle_affine_filter(LauncherModel* m) {
+    if (!m || !m->has_affine_filter) return;
+    m->s.affine_filter = !m->s.affine_filter;
 }
 
 void launcher_model_toggle_widescreen(LauncherModel* m) {

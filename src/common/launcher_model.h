@@ -200,6 +200,8 @@ typedef struct {
     // the mouse surface composes and behavior is unchanged for every game.
     bool has_mouse_controls;
     bool has_gyro_controls;
+    bool has_sharp_filter;
+    bool has_affine_filter;
     bool netplay_supported;
     const RecompLauncherCNetplayCallbacks* netplay;
     const RecompLauncherCModProvider* mods;
@@ -399,6 +401,8 @@ void launcher_model_open_config(LauncherModel* m, int player);  // -> Controller
 // ---- display settings ----
 void launcher_model_cycle_scale(LauncherModel* m);   // 1..6 wrap
 void launcher_model_toggle_filter(LauncherModel* m);
+void launcher_model_toggle_sharp_filter(LauncherModel* m);
+void launcher_model_toggle_affine_filter(LauncherModel* m);
 void launcher_model_toggle_widescreen(LauncherModel* m);  // gated
 void launcher_model_toggle_adaptive_view(LauncherModel* m);  // gated; fixed aspect is retained
 /* Unified Native / fixed widescreen / Adaptive control. Compatibility fields
