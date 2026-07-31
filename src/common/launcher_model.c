@@ -131,12 +131,17 @@ void launcher_model_init(LauncherModel* m,
         m->bios_verify_cb       = game->bios_verify;
         m->prepare_disc_cb      = game->prepare_disc;
         m->prepare_with_progress_cb = game->prepare_with_progress;
+        m->rebuild_with_progress_cb = game->rebuild_with_progress;
         m->prepare_disc_label   = game->prepare_disc_label;
         m->prepare_disc_note    = game->prepare_disc_note;
         m->prepare_section_title = game->prepare_section_title;
         m->prepare_busy_status  = game->prepare_busy_status;
         m->prepare_success_status = game->prepare_success_status;
+        m->rebuild_busy_status  = game->rebuild_busy_status;
+        m->rebuild_success_status = game->rebuild_success_status;
         m->prepare_use_selected_rom = game->prepare_use_selected_rom != 0;
+        m->rebuild_after_prepare = game->rebuild_after_prepare != 0;
+        m->relaunch_after_rebuild = game->relaunch_after_rebuild != 0;
         m->boxart_path          = game->boxart_path;      // NULL => default boxart.tga
         m->aspect_labels        = game->aspect_labels;    // NULL => built-in 4:3/16:9/21:9
         m->num_aspect_labels    = game->num_aspect_labels;
@@ -361,6 +366,7 @@ void launcher_model_init(LauncherModel* m,
     m->setup_prepare_fraction = -1.0f;
     m->setup_status[0] = '\0';
     m->setup_error[0] = '\0';
+    m->relaunch_exe[0] = '\0';
     launcher_model_refresh_bios_status(m);
 
     /* Soft-return from a match: land on Netplay with the room modal open. */
@@ -983,7 +989,9 @@ void launcher_model_finish_setup(LauncherModel* m) {
     m->setup_error[0] = '\0';
 }
 
-/* ---- prepare_disc background job (file-scope; one at a time) ---- */
+/* ---- prepare / rebuild background job (file-scope; one at a time) ---- */
+enum { PREP_JOB_PREPARE = 0, PREP_JOB_REBUILD = 1 };
+
 typedef struct {
     LauncherModel* m;
     char source[512];
@@ -991,6 +999,7 @@ typedef struct {
     char err[256];
     char progress_msg[256];
     float progress_pct; /* <0 indeterminate; else 0..1 */
+    int  kind;          /* PREP_JOB_PREPARE or PREP_JOB_REBUILD */
     int  result;        /* 0 fail, 1 ok */
     volatile int done;
     volatile int progress_dirty;
@@ -1024,6 +1033,35 @@ static void prep_progress_cb(void* ctx, float pct, const char* message) {
 }
 
 #if defined(_WIN32)
+static DWORD WINAPI prep_thread_main(LPVOID arg);
+#else
+static void* prep_thread_main(void* arg);
+#endif
+
+static int prep_spawn_thread(LauncherModel* m) {
+#if defined(_WIN32)
+    HANDLE th = CreateThread(NULL, 0, prep_thread_main, &g_prep_job, 0, NULL);
+    if (!th) {
+        m->setup_preparing = false;
+        safe_copy(m->setup_error, sizeof(m->setup_error), "Failed to start prepare thread.");
+        m->setup_status[0] = '\0';
+        return 0;
+    }
+    CloseHandle(th);
+#else
+    pthread_t th;
+    if (pthread_create(&th, NULL, prep_thread_main, &g_prep_job) != 0) {
+        m->setup_preparing = false;
+        safe_copy(m->setup_error, sizeof(m->setup_error), "Failed to start prepare thread.");
+        m->setup_status[0] = '\0';
+        return 0;
+    }
+    pthread_detach(th);
+#endif
+    return 1;
+}
+
+#if defined(_WIN32)
 static DWORD WINAPI prep_thread_main(LPVOID arg) {
 #else
 static void* prep_thread_main(void* arg) {
@@ -1032,7 +1070,16 @@ static void* prep_thread_main(void* arg) {
     j->out_path[0] = '\0';
     j->err[0] = '\0';
     j->result = 0;
-    if (j->m && j->m->prepare_with_progress_cb) {
+    if (j->kind == PREP_JOB_REBUILD) {
+        if (j->m && j->m->rebuild_with_progress_cb) {
+            j->result = j->m->rebuild_with_progress_cb(
+                            j->source, j->out_path, sizeof(j->out_path),
+                            j->err, sizeof(j->err),
+                            prep_progress_cb, j) ? 1 : 0;
+        } else {
+            safe_copy(j->err, sizeof(j->err), "No rebuild callback.");
+        }
+    } else if (j->m && j->m->prepare_with_progress_cb) {
         j->result = j->m->prepare_with_progress_cb(
                         j->source, j->out_path, sizeof(j->out_path),
                         j->err, sizeof(j->err),
@@ -1051,12 +1098,41 @@ static void* prep_thread_main(void* arg) {
 #endif
 }
 
+static void launcher_model_begin_rebuild_locked(LauncherModel* m) {
+    /* Caller has already cleared setup_preparing from a completed prepare. */
+    memset(&g_prep_job, 0, sizeof(g_prep_job));
+    g_prep_job.m = m;
+    g_prep_job.kind = PREP_JOB_REBUILD;
+    g_prep_job.progress_pct = -1.0f;
+    safe_copy(g_prep_job.source, sizeof(g_prep_job.source), m->rom_full);
+    m->setup_preparing = true;
+    m->setup_prepare_pulse = 0.0f;
+    m->setup_prepare_fraction = -1.0f;
+    m->setup_error[0] = '\0';
+    safe_copy(m->setup_status, sizeof(m->setup_status),
+              (m->rebuild_busy_status && m->rebuild_busy_status[0])
+                  ? m->rebuild_busy_status
+                  : "Building game…");
+    if (!prep_spawn_thread(m))
+        return;
+}
+
+void launcher_model_start_rebuild(LauncherModel* m) {
+    if (!m || m->setup_preparing || !m->rebuild_with_progress_cb) return;
+    if (!m->rom_full[0]) {
+        safe_copy(m->setup_error, sizeof(m->setup_error), "Select a ROM before rebuilding.");
+        return;
+    }
+    launcher_model_begin_rebuild_locked(m);
+}
+
 void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path) {
     if (!m || m->setup_preparing) return;
     if (!m->prepare_with_progress_cb && !m->prepare_disc_cb) return;
     if (!source_path || !source_path[0]) return;
     memset(&g_prep_job, 0, sizeof(g_prep_job));
     g_prep_job.m = m;
+    g_prep_job.kind = PREP_JOB_PREPARE;
     g_prep_job.progress_pct = -1.0f;
     safe_copy(g_prep_job.source, sizeof(g_prep_job.source), source_path);
     m->setup_preparing = true;
@@ -1067,25 +1143,7 @@ void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path
               (m->prepare_busy_status && m->prepare_busy_status[0])
                   ? m->prepare_busy_status
                   : "Preparing disc image…");
-#if defined(_WIN32)
-    HANDLE th = CreateThread(NULL, 0, prep_thread_main, &g_prep_job, 0, NULL);
-    if (!th) {
-        m->setup_preparing = false;
-        safe_copy(m->setup_error, sizeof(m->setup_error), "Failed to start prepare thread.");
-        m->setup_status[0] = '\0';
-        return;
-    }
-    CloseHandle(th);
-#else
-    pthread_t th;
-    if (pthread_create(&th, NULL, prep_thread_main, &g_prep_job) != 0) {
-        m->setup_preparing = false;
-        safe_copy(m->setup_error, sizeof(m->setup_error), "Failed to start prepare thread.");
-        m->setup_status[0] = '\0';
-        return;
-    }
-    pthread_detach(th);
-#endif
+    prep_spawn_thread(m);
 }
 
 void launcher_model_poll_prepare_disc(LauncherModel* m) {
@@ -1102,6 +1160,7 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
         g_prep_job.progress_dirty = 0;
     }
     const int done = g_prep_job.done && g_prep_job.m == m;
+    const int kind = g_prep_job.kind;
     char out_path[512];
     char err[256];
     int result = 0;
@@ -1116,13 +1175,43 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
     if (!done) return;
     m->setup_preparing = false;
     m->setup_prepare_fraction = -1.0f;
+
+    if (kind == PREP_JOB_REBUILD) {
+        if (result && out_path[0]) {
+            safe_copy(m->relaunch_exe, sizeof(m->relaunch_exe), out_path);
+            safe_copy(m->setup_status, sizeof(m->setup_status),
+                      (m->rebuild_success_status && m->rebuild_success_status[0])
+                          ? m->rebuild_success_status
+                          : "Build complete.");
+            m->setup_error[0] = '\0';
+            if (m->relaunch_after_rebuild) {
+                safe_copy(m->setup_status, sizeof(m->setup_status),
+                          "Build complete — restarting…");
+                m->action = LNG_ACTION_RELAUNCH;
+            }
+        } else {
+            m->setup_status[0] = '\0';
+            safe_copy(m->setup_error, sizeof(m->setup_error),
+                      err[0] ? err : "Rebuild failed.");
+        }
+        return;
+    }
+
     if (result && out_path[0]) {
         launcher_model_set_rom(m, out_path);
+        m->setup_error[0] = '\0';
+        if (m->rebuild_after_prepare && m->rebuild_with_progress_cb) {
+            safe_copy(m->setup_status, sizeof(m->setup_status),
+                      (m->prepare_success_status && m->prepare_success_status[0])
+                          ? m->prepare_success_status
+                          : "Sources ready — starting build…");
+            launcher_model_begin_rebuild_locked(m);
+            return;
+        }
         safe_copy(m->setup_status, sizeof(m->setup_status),
                   (m->prepare_success_status && m->prepare_success_status[0])
                       ? m->prepare_success_status
                       : "Disc ready.");
-        m->setup_error[0] = '\0';
     } else {
         m->setup_status[0] = '\0';
         safe_copy(m->setup_error, sizeof(m->setup_error),

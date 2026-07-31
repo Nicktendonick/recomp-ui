@@ -48,7 +48,8 @@ typedef enum {
 typedef enum {
     LNG_ACTION_NONE = 0,   // still running
     LNG_ACTION_LAUNCH,     // boot the game with committed settings
-    LNG_ACTION_QUIT        // user quit
+    LNG_ACTION_QUIT,       // user quit
+    LNG_ACTION_RELAUNCH    // quit + host should exec rebuilt binary
 } LngAction;
 
 // Representative subset of the SNES pad for the rebind UI. This enum is the
@@ -167,12 +168,22 @@ typedef struct {
                                     char* err_msg, size_t err_cap,
                                     RecompLauncherCPrepareProgressFn on_progress,
                                     void* progress_ctx);
+    int (*rebuild_with_progress_cb)(const char* rom_path,
+                                    char* out_exe_path, size_t out_cap,
+                                    char* err_msg, size_t err_cap,
+                                    RecompLauncherCPrepareProgressFn on_progress,
+                                    void* progress_ctx);
     const char* prepare_disc_label;   // borrowed; NULL => default button text
     const char* prepare_disc_note;    // borrowed; NULL => default help
     const char* prepare_section_title;   // borrowed; NULL => "Convert raw dump…"
     const char* prepare_busy_status;     // borrowed; NULL => "Preparing disc image…"
     const char* prepare_success_status;  // borrowed; NULL => "Disc ready."
+    const char* rebuild_busy_status;     // borrowed; NULL => "Building game…"
+    const char* rebuild_success_status;  // borrowed; NULL => "Build complete."
     bool        prepare_use_selected_rom; // button uses current ROM (no 2nd picker)
+    bool        rebuild_after_prepare;
+    bool        relaunch_after_rebuild;
+    char        relaunch_exe[512];       // set when rebuild requests relaunch
     // Box-art path relative to the assets dir (GameInfo.boxart_path);
     // NULL => the default "assets/img/boxart.tga".
     const char* boxart_path;
@@ -579,8 +590,11 @@ bool launcher_model_can_launch(const LauncherModel* m);
 void launcher_model_refresh_bios_status(LauncherModel* m);
 // Kick a host prepare_disc job on a background thread. No-op if no callback
 // or a job is already running. On success adopts the resulting disc path.
+// When rebuild_after_prepare is set, automatically chains into rebuild.
 void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path);
-// Poll prepare job; call once per frame from the UI while setup_preparing.
+// Kick rebuild_with_progress alone (same busy UI as prepare).
+void launcher_model_start_rebuild(LauncherModel* m);
+// Poll prepare/rebuild job; call once per frame from the UI while setup_preparing.
 void launcher_model_poll_prepare_disc(LauncherModel* m);
 // Dismiss the wizard once can_finish_setup is true (keeps dashboard).
 void launcher_model_finish_setup(LauncherModel* m);

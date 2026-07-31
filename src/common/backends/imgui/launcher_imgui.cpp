@@ -5069,13 +5069,16 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::PopTextWrapPos();
         const char* prep_lbl = (m->prepare_disc_label && m->prepare_disc_label[0])
                                    ? m->prepare_disc_label
-                                   : "Convert raw dump…";
+                                   : ((m->rebuild_after_prepare &&
+                                       m->rebuild_with_progress_cb)
+                                          ? "Generate & rebuild…"
+                                          : "Convert raw dump…");
         const bool use_selected = m->prepare_use_selected_rom;
         const bool can_prep_selected = use_selected && m->rom_present &&
                                        m->rom_full[0] &&
                                        strcmp(m->rom_size, "--") != 0;
         if (use_selected && !can_prep_selected) ImGui::BeginDisabled();
-        if (ImGui::Button(prep_lbl, ImVec2(px(220), px(32)))) {
+        if (ImGui::Button(prep_lbl, ImVec2(px(240), px(32)))) {
             if (use_selected) {
                 if (can_prep_selected)
                     launcher_model_start_prepare_disc(m, m->rom_full);
