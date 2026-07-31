@@ -748,9 +748,9 @@ typedef struct RecompLauncherCGameInfo {
     const char* rebuild_busy_status;     /* NULL => "Building game…" */
     const char* rebuild_success_status;  /* NULL => "Build complete." */
 
-    /* When 1, "Continue to launcher" stays disabled until prepare succeeds
-     * (and rebuild too when rebuild_after_prepare is set). For local codegen
-     * first-run flows that must not skip Generate. */
+    /* When 1, the setup modal hides "Continue to launcher" and requires
+     * prepare (and rebuild when rebuild_after_prepare is set). Local codegen
+     * first-run: Generate & rebuild, then relaunch — Quit is the only other exit. */
     int prepare_required_before_continue;
 } RecompLauncherCGameInfo;
 

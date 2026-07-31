@@ -4934,8 +4934,10 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     ImGui::OpenPopup("First-run setup");
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(px(520), px(420)), ImGuiCond_Appearing);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(px(420), px(280)),
+    /* Wide enough for ROM path + Browse; tall enough for wrapped status
+     * above the progress bar and Continue/Quit without crowding. */
+    ImGui::SetNextWindowSize(ImVec2(px(680), px(560)), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(px(560), px(420)),
                                         ImVec2(FLT_MAX, FLT_MAX));
     /* User-resizable; do not AlwaysAutoResize — long cmake lines were
      * stretching the modal, then shrinking it as status text shortened. */
@@ -5129,32 +5131,33 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     }
 
     ImGui::Dummy(ImVec2(0, px(14)));
-    /* Continue once required files are present. Fingerprint mismatch still
-     * blocks PLAY on the dashboard, but must not trap the user in this modal.
-     * Codegen hosts may require Generate (& rebuild) first. */
-    const bool ready = launcher_model_can_finish_setup(m);
-    if (!ready) ImGui::BeginDisabled();
-    if (ImGui::Button("Continue to launcher", ImVec2(px(220), px(34)))) {
+    /* Codegen hosts gate on Generate (& rebuild) then relaunch — no Continue.
+     * ROM/BIOS-only wizards still offer Continue once paths are present. */
+    if (!m->prepare_required_before_continue) {
+        const bool ready = launcher_model_can_finish_setup(m);
+        if (!ready) ImGui::BeginDisabled();
+        if (ImGui::Button("Continue to launcher", ImVec2(px(220), px(34)))) {
+            launcher_model_finish_setup(m);
+            ImGui::CloseCurrentPopup();
+        }
+        if (!ready) {
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                if (!m->rom_present || !m->rom_full[0])
+                    ImGui::SetTooltip("Select a %s first", noun);
+                else if (m->setup_preparing)
+                    ImGui::SetTooltip("Wait for the current job to finish");
+                else if (m->has_bios && !m->setup_bios_ok)
+                    ImGui::SetTooltip("BIOS check required");
+            }
+        }
+        ImGui::SameLine();
+    } else if (launcher_model_can_finish_setup(m) &&
+               m->action != LNG_ACTION_RELAUNCH) {
+        /* Prepare-only success (e.g. no cmake): drop into the launcher. */
         launcher_model_finish_setup(m);
         ImGui::CloseCurrentPopup();
     }
-    if (!ready) {
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            if (m->prepare_required_before_continue && !m->setup_prepare_satisfied)
-                ImGui::SetTooltip(
-                    m->rebuild_after_prepare
-                        ? "Generate & rebuild first"
-                        : "Generate sources first");
-            else if (!m->rom_present || !m->rom_full[0])
-                ImGui::SetTooltip("Select a %s first", noun);
-            else if (m->setup_preparing)
-                ImGui::SetTooltip("Wait for the current job to finish");
-            else if (m->has_bios && !m->setup_bios_ok)
-                ImGui::SetTooltip("BIOS check required");
-        }
-    }
-    ImGui::SameLine();
     if (ImGui::Button("Quit", ImVec2(px(100), px(34))))
         m->action = LNG_ACTION_QUIT;
 
