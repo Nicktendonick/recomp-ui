@@ -185,6 +185,12 @@ typedef struct RecompLauncherCNetplayCallbacks {
  * rebuild their catalogs after any mutation without dangling UI pointers. */
 #define RECOMP_LAUNCHER_MOD_ID_MAX 96
 #define RECOMP_LAUNCHER_MOD_VALUE_MAX 128
+#define RECOMP_LAUNCHER_MOD_AUTHOR_LINK_MAX 8
+
+typedef struct RecompLauncherCModAuthorLink {
+    char name[64];
+    char url[256];
+} RecompLauncherCModAuthorLink;
 
 typedef enum RecompLauncherCModOptionType {
     RECOMP_MOD_OPTION_BOOLEAN = 0,
@@ -197,8 +203,12 @@ typedef struct RecompLauncherCModPackage {
     char version[32];
     char name[128];
     char author[96];
+    RecompLauncherCModAuthorLink author_links[RECOMP_LAUNCHER_MOD_AUTHOR_LINK_MAX];
+    int  author_link_count;
     char description[512];
     char license[64];
+    char source_name[128];
+    char source_url[256];
     char status[256];
     int  enabled;
     int  option_count;
@@ -216,7 +226,11 @@ typedef struct RecompLauncherCModFeature {
     char package_name[128];
     char name[128];
     char author[96];
+    RecompLauncherCModAuthorLink author_links[RECOMP_LAUNCHER_MOD_AUTHOR_LINK_MAX];
+    int  author_link_count;
     char description[512];
+    char source_name[128];
+    char source_url[256];
     char group[96];
     char status[256];
     int  enabled;

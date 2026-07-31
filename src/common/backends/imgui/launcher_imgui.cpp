@@ -256,6 +256,9 @@ void apply_scale(const LauncherTheme& th, float scale, const char* font_path,
     style.Colors[ImGuiCol_CheckMark]       = col(th.accent);
     style.Colors[ImGuiCol_Text]            = col(th.text);
     style.Colors[ImGuiCol_TextDisabled]    = col(th.text_muted);
+#if defined(IMGUI_VERSION_NUM) && IMGUI_VERSION_NUM >= 19100
+    style.Colors[ImGuiCol_TextLink]        = col(th.accent2);
+#endif
     style.Colors[ImGuiCol_Separator]       = col(th.border);
     style.Colors[ImGuiCol_ScrollbarBg]     = col(th.panel);
     style.Colors[ImGuiCol_ScrollbarGrab]   = col(th.border);
@@ -4453,6 +4456,43 @@ static bool draw_mod_integer_option(const RecompLauncherCModOption& option,
     return true;
 }
 
+static void draw_linkified_mod_author(
+    const char* author_text,
+    const RecompLauncherCModAuthorLink* author_links,
+    int author_link_count,
+    const LauncherTheme& th) {
+    if (!author_text || !author_text[0]) return;
+    const std::string author(author_text);
+    size_t cursor = 0;
+    ImGui::TextColored(col(th.text_muted), "by: ");
+    ImGui::SameLine(0, 0);
+    while (cursor < author.size()) {
+        size_t next = std::string::npos;
+        const RecompLauncherCModAuthorLink* link = nullptr;
+        for (int i = 0; i < author_link_count; ++i) {
+            const auto& candidate = author_links[i];
+            if (!candidate.name[0] || !candidate.url[0]) continue;
+            const size_t found = author.find(candidate.name, cursor);
+            if (found < next) {
+                next = found;
+                link = &candidate;
+            }
+        }
+        if (!link) {
+            ImGui::TextColored(col(th.text_muted), "%s", author.c_str() + cursor);
+            break;
+        }
+        if (next > cursor) {
+            const std::string prefix = author.substr(cursor, next - cursor);
+            ImGui::TextColored(col(th.text_muted), "%s", prefix.c_str());
+            ImGui::SameLine(0, 0);
+        }
+        ImGui::TextLinkOpenURL(link->name, link->url);
+        cursor = next + std::strlen(link->name);
+        if (cursor < author.size()) ImGui::SameLine(0, 0);
+    }
+}
+
 static void draw_mod_packages(LauncherModel* m, const LauncherTheme& th) {
     const auto* mods = m ? m->mods : nullptr;
     if (!mods || !mods->package_count || !mods->package_get) return;
@@ -4535,8 +4575,17 @@ static void draw_mod_packages(LauncherModel* m, const LauncherTheme& th) {
             ImGui::SameLine();
             ImGui::TextColored(col(th.text_muted), "%s", package.version);
             if (package.author[0])
-                ImGui::TextColored(col(th.text_muted), "by %s", package.author);
+                draw_linkified_mod_author(
+                    package.author, package.author_links,
+                    package.author_link_count, th);
             if (package.description[0]) ImGui::TextWrapped("%s", package.description);
+            if (package.source_url[0]) {
+                ImGui::TextColored(col(th.text_muted), "Source: ");
+                ImGui::SameLine(0, 0);
+                ImGui::TextLinkOpenURL(
+                    package.source_name[0] ? package.source_name : "Project page",
+                    package.source_url);
+            }
             if (package.license[0])
                 ImGui::TextColored(col(th.text_muted), "License: %s", package.license);
             ImGui::Spacing();
@@ -5038,7 +5087,16 @@ static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
                 feature.package_version[0] ? " " : "",
                 feature.package_version);
             if (feature.author[0])
-                ImGui::TextColored(col(th.text_muted), "by %s", feature.author);
+                draw_linkified_mod_author(
+                    feature.author, feature.author_links,
+                    feature.author_link_count, th);
+            if (feature.source_url[0]) {
+                ImGui::TextColored(col(th.text_muted), "Source: ");
+                ImGui::SameLine(0, 0);
+                ImGui::TextLinkOpenURL(
+                    feature.source_name[0] ? feature.source_name : "Project page",
+                    feature.source_url);
+            }
             if (feature.description[0])
                 ImGui::TextWrapped("%s", feature.description);
             ImGui::Spacing();
