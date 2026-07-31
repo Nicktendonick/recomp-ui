@@ -1196,6 +1196,14 @@ void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path
     if (!m || m->setup_preparing) return;
     if (!m->prepare_with_progress_cb && !m->prepare_disc_cb) return;
     if (!source_path || !source_path[0]) return;
+    /* Persist BIOS pick for codegen hosts that stage/regenerate backends. */
+    if (m->has_bios && m->s.bios_path[0]) {
+        FILE* bf = fopen("bios.cfg", "w");
+        if (bf) {
+            fprintf(bf, "%s\n", m->s.bios_path);
+            fclose(bf);
+        }
+    }
     memset(&g_prep_job, 0, sizeof(g_prep_job));
     g_prep_job.m = m;
     g_prep_job.kind = PREP_JOB_PREPARE;
