@@ -5154,20 +5154,92 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
     (void)win;
 }
 
-void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
-    if (!m->setup_wizard_open) return;
-    launcher_model_poll_prepare_disc(m);
-    ImGui::OpenPopup("First-run setup");
+/* Compact progress-only modal while a setup job runs — closes the full
+ * first-run form so nothing else is interactive. */
+static void draw_setup_progress_modal(LauncherModel* m, const LauncherTheme& th) {
+    static const char* kProgPopup = "Setup progress";
+    ImGui::OpenPopup(kProgPopup);
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    /* Wide enough for ROM path + Browse; tall enough for wrapped status
-     * above the progress bar and Continue/Quit without crowding. */
-    ImGui::SetNextWindowSize(ImVec2(px(680), px(560)), ImGuiCond_Appearing);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(px(560), px(420)),
-                                        ImVec2(FLT_MAX, FLT_MAX));
-    /* User-resizable; do not AlwaysAutoResize — long cmake lines were
-     * stretching the modal, then shrinking it as status text shortened. */
-    if (!ImGui::BeginPopupModal("First-run setup", nullptr, 0))
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(px(480), 0), ImGuiCond_Always);
+    const ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize;
+    if (!ImGui::BeginPopupModal(kProgPopup, nullptr, flags))
+        return;
+
+    const float wrap_x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+    const char* game =
+        (m->game_name && m->game_name[0]) ? m->game_name : "this game";
+    const char* job =
+        (m->prepare_disc_label && m->prepare_disc_label[0])
+            ? m->prepare_disc_label
+            : "Setup";
+    ImGui::TextColored(col(th.accent), "%s", job);
+    ImGui::PushTextWrapPos(wrap_x);
+    ImGui::TextColored(col(th.text_muted),
+                       "Please wait — %s is working. Do not close this window.",
+                       game);
+    ImGui::PopTextWrapPos();
+    ImGui::Dummy(ImVec2(0, px(14)));
+
+    ImGui::PushTextWrapPos(wrap_x);
+    const char* st = m->setup_status[0] ? m->setup_status : "Working…";
+    const bool warn_st =
+        (strncmp(st, "WARNING", 7) == 0) ||
+        (strstr(st, "Do not close") != nullptr) ||
+        (strstr(st, "DO NOT") != nullptr);
+    if (warn_st) {
+        ImGui::PushStyleColor(ImGuiCol_Text, col(th.warn));
+        ImGui::TextWrapped("%s", st);
+        ImGui::PopStyleColor();
+    } else {
+        ImGui::TextColored(col(th.accent), "%s", st);
+    }
+    ImGui::PopTextWrapPos();
+    ImGui::Dummy(ImVec2(0, px(8)));
+    const float bar = (m->setup_prepare_fraction >= 0.0f)
+                          ? m->setup_prepare_fraction
+                          : m->setup_prepare_pulse;
+    ImGui::ProgressBar(bar, ImVec2(-1.0f, px(14)), "");
+
+    if (m->setup_error[0]) {
+        ImGui::Dummy(ImVec2(0, px(8)));
+        ImGui::PushTextWrapPos(wrap_x);
+        ImGui::TextColored(col(th.warn), "%s", m->setup_error);
+        ImGui::PopTextWrapPos();
+    }
+
+    ImGui::EndPopup();
+    /* Esc / outside click must not dismiss while the job is running. */
+    if (m->setup_preparing && !ImGui::IsPopupOpen(kProgPopup))
+        ImGui::OpenPopup(kProgPopup);
+}
+
+void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
+    if (!m->setup_wizard_open && !m->setup_preparing) return;
+    launcher_model_poll_prepare_disc(m);
+
+    /* While a prepare/rebuild job runs, show only the progress window.
+     * Skipping BeginPopupModal on "First-run setup" lets ImGui dismiss it. */
+    if (m->setup_preparing) {
+        draw_setup_progress_modal(m, th);
+        return;
+    }
+
+    ImGui::OpenPopup("First-run setup");
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    /* Fixed width; height follows content (BIOS / prepare sections vary by
+     * title). Job progress lives in a separate modal, so AutoResize no longer
+     * fights long cmake status lines. Clamp to the work area so PSX setup
+     * cannot grow off-screen. */
+    const float max_h = vp->WorkSize.y * 0.92f;
+    ImGui::SetNextWindowSize(ImVec2(px(680), 0), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(px(560), 0),
+                                        ImVec2(FLT_MAX, max_h));
+    if (!ImGui::BeginPopupModal("First-run setup", nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize))
         return;
 
     const float wrap_x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
@@ -5198,9 +5270,6 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     }
     ImGui::PopTextWrapPos();
     ImGui::Dummy(ImVec2(0, px(10)));
-
-    const bool busy = m->setup_preparing;
-    if (busy) ImGui::BeginDisabled();
 
     /* ---- BIOS (PSX / GBA): empty = bundled; Browse for optional retail ---- */
     if (m->has_bios) {
@@ -5305,11 +5374,17 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     /* ---- Optional prepare job (disc convert / local codegen) ---- */
     if (m->prepare_disc_cb || m->prepare_with_progress_cb) {
         ImGui::Dummy(ImVec2(0, px(12)));
-        const char* section =
-            (m->prepare_section_title && m->prepare_section_title[0])
-                ? m->prepare_section_title
-                : (m->has_bios ? "3. Convert raw dump (optional)"
-                               : "2. Convert raw dump (optional)");
+        char section_buf[128];
+        const char* section;
+        if (m->prepare_section_title && m->prepare_section_title[0]) {
+            /* Host titles omit the step number; BIOS is step 1 when present. */
+            std::snprintf(section_buf, sizeof(section_buf), "%s. %s",
+                          m->has_bios ? "3" : "2", m->prepare_section_title);
+            section = section_buf;
+        } else {
+            section = m->has_bios ? "3. Convert raw dump (optional)"
+                                  : "2. Convert raw dump (optional)";
+        }
         ImGui::TextUnformatted(section);
         ImGui::PushTextWrapPos(wrap_x);
         ImGui::TextColored(col(th.text_muted), "%s",
@@ -5348,22 +5423,17 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 ImGui::SetTooltip("Select a verified %s first", noun);
         }
+        /* Switch to the progress-only modal on the same frame as the click. */
+        if (m->setup_preparing) {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+            draw_setup_progress_modal(m, th);
+            return;
+        }
     }
 
-    if (busy) ImGui::EndDisabled();
-
-    /* ---- Progress / status (wrap to content width; never grow the modal) ---- */
-    if (m->setup_preparing) {
-        ImGui::Dummy(ImVec2(0, px(10)));
-        ImGui::PushTextWrapPos(wrap_x);
-        ImGui::TextColored(col(th.accent), "%s",
-                           m->setup_status[0] ? m->setup_status : "Working…");
-        ImGui::PopTextWrapPos();
-        const float bar = (m->setup_prepare_fraction >= 0.0f)
-                              ? m->setup_prepare_fraction
-                              : m->setup_prepare_pulse;
-        ImGui::ProgressBar(bar, ImVec2(-1.0f, px(8)), "");
-    } else if (m->setup_status[0]) {
+    /* ---- Status / errors (job progress uses a separate modal) ---- */
+    if (m->setup_status[0]) {
         ImGui::Dummy(ImVec2(0, px(8)));
         ImGui::PushTextWrapPos(wrap_x);
         ImGui::TextColored(col(th.good), "%s", m->setup_status);
