@@ -743,7 +743,6 @@ typedef struct RecompLauncherCGameInfo {
      * discovery, sensor selection, and axis mapping remain host-owned. */
     int has_gyro_controls;
 
-<<<<<<< HEAD
     /* Add independent checkboxes to Display settings. The host maps their
      * committed Settings values onto renderer configuration. */
     int has_sharp_filter;
@@ -755,7 +754,7 @@ typedef struct RecompLauncherCGameInfo {
      * NULL/0 keeps every existing single-display launcher unchanged. */
     const char* const* display_layout_labels;
     int num_display_layouts;
-=======
+
     /* ---- prepare job UX (appended; disc convert / local codegen) ---------
      * prepare_use_selected_rom: 1 = the prepare button uses the already-
      * picked ROM/disc (no second file picker). Cart codegen hosts use this.
@@ -774,18 +773,46 @@ typedef struct RecompLauncherCGameInfo {
                                  char* err_msg, size_t err_cap,
                                  RecompLauncherCPrepareProgressFn on_progress,
                                  void* progress_ctx);
->>>>>>> 708fe2a (Add progress-aware setup prepare for local codegen.)
+
+    /* ---- rebuild + relaunch after prepare (local codegen hosts) ----------
+     * rebuild_with_progress: compile the project after sources are generated.
+     * Return 1 and write the new/updated executable path into out_exe_path.
+     * rebuild_after_prepare: when 1 and rebuild_with_progress is set, the
+     * setup wizard auto-starts rebuild after a successful prepare.
+     * relaunch_after_rebuild: when 1, a successful rebuild makes
+     * recomp_launcher_run_window return RECOMP_LAUNCHER_RESULT_RELAUNCH (3);
+     * call recomp_launcher_relaunch_exe() for the path to exec. */
+    int (*rebuild_with_progress)(const char* rom_path,
+                                 char* out_exe_path, size_t out_cap,
+                                 char* err_msg, size_t err_cap,
+                                 RecompLauncherCPrepareProgressFn on_progress,
+                                 void* progress_ctx);
+    int rebuild_after_prepare;
+    int relaunch_after_rebuild;
+    const char* rebuild_busy_status;     /* NULL => "Building game…" */
+    const char* rebuild_success_status;  /* NULL => "Build complete." */
 } RecompLauncherCGameInfo;
+
+/* recomp_launcher_run_window return codes */
+#define RECOMP_LAUNCHER_RESULT_LAUNCH       0
+#define RECOMP_LAUNCHER_RESULT_QUIT         1
+#define RECOMP_LAUNCHER_RESULT_UNAVAILABLE  2
+#define RECOMP_LAUNCHER_RESULT_RELAUNCH     3
 
 // Returns: 0 = LAUNCH (boot out_rom_path with the edited *io),
 //          1 = QUIT (caller should exit),
-//          2 = UNAVAILABLE (assets/GL failed — caller boots as if skipped).
+//          2 = UNAVAILABLE (assets/GL failed — caller boots as if skipped),
+//          3 = RELAUNCH (host should exec recomp_launcher_relaunch_exe()).
 int recomp_launcher_run_window(const char* window_title,
                              RecompLauncherCSettings* io,
                              const RecompLauncherCGameInfo* game,
                              const char* assets_dir,
                              const char* initial_rom,
                              char* out_rom_path, size_t out_rom_path_len);
+
+/* Valid after run_window returns RECOMP_LAUNCHER_RESULT_RELAUNCH. Copies the
+ * executable path produced by rebuild_with_progress. Returns 1 on success. */
+int recomp_launcher_relaunch_exe(char* out, size_t out_cap);
 
 /* When preserve != 0, the launcher tears down its window/GL context but does
  * NOT call SDL_Quit(), so an in-process host can keep SDL subsystems across
