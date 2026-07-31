@@ -1786,19 +1786,25 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         if (m->has_integer_scale) { float t = ImGui::CalcTextSize("Integer scaling").x; if (t > cw) cw = t; }
         cw += px(18.0f);
         row_label("Window scale", th, cw);
+        ImGui::PushID("window_scale");
         if (ImGui::Button(launcher_model_scale_label(m), ImVec2(px(120), px(30))))
             launcher_model_cycle_scale(m);
+        ImGui::PopID();
         // Universal fullscreen row (every console; tri-state cycle restoring
         // the legacy launcher's Off/Borderless/Exclusive vocabulary). Sits
         // right under Window scale, matching the old Display panel order.
         row_label("Fullscreen", th, cw);
+        ImGui::PushID("fullscreen");
         if (ImGui::Button(launcher_model_fullscreen_label(m), ImVec2(px(120), px(30))))
             launcher_model_cycle_fullscreen(m);
+        ImGui::PopID();
         if (m->num_display_layouts > 0) {
             row_label("Screen layout", th, cw);
+            ImGui::PushID("screen_layout");
             if (ImGui::Button(launcher_model_display_layout_label(m),
                               ImVec2(px(180), px(30))))
                 launcher_model_cycle_display_layout(m);
+            ImGui::PopID();
         }
         if (m->has_integer_scale) {   // NES module: snap the image to integer multiples
             row_label("Integer scaling", th, cw);
@@ -1875,8 +1881,10 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
             launcher_model_cycle_window_size(m);
     } else {
         row_label("Window scale", th);
+        ImGui::PushID("window_scale");
         if (ImGui::Button(launcher_model_scale_label(m), ImVec2(px(120), px(30))))
             launcher_model_cycle_scale(m);
+        ImGui::PopID();
     }
 
     // NES module rows can appear on this branch too (has_renderer puts NES
@@ -1896,21 +1904,27 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
 
     if (m->has_supersampling) {
         row_label("Supersampling", th);
+        ImGui::PushID("supersampling");
         if (ImGui::Button(launcher_model_supersampling_label(m), ImVec2(px(90), px(30))))
             launcher_model_cycle_supersampling(m);
+        ImGui::PopID();
     }
 
     // Universal fullscreen row (every console — no longer gated on the
     // vestigial has_fullscreen_toggle). Tri-state cycle replaces the old
     // binary checkbox so Exclusive mode is reachable again.
     row_label("Fullscreen", th);
+    ImGui::PushID("fullscreen");
     if (ImGui::Button(launcher_model_fullscreen_label(m), ImVec2(px(120), px(30))))
         launcher_model_cycle_fullscreen(m);
+    ImGui::PopID();
     if (m->num_display_layouts > 0) {
         row_label("Screen layout", th);
+        ImGui::PushID("screen_layout");
         if (ImGui::Button(launcher_model_display_layout_label(m),
                           ImVec2(px(180), px(30))))
             launcher_model_cycle_display_layout(m);
+        ImGui::PopID();
     }
 
     if (m->aspect_mask || m->num_aspect_labels > 0 ||
@@ -1939,8 +1953,10 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
 
     if (m->has_antialiasing) {
         row_label("Antialiasing", th);
+        ImGui::PushID("antialiasing");
         if (ImGui::Button(launcher_model_aa_label(m), ImVec2(px(90), px(30))))
             launcher_model_cycle_aa(m);
+        ImGui::PopID();
     }
 
     if (m->has_affine_filter) {
