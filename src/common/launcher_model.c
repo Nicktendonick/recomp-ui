@@ -144,6 +144,8 @@ void launcher_model_init(LauncherModel* m,
         m->prepare_use_selected_rom = game->prepare_use_selected_rom != 0;
         m->rebuild_after_prepare = game->rebuild_after_prepare != 0;
         m->relaunch_after_rebuild = game->relaunch_after_rebuild != 0;
+        m->prepare_required_before_continue =
+            game->prepare_required_before_continue != 0;
         m->boxart_path          = game->boxart_path;      // NULL => default boxart.tga
         m->aspect_labels        = game->aspect_labels;    // NULL => built-in 4:3/16:9/21:9
         m->num_aspect_labels    = game->num_aspect_labels;
@@ -385,6 +387,7 @@ void launcher_model_init(LauncherModel* m,
     m->setup_prepare_fraction = -1.0f;
     m->setup_status[0] = '\0';
     m->setup_error[0] = '\0';
+    m->setup_prepare_satisfied = false;
     m->relaunch_exe[0] = '\0';
     launcher_model_refresh_bios_status(m);
 
@@ -1020,9 +1023,12 @@ bool launcher_model_can_finish_setup(const LauncherModel* m) {
     if (!m) return false;
     if (m->setup_preparing) return false;
     /* Path selected is enough to leave the wizard (settings stay in the model).
-     * PLAY still requires a readable, fingerprinted image via can_launch. */
+     * PLAY still requires a readable, fingerprinted image via can_launch.
+     * Codegen hosts may also require a successful prepare/rebuild. */
     if (!m->rom_present || !m->rom_full[0]) return false;
     if (m->has_bios && !m->setup_bios_ok) return false;
+    if (m->prepare_required_before_continue && !m->setup_prepare_satisfied)
+        return false;
     return true;
 }
 
@@ -1239,6 +1245,7 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
     if (kind == PREP_JOB_REBUILD) {
         if (result && out_path[0]) {
             safe_copy(m->relaunch_exe, sizeof(m->relaunch_exe), out_path);
+            m->setup_prepare_satisfied = true;
             safe_copy(m->setup_status, sizeof(m->setup_status),
                       (m->rebuild_success_status && m->rebuild_success_status[0])
                           ? m->rebuild_success_status
@@ -1268,6 +1275,7 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
             launcher_model_begin_rebuild_locked(m);
             return;
         }
+        m->setup_prepare_satisfied = true;
         safe_copy(m->setup_status, sizeof(m->setup_status),
                   (m->prepare_success_status && m->prepare_success_status[0])
                       ? m->prepare_success_status

@@ -185,6 +185,8 @@ typedef struct {
     bool        prepare_use_selected_rom; // button uses current ROM (no 2nd picker)
     bool        rebuild_after_prepare;
     bool        relaunch_after_rebuild;
+    bool        prepare_required_before_continue;
+    bool        setup_prepare_satisfied; // prepare (+ rebuild if chained) succeeded
     char        relaunch_exe[512];       // set when rebuild requests relaunch
     // Box-art path relative to the assets dir (GameInfo.boxart_path);
     // NULL => the default "assets/img/boxart.tga".
@@ -601,8 +603,9 @@ void launcher_model_set_mouse_bind(LauncherModel* m, int which, int button_index
 void launcher_model_set_gyro_sensitivity(LauncherModel* m, float value);
 
 // ---- first-run setup wizard ----
-// True when required BIOS + ROM/disc paths are present (readable). Used to
-// enable "Continue to launcher"; fingerprint mismatch is allowed here.
+// True when required BIOS + ROM/disc paths are present (readable), and when
+// prepare_required_before_continue is set, prepare (+ chained rebuild) has
+// succeeded. Fingerprint mismatch is allowed here.
 bool launcher_model_can_finish_setup(const LauncherModel* m);
 // True when BIOS (if required) and ROM/disc are ready to launch (incl. fingerprint).
 bool launcher_model_can_launch(const LauncherModel* m);
