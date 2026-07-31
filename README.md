@@ -2,7 +2,7 @@
 
 A shared, **console-agnostic launcher and in-game settings UI** for static-
 recompilation game ports. One Dear ImGui launcher core serves every recomp
-ecosystem — SNES, PSX, N64, Genesis, NES, and beyond — while a small runtime
+ecosystem — SNES, PSX, N64, Nintendo DS, Genesis, NES, and beyond — while a small runtime
 overlay API lets the same hosts expose live settings after boot.
 
 It is the reusable extraction of the SNES-recomp "launcher_ng" launcher,
@@ -56,7 +56,7 @@ git submodule add https://github.com/mstan/recomp-ui.git recomp-ui
 ```cmake
 include(${CMAKE_SOURCE_DIR}/recomp-ui/recomp_ui.cmake)
 recomp_target_launcher_ui(my-game-runtime
-    CONSOLE psx                                  # required: psx/snes/n64/nes/...
+    CONSOLE psx                                  # required: psx/snes/nds/n64/nes/...
     BOXART ${CMAKE_SOURCE_DIR}/art/boxart.tga   # optional: game box art
     PAD    ${CMAKE_SOURCE_DIR}/art/pad.tga       # optional: per-console controller image
     BRAND  ${CMAKE_SOURCE_DIR}/art/brand.tga)    # optional: per-console top-left mark
@@ -85,6 +85,13 @@ with `-DRECOMP_UI_ENABLE_MODS=ON`, then provide a non-null
 `RecompLauncherCGameInfo.mods` provider. These are separate gates: the CMake
 option enables the frontend, while the provider supplies the actual catalog and
 behavior. See [Mods frontend](#mods-frontend) for the complete integration.
+
+Multi-display systems can provide `GameInfo.display_layout_labels`; recomp-ui
+then exposes a dedicated Display → Screen layout cycle backed by
+`Settings.display_layout`. This remains independent of aspect or widescreen
+features. The Nintendo DS profile uses it for stacked versus separate windows,
+keeps Player 1's ordinary buttons controller-configurable, and leaves the
+bottom-screen pointer/touch mapping to the host.
 
 ### 3. Call it from your `main()`
 

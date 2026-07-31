@@ -453,6 +453,12 @@ struct RecompLauncherCSettings {
     int  solar_source;          // 0 = live local weather, 1 = fixed level
     int  solar_manual_step;     // 0..8, used when solar_source == 1
     int  solar_full_sun;        // W/m^2 that reads as full sun; 0 = host default
+
+    // ---- multi-display layout --------------------------------------------
+    // Index into GameInfo.display_layout_labels. This is intentionally
+    // independent of aspect/widescreen: it describes physical host windows,
+    // not how a game's camera is rendered inside one of them.
+    int display_layout;
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
@@ -736,6 +742,13 @@ typedef struct RecompLauncherCGameInfo {
      * committed Settings values onto renderer configuration. */
     int has_sharp_filter;
     int has_affine_filter;
+
+    /* ---- multi-display layout -------------------------------------------
+     * Optional host-defined Display row. Settings.display_layout cycles over
+     * these labels. Nintendo DS uses {"Stacked window","Separate windows"}.
+     * NULL/0 keeps every existing single-display launcher unchanged. */
+    const char* const* display_layout_labels;
+    int num_display_layouts;
 } RecompLauncherCGameInfo;
 
 // Returns: 0 = LAUNCH (boot out_rom_path with the edited *io),

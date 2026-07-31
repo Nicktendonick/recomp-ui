@@ -139,6 +139,8 @@ void launcher_model_init(LauncherModel* m,
         m->num_aspect_labels    = game->num_aspect_labels;
         m->aspect_experimental  = game->aspect_experimental != 0;
         m->adaptive_view_supported = game->adaptive_view_supported != 0;
+        m->display_layout_labels = game->display_layout_labels;
+        m->num_display_layouts = game->num_display_layouts;
         m->tpak_slots           = clampi(game->tpak_slots, 0, RECOMP_LAUNCHER_MAX_TPAKS);
         m->tpak_inspect_cb      = game->tpak_inspect;
         m->audio_device_labels  = game->audio_device_labels;
@@ -276,6 +278,12 @@ void launcher_model_init(LauncherModel* m,
         // 4:3 (bit0, index 0) is always offered so this always terminates.
         while (idx > 0 && !(m->aspect_mask & (1 << idx))) --idx;
         m->s.aspect_index = idx;
+    }
+    if (m->display_layout_labels && m->num_display_layouts > 0) {
+        m->s.display_layout =
+            clampi(m->s.display_layout, 0, m->num_display_layouts - 1);
+    } else {
+        m->s.display_layout = 0;
     }
 
     // ---- clamp/seed the deeper PSX-style settings against their own ranges ----
@@ -679,6 +687,20 @@ const char* launcher_model_view_mode_label(const LauncherModel* m) {
     if (m->adaptive_view_supported && m->s.adaptive_view) return "Adaptive";
     if (aspect_choice_count(m)) return launcher_model_aspect_label(m);
     return m->s.widescreen ? "16:9 fixed" : "Native";
+}
+
+void launcher_model_cycle_display_layout(LauncherModel* m) {
+    if (!m || !m->display_layout_labels || m->num_display_layouts <= 0) return;
+    m->s.display_layout =
+        (clampi(m->s.display_layout, 0, m->num_display_layouts - 1) + 1) %
+        m->num_display_layouts;
+}
+
+const char* launcher_model_display_layout_label(const LauncherModel* m) {
+    if (!m || !m->display_layout_labels || m->num_display_layouts <= 0)
+        return "Default";
+    return m->display_layout_labels[
+        clampi(m->s.display_layout, 0, m->num_display_layouts - 1)];
 }
 
 void launcher_model_ws_cells_delta(LauncherModel* m, int delta) {

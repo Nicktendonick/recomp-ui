@@ -1749,6 +1749,7 @@ bool video_card_grows(const LauncherModel* m) {
     if (any_deep_display(m)) return true;
     if (m->adaptive_view_supported) return true;
     if (m->has_sharp_filter || m->has_affine_filter) return true;
+    if (m->num_display_layouts > 0) return true;
     // NES legacy-surface additions (Integer scaling row, HD texture pack block)
     // add extra rows the fixed no_scroll band wasn't sized for.
     if (m->has_integer_scale || m->hdpack_supported) return true;
@@ -1793,6 +1794,12 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         row_label("Fullscreen", th, cw);
         if (ImGui::Button(launcher_model_fullscreen_label(m), ImVec2(px(120), px(30))))
             launcher_model_cycle_fullscreen(m);
+        if (m->num_display_layouts > 0) {
+            row_label("Screen layout", th, cw);
+            if (ImGui::Button(launcher_model_display_layout_label(m),
+                              ImVec2(px(180), px(30))))
+                launcher_model_cycle_display_layout(m);
+        }
         if (m->has_integer_scale) {   // NES module: snap the image to integer multiples
             row_label("Integer scaling", th, cw);
             bool is = m->s.integer_scale != 0;
@@ -1899,6 +1906,12 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
     row_label("Fullscreen", th);
     if (ImGui::Button(launcher_model_fullscreen_label(m), ImVec2(px(120), px(30))))
         launcher_model_cycle_fullscreen(m);
+    if (m->num_display_layouts > 0) {
+        row_label("Screen layout", th);
+        if (ImGui::Button(launcher_model_display_layout_label(m),
+                          ImVec2(px(180), px(30))))
+            launcher_model_cycle_display_layout(m);
+    }
 
     if (m->aspect_mask || m->num_aspect_labels > 0 ||
         m->widescreen_supported || m->adaptive_view_supported) {

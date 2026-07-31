@@ -219,6 +219,8 @@ typedef struct {
     int  num_aspect_labels;
     bool aspect_experimental;
     bool adaptive_view_supported;
+    const char* const* display_layout_labels;
+    int  num_display_layouts;
     // Number of players the GAME actually supports. Mega Man X is 1-player, so
     // the launcher must not show a dead Player 2 row. Games that support 2
     // report 2 and the second row appears. Driven by data, never hardcoded.
@@ -413,6 +415,8 @@ void launcher_model_toggle_adaptive_view(LauncherModel* m);  // gated; fixed asp
  * presents them as one mode instead of unrelated toggles. */
 void launcher_model_cycle_view_mode(LauncherModel* m);
 const char* launcher_model_view_mode_label(const LauncherModel* m);
+void launcher_model_cycle_display_layout(LauncherModel* m);
+const char* launcher_model_display_layout_label(const LauncherModel* m);
 
 // ---- widescreen extra cells (SystemProfile.video.widescreen_cells consoles,
 // e.g. Genesis: N extra 8-px background cells rendered per side while
