@@ -4934,16 +4934,19 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     ImGui::OpenPopup("First-run setup");
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(px(520), 0), ImGuiCond_Appearing);
-    if (!ImGui::BeginPopupModal("First-run setup", nullptr,
-                                ImGuiWindowFlags_AlwaysAutoResize |
-                                ImGuiWindowFlags_NoMove))
+    ImGui::SetNextWindowSize(ImVec2(px(520), px(420)), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(px(420), px(280)),
+                                        ImVec2(FLT_MAX, FLT_MAX));
+    /* User-resizable; do not AlwaysAutoResize — long cmake lines were
+     * stretching the modal, then shrinking it as status text shortened. */
+    if (!ImGui::BeginPopupModal("First-run setup", nullptr, 0))
         return;
 
+    const float wrap_x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
     const char* noun = (m->rom_noun && m->rom_noun[0]) ? m->rom_noun : "ROM";
     const char* game = (m->game_name && m->game_name[0]) ? m->game_name : "this game";
     ImGui::TextColored(col(th.accent), "Setup required");
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
+    ImGui::PushTextWrapPos(wrap_x);
     if (m->has_bios) {
         ImGui::TextColored(col(th.text_muted),
             "%s needs a playable %s before you can launch. This build includes "
@@ -4966,7 +4969,7 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     if (m->has_bios) {
         const bool has_pick = m->s.bios_path[0] != 0;
         ImGui::TextUnformatted("1. PlayStation BIOS (optional)");
-        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
+        ImGui::PushTextWrapPos(wrap_x);
         ImGui::TextColored(col(th.text_muted),
             "Default: bundled OpenBIOS. Optionally browse for your own "
             "SCPH1001.BIN (exactly 512 KB, dumped from your console).");
@@ -4999,7 +5002,7 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         }
         ImGui::PopStyleVar();
         if (m->setup_bios_detail[0]) {
-            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
+            ImGui::PushTextWrapPos(wrap_x);
             ImGui::TextColored(col(m->setup_bios_warn ? th.warn : th.text_muted),
                                "%s", m->setup_bios_detail);
             ImGui::PopTextWrapPos();
@@ -5009,7 +5012,7 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
 
     /* ---- Disc / ROM ---- */
     ImGui::Text("%s. %s image", m->has_bios ? "2" : "1", noun);
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
+    ImGui::PushTextWrapPos(wrap_x);
     ImGui::TextColored(col(th.text_muted),
         m->has_bios
             ? "Prefer a .cue with its .bin beside it (MODE2/2352). Raw dumps may need conversion."
@@ -5048,7 +5051,7 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         }
         ImGui::PopStyleVar();
         if (m->profile && m->profile->verify.mode == 1 && m->rom_present)
-            draw_verdict_block(m, th, px(480));
+            draw_verdict_block(m, th, ImGui::GetContentRegionAvail().x);
     }
 
     /* ---- Optional prepare job (disc convert / local codegen) ---- */
@@ -5060,7 +5063,7 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
                 : (m->has_bios ? "3. Convert raw dump (optional)"
                                : "2. Convert raw dump (optional)");
         ImGui::TextUnformatted(section);
-        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
+        ImGui::PushTextWrapPos(wrap_x);
         ImGui::TextColored(col(th.text_muted), "%s",
             (m->prepare_disc_note && m->prepare_disc_note[0])
                 ? m->prepare_disc_note
@@ -5101,22 +5104,26 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
 
     if (busy) ImGui::EndDisabled();
 
-    /* ---- Progress / status ---- */
+    /* ---- Progress / status (wrap to content width; never grow the modal) ---- */
     if (m->setup_preparing) {
         ImGui::Dummy(ImVec2(0, px(10)));
+        ImGui::PushTextWrapPos(wrap_x);
         ImGui::TextColored(col(th.accent), "%s",
                            m->setup_status[0] ? m->setup_status : "Working…");
+        ImGui::PopTextWrapPos();
         const float bar = (m->setup_prepare_fraction >= 0.0f)
                               ? m->setup_prepare_fraction
                               : m->setup_prepare_pulse;
-        ImGui::ProgressBar(bar, ImVec2(-1, px(8)), "");
+        ImGui::ProgressBar(bar, ImVec2(-1.0f, px(8)), "");
     } else if (m->setup_status[0]) {
         ImGui::Dummy(ImVec2(0, px(8)));
+        ImGui::PushTextWrapPos(wrap_x);
         ImGui::TextColored(col(th.good), "%s", m->setup_status);
+        ImGui::PopTextWrapPos();
     }
     if (m->setup_error[0]) {
         ImGui::Dummy(ImVec2(0, px(6)));
-        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
+        ImGui::PushTextWrapPos(wrap_x);
         ImGui::TextColored(col(th.warn), "%s", m->setup_error);
         ImGui::PopTextWrapPos();
     }
