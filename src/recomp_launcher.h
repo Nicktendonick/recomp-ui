@@ -752,6 +752,18 @@ typedef struct RecompLauncherCGameInfo {
      * prepare (and rebuild when rebuild_after_prepare is set). Local codegen
      * first-run: Generate & rebuild, then relaunch — Quit is the only other exit. */
     int prepare_required_before_continue;
+
+    /* ---- portable toolchain step (appended; local codegen hosts) ----------
+     * When setup_needs_toolchain is 1, the first-run wizard shows a page to
+     * download cmake-clang-v1 or pick an offline zip before BIOS/ROM/generate.
+     * toolchain_is_ready: optional quick check (non-NULL + returns 1 => skip
+     * page 0). ensure_toolchain_with_progress: download (download!=0) or install
+     * from zip_path (non-empty); download==0 and empty zip = resolve cache only. */
+    int setup_needs_toolchain;
+    int (*toolchain_is_ready)(void);
+    int (*ensure_toolchain_with_progress)(
+        int download, const char* zip_path, char* err_msg, size_t err_cap,
+        RecompLauncherCPrepareProgressFn on_progress, void* progress_ctx);
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */

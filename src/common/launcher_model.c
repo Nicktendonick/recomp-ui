@@ -144,6 +144,10 @@ void launcher_model_init(LauncherModel* m,
         m->relaunch_after_rebuild = game->relaunch_after_rebuild != 0;
         m->prepare_required_before_continue =
             game->prepare_required_before_continue != 0;
+        m->setup_needs_toolchain = game->setup_needs_toolchain != 0;
+        m->toolchain_is_ready_cb = game->toolchain_is_ready;
+        m->ensure_toolchain_with_progress_cb =
+            game->ensure_toolchain_with_progress;
         m->boxart_path          = game->boxart_path;      // NULL => default boxart.tga
         m->aspect_labels        = game->aspect_labels;    // NULL => built-in 4:3/16:9/21:9
         m->num_aspect_labels    = game->num_aspect_labels;
@@ -363,13 +367,23 @@ void launcher_model_init(LauncherModel* m,
     m->action    = LNG_ACTION_NONE;
     m->cfg_player = 0;
     m->setup_wizard_open = false;
+    m->setup_page = 1;
+    m->setup_tc_auto = true;
+    m->setup_tc_ready = false;
+    m->setup_tc_zip[0] = '\0';
     m->setup_preparing = false;
     m->setup_prepare_pulse = 0.0f;
     m->setup_prepare_fraction = -1.0f;
+    m->setup_progress_title[0] = '\0';
     m->setup_status[0] = '\0';
     m->setup_error[0] = '\0';
     m->setup_prepare_satisfied = false;
     m->relaunch_exe[0] = '\0';
+    if (!game || !game->setup_needs_toolchain) {
+        m->setup_needs_toolchain = false;
+        m->toolchain_is_ready_cb = NULL;
+        m->ensure_toolchain_with_progress_cb = NULL;
+    }
     launcher_model_refresh_bios_status(m);
 
     /* Soft-return from a match: land on Netplay with the room modal open. */
@@ -394,6 +408,20 @@ void launcher_model_init(LauncherModel* m,
         const int missing_bios = m->has_bios && !m->setup_bios_ok;
         if (force || missing_rom || missing_bios)
             m->setup_wizard_open = true;
+    }
+
+    /* Toolchain page first for local codegen hosts unless already usable. */
+    if (m->setup_wizard_open && m->setup_needs_toolchain) {
+        if (m->toolchain_is_ready_cb && m->toolchain_is_ready_cb()) {
+            m->setup_tc_ready = true;
+            m->setup_page = 1;
+        } else {
+            m->setup_tc_ready = false;
+            m->setup_page = 0;
+        }
+    } else {
+        m->setup_page = 1;
+        m->setup_tc_ready = !m->setup_needs_toolchain;
     }
 
     // Placeholder display until launcher_binds_load() fills real values from
@@ -995,8 +1023,12 @@ void launcher_model_finish_setup(LauncherModel* m) {
     m->setup_error[0] = '\0';
 }
 
-/* ---- prepare / rebuild background job (file-scope; one at a time) ---- */
-enum { PREP_JOB_PREPARE = 0, PREP_JOB_REBUILD = 1 };
+/* ---- prepare / rebuild / toolchain background job (one at a time) ---- */
+enum {
+    PREP_JOB_PREPARE = 0,
+    PREP_JOB_REBUILD = 1,
+    PREP_JOB_TOOLCHAIN = 2
+};
 
 typedef struct {
     LauncherModel* m;
@@ -1004,8 +1036,10 @@ typedef struct {
     char out_path[512];
     char err[256];
     char progress_msg[256];
+    char zip_path[512];
     float progress_pct; /* <0 indeterminate; else 0..1 */
-    int  kind;          /* PREP_JOB_PREPARE or PREP_JOB_REBUILD */
+    int  kind;          /* PREP_JOB_* */
+    int  download;      /* toolchain: non-zero => allow network fetch */
     int  result;        /* 0 fail, 1 ok */
     volatile int done;
     volatile int progress_dirty;
@@ -1076,7 +1110,21 @@ static void* prep_thread_main(void* arg) {
     j->out_path[0] = '\0';
     j->err[0] = '\0';
     j->result = 0;
-    if (j->kind == PREP_JOB_REBUILD) {
+    if (j->kind == PREP_JOB_TOOLCHAIN) {
+        if (j->m && j->m->ensure_toolchain_with_progress_cb) {
+            j->result = j->m->ensure_toolchain_with_progress_cb(
+                            j->download,
+                            j->zip_path[0] ? j->zip_path : NULL,
+                            j->err, sizeof(j->err),
+                            prep_progress_cb, j)
+                            ? 1
+                            : 0;
+            if (j->result)
+                safe_copy(j->out_path, sizeof(j->out_path), "ok");
+        } else {
+            safe_copy(j->err, sizeof(j->err), "No toolchain ensure callback.");
+        }
+    } else if (j->kind == PREP_JOB_REBUILD) {
         if (j->m && j->m->rebuild_with_progress_cb) {
             j->result = j->m->rebuild_with_progress_cb(
                             j->source, j->out_path, sizeof(j->out_path),
@@ -1129,7 +1177,61 @@ void launcher_model_start_rebuild(LauncherModel* m) {
         safe_copy(m->setup_error, sizeof(m->setup_error), "Select a ROM before rebuilding.");
         return;
     }
+    m->setup_progress_title[0] = '\0';
     launcher_model_begin_rebuild_locked(m);
+}
+
+bool launcher_model_can_advance_toolchain(const LauncherModel* m) {
+    if (!m || !m->setup_needs_toolchain) return true;
+    if (m->setup_tc_ready) return true;
+    if (m->setup_preparing) return false;
+    if (m->setup_tc_auto) return true;
+    return m->setup_tc_zip[0] != '\0';
+}
+
+void launcher_model_start_ensure_toolchain(LauncherModel* m) {
+    if (!m || m->setup_preparing) return;
+    if (!m->setup_needs_toolchain) {
+        m->setup_tc_ready = true;
+        m->setup_page = 1;
+        return;
+    }
+    if (m->setup_tc_ready ||
+        (m->toolchain_is_ready_cb && m->toolchain_is_ready_cb())) {
+        m->setup_tc_ready = true;
+        m->setup_page = 1;
+        m->setup_error[0] = '\0';
+        safe_copy(m->setup_status, sizeof(m->setup_status),
+                  "Using existing portable toolchain.");
+        return;
+    }
+    if (!m->ensure_toolchain_with_progress_cb) {
+        safe_copy(m->setup_error, sizeof(m->setup_error),
+                  "Toolchain install is not available in this build.");
+        return;
+    }
+    if (!launcher_model_can_advance_toolchain(m)) {
+        safe_copy(m->setup_error, sizeof(m->setup_error),
+                  "Select a cmake-clang-v1 toolchain zip, or enable automatic download.");
+        return;
+    }
+    memset(&g_prep_job, 0, sizeof(g_prep_job));
+    g_prep_job.m = m;
+    g_prep_job.kind = PREP_JOB_TOOLCHAIN;
+    g_prep_job.progress_pct = -1.0f;
+    g_prep_job.download = m->setup_tc_auto ? 1 : 0;
+    if (!m->setup_tc_auto && m->setup_tc_zip[0])
+        safe_copy(g_prep_job.zip_path, sizeof(g_prep_job.zip_path), m->setup_tc_zip);
+    m->setup_preparing = true;
+    m->setup_prepare_pulse = 0.0f;
+    m->setup_prepare_fraction = -1.0f;
+    m->setup_error[0] = '\0';
+    safe_copy(m->setup_progress_title, sizeof(m->setup_progress_title),
+              "Installing build tools…");
+    safe_copy(m->setup_status, sizeof(m->setup_status),
+              m->setup_tc_auto ? "Downloading portable cmake/clang…"
+                               : "Installing toolchain from zip…");
+    prep_spawn_thread(m);
 }
 
 void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path) {
@@ -1153,6 +1255,7 @@ void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path
     m->setup_prepare_pulse = 0.0f;
     m->setup_prepare_fraction = -1.0f;
     m->setup_error[0] = '\0';
+    m->setup_progress_title[0] = '\0';
     safe_copy(m->setup_status, sizeof(m->setup_status),
               (m->prepare_busy_status && m->prepare_busy_status[0])
                   ? m->prepare_busy_status
@@ -1189,6 +1292,22 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
     if (!done) return;
     m->setup_preparing = false;
     m->setup_prepare_fraction = -1.0f;
+
+    if (kind == PREP_JOB_TOOLCHAIN) {
+        m->setup_progress_title[0] = '\0';
+        if (result) {
+            m->setup_tc_ready = true;
+            m->setup_page = 1;
+            m->setup_error[0] = '\0';
+            safe_copy(m->setup_status, sizeof(m->setup_status),
+                      "Build tools ready — continue with BIOS and disc.");
+        } else {
+            m->setup_status[0] = '\0';
+            safe_copy(m->setup_error, sizeof(m->setup_error),
+                      err[0] ? err : "Toolchain install failed.");
+        }
+        return;
+    }
 
     if (kind == PREP_JOB_REBUILD) {
         if (result && out_path[0]) {

@@ -4957,9 +4957,11 @@ static void draw_setup_progress_modal(LauncherModel* m, const LauncherTheme& th)
     const char* game =
         (m->game_name && m->game_name[0]) ? m->game_name : "this game";
     const char* job =
-        (m->prepare_disc_label && m->prepare_disc_label[0])
-            ? m->prepare_disc_label
-            : "Setup";
+        (m->setup_progress_title[0])
+            ? m->setup_progress_title
+            : ((m->prepare_disc_label && m->prepare_disc_label[0])
+                   ? m->prepare_disc_label
+                   : "Setup");
     ImGui::TextColored(col(th.accent), "%s", job);
     ImGui::PushTextWrapPos(wrap_x);
     ImGui::TextColored(col(th.text_muted),
@@ -5005,7 +5007,7 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     if (!m->setup_wizard_open && !m->setup_preparing) return;
     launcher_model_poll_prepare_disc(m);
 
-    /* While a prepare/rebuild job runs, show only the progress window.
+    /* While a prepare/rebuild/toolchain job runs, show only the progress window.
      * Skipping BeginPopupModal on "First-run setup" lets ImGui dismiss it. */
     if (m->setup_preparing) {
         draw_setup_progress_modal(m, th);
@@ -5015,13 +5017,10 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     ImGui::OpenPopup("First-run setup");
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    /* Fixed width; height follows content (BIOS / prepare sections vary by
-     * title). Job progress lives in a separate modal, so AutoResize no longer
-     * fights long cmake status lines. Clamp to the work area so PSX setup
-     * cannot grow off-screen. */
+    /* Prefer content height (AlwaysAutoResize). Clamp to the work area. */
     const float max_h = vp->WorkSize.y * 0.92f;
-    ImGui::SetNextWindowSize(ImVec2(px(680), 0), ImGuiCond_Appearing);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(px(560), 0),
+    ImGui::SetNextWindowSize(ImVec2(px(640), 0), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(px(520), 0),
                                         ImVec2(FLT_MAX, max_h));
     if (!ImGui::BeginPopupModal("First-run setup", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize))
@@ -5030,6 +5029,105 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     const float wrap_x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
     const char* noun = (m->rom_noun && m->rom_noun[0]) ? m->rom_noun : "ROM";
     const char* game = (m->game_name && m->game_name[0]) ? m->game_name : "this game";
+
+    /* ---- Page 0: portable toolchain ------------------------------------ */
+    if (m->setup_needs_toolchain && m->setup_page == 0) {
+        ImGui::TextColored(col(th.accent), "Build tools");
+        ImGui::PushTextWrapPos(wrap_x);
+        ImGui::TextColored(col(th.text_muted),
+            "%s builds game sources on your machine. Install the portable "
+            "cmake/clang pack (cmake-clang-v1), or provide a matching zip for "
+            "offline setup.",
+            game);
+        ImGui::PopTextWrapPos();
+        ImGui::Dummy(ImVec2(0, px(12)));
+
+        ImGui::TextUnformatted("1. Portable toolchain");
+        ImGui::PushTextWrapPos(wrap_x);
+        ImGui::TextColored(col(th.text_muted),
+            "Downloaded from TechnicallyComputers/retcomm-toolchains and cached "
+            "for reuse across titles. Uncheck to pick a local zip instead.");
+        ImGui::PopTextWrapPos();
+        ImGui::Dummy(ImVec2(0, px(6)));
+
+        if (ImGui::Checkbox("Download portable toolchain automatically##tc",
+                            &m->setup_tc_auto)) {
+            if (m->setup_tc_auto)
+                m->setup_error[0] = '\0';
+        }
+
+        if (!m->setup_tc_auto) {
+            ImGui::Dummy(ImVec2(0, px(8)));
+            ImGui::TextUnformatted("Toolchain zip");
+            const char* zp = m->setup_tc_zip[0] ? m->setup_tc_zip
+                                                : "(none selected)";
+            char zelided[220];
+            elide_left(zp, px(320), zelided, sizeof(zelided));
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextColored(col(m->setup_tc_zip[0] ? th.good : th.warn), "%s",
+                               m->setup_tc_zip[0] ? "OK" : "Needed");
+            ImGui::SameLine();
+            ImGui::TextColored(
+                col(m->setup_tc_zip[0] ? th.text : th.text_muted), "%s",
+                zelided);
+            ImGui::SameLine();
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(12), px(6)));
+            if (ImGui::Button("Browse zip…##tc", ImVec2(px(128), px(32)))) {
+                static const char* kZipPatterns[] = {"*.zip"};
+                if (launcher_pick_file(
+                        "Select cmake-clang-v1 toolchain zip", kZipPatterns, 1,
+                        "Toolchain zip archives", g_pick_buf,
+                        sizeof(g_pick_buf))) {
+                    std::snprintf(m->setup_tc_zip, sizeof(m->setup_tc_zip), "%s",
+                                  g_pick_buf);
+                    m->setup_error[0] = '\0';
+                }
+            }
+            ImGui::PopStyleVar();
+        }
+
+        if (m->setup_status[0]) {
+            ImGui::Dummy(ImVec2(0, px(8)));
+            ImGui::PushTextWrapPos(wrap_x);
+            ImGui::TextColored(col(th.good), "%s", m->setup_status);
+            ImGui::PopTextWrapPos();
+        }
+        if (m->setup_error[0]) {
+            ImGui::Dummy(ImVec2(0, px(6)));
+            ImGui::PushTextWrapPos(wrap_x);
+            ImGui::TextColored(col(th.warn), "%s", m->setup_error);
+            ImGui::PopTextWrapPos();
+        }
+
+        ImGui::Dummy(ImVec2(0, px(14)));
+        const bool can_next = launcher_model_can_advance_toolchain(m);
+        if (!can_next) ImGui::BeginDisabled();
+        if (ImGui::Button("Next", ImVec2(px(140), px(34)))) {
+            launcher_model_start_ensure_toolchain(m);
+            if (m->setup_preparing) {
+                ImGui::CloseCurrentPopup();
+                ImGui::EndPopup();
+                draw_setup_progress_modal(m, th);
+                return;
+            }
+        }
+        if (!can_next) {
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip(
+                    "Enable automatic download or select a toolchain zip");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Quit", ImVec2(px(100), px(34))))
+            m->action = LNG_ACTION_QUIT;
+
+        if (m->setup_wizard_open && !ImGui::IsPopupOpen("First-run setup"))
+            ImGui::OpenPopup("First-run setup");
+        ImGui::EndPopup();
+        return;
+    }
+
+    /* ---- Page 1: BIOS / disc / generate -------------------------------- */
     ImGui::TextColored(col(th.accent), "Setup required");
     ImGui::PushTextWrapPos(wrap_x);
     if (m->has_bios) {
@@ -5047,7 +5145,6 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     ImGui::PopTextWrapPos();
     ImGui::Dummy(ImVec2(0, px(10)));
 
-    /* ---- BIOS (PSX / GBA): empty = bundled; Browse for optional retail ---- */
     if (m->has_bios) {
         const bool has_pick = m->s.bios_path[0] != 0;
         ImGui::TextUnformatted("1. PlayStation BIOS (optional)");
@@ -5092,7 +5189,6 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::Dummy(ImVec2(0, px(12)));
     }
 
-    /* ---- Disc / ROM ---- */
     ImGui::Text("%s. %s image", m->has_bios ? "2" : "1", noun);
     ImGui::PushTextWrapPos(wrap_x);
     ImGui::TextColored(col(th.text_muted),
@@ -5115,7 +5211,6 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::SameLine();
         char browse_lbl[48];
         std::snprintf(browse_lbl, sizeof(browse_lbl), "Browse %s##setup", noun);
-        /* Taller + FramePadding so label isn't glued to the bottom edge. */
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(12), px(6)));
         if (ImGui::Button(browse_lbl, ImVec2(px(128), px(32)))) {
             const SystemProfile* prof = (const SystemProfile*)m->profile;
@@ -5132,19 +5227,15 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             if (picked) launcher_model_set_rom(m, g_pick_buf);
         }
         ImGui::PopStyleVar();
-        /* Always reserve Serial/Region/ISO rows (blank until a disc is picked)
-         * so AlwaysAutoResize does not reflow the modal after Browse. */
         if (m->profile && m->profile->verify.mode == 1)
             draw_verdict_block(m, th, ImGui::GetContentRegionAvail().x);
     }
 
-    /* ---- Optional prepare job (disc convert / local codegen) ---- */
     if (m->prepare_disc_cb || m->prepare_with_progress_cb) {
         ImGui::Dummy(ImVec2(0, px(12)));
         char section_buf[128];
         const char* section;
         if (m->prepare_section_title && m->prepare_section_title[0]) {
-            /* Host titles omit the step number; BIOS is step 1 when present. */
             std::snprintf(section_buf, sizeof(section_buf), "%s. %s",
                           m->has_bios ? "3" : "2", m->prepare_section_title);
             section = section_buf;
@@ -5190,7 +5281,6 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 ImGui::SetTooltip("Select a verified %s first", noun);
         }
-        /* Switch to the progress-only modal on the same frame as the click. */
         if (m->setup_preparing) {
             ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
@@ -5199,7 +5289,6 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         }
     }
 
-    /* ---- Status / errors (job progress uses a separate modal) ---- */
     if (m->setup_status[0]) {
         ImGui::Dummy(ImVec2(0, px(8)));
         ImGui::PushTextWrapPos(wrap_x);
@@ -5214,8 +5303,13 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     }
 
     ImGui::Dummy(ImVec2(0, px(14)));
-    /* Codegen hosts gate on Generate (& rebuild) then relaunch — no Continue.
-     * ROM/BIOS-only wizards still offer Continue once paths are present. */
+    if (m->setup_needs_toolchain) {
+        if (ImGui::Button("Back", ImVec2(px(100), px(34)))) {
+            m->setup_page = 0;
+            m->setup_error[0] = '\0';
+        }
+        ImGui::SameLine();
+    }
     if (!m->prepare_required_before_continue) {
         const bool ready = launcher_model_can_finish_setup(m);
         if (!ready) ImGui::BeginDisabled();
@@ -5237,15 +5331,12 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::SameLine();
     } else if (launcher_model_can_finish_setup(m) &&
                m->action != LNG_ACTION_RELAUNCH) {
-        /* Prepare-only success (e.g. no cmake): drop into the launcher. */
         launcher_model_finish_setup(m);
         ImGui::CloseCurrentPopup();
     }
     if (ImGui::Button("Quit", ImVec2(px(100), px(34))))
         m->action = LNG_ACTION_QUIT;
 
-    /* Esc must not dismiss while setup is still required. Do NOT force
-     * setup_wizard_open back on after finish_setup — that made Continue a no-op. */
     if (m->setup_wizard_open && !ImGui::IsPopupOpen("First-run setup"))
         ImGui::OpenPopup("First-run setup");
     ImGui::EndPopup();

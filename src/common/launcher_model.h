@@ -184,6 +184,11 @@ typedef struct {
     bool        rebuild_after_prepare;
     bool        relaunch_after_rebuild;
     bool        prepare_required_before_continue;
+    bool        setup_needs_toolchain;   // wizard page 0: portable cmake/clang
+    int (*toolchain_is_ready_cb)(void);
+    int (*ensure_toolchain_with_progress_cb)(
+        int download, const char* zip_path, char* err_msg, size_t err_cap,
+        RecompLauncherCPrepareProgressFn on_progress, void* progress_ctx);
     bool        setup_prepare_satisfied; // prepare (+ rebuild if chained) succeeded
     char        relaunch_exe[512];       // set when rebuild requests relaunch
     // Box-art path relative to the assets dir (GameInfo.boxart_path);
@@ -315,12 +320,17 @@ typedef struct {
     int       cfg_player;            // 0..LNG_MAX_PLAYERS-1 — which player the Controller view edits
     bool      skip_modal_open;       // "Skip the launcher on boot?" confirm
     bool      setup_wizard_open;     // first-run BIOS/ROM setup (blocking)
+    int       setup_page;            // 0 = toolchain, 1 = BIOS/ROM/generate
+    bool      setup_tc_auto;         // download portable toolchain (default true)
+    bool      setup_tc_ready;        // toolchain resolved / installed
+    char      setup_tc_zip[512];     // offline cmake-clang-v1 zip when !auto
     bool      setup_bios_ok;         // last bios_verify_cb result (or path-only ok)
     bool      setup_bios_warn;
     char      setup_bios_detail[256];
-    bool      setup_preparing;       // prepare_disc job in flight
+    bool      setup_preparing;       // prepare/rebuild/toolchain job in flight
     float     setup_prepare_pulse;   // 0..1 animation phase while preparing
     float     setup_prepare_fraction; // 0..1 real progress, or <0 for pulse-only
+    char      setup_progress_title[128]; // progress modal title override
     char      setup_status[256];     // busy / result line under the wizard
     char      setup_error[256];
     bool      netplay_name_modal_open;
@@ -597,7 +607,12 @@ void launcher_model_refresh_bios_status(LauncherModel* m);
 void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path);
 // Kick rebuild_with_progress alone (same busy UI as prepare).
 void launcher_model_start_rebuild(LauncherModel* m);
-// Poll prepare/rebuild job; call once per frame from the UI while setup_preparing.
+// Kick ensure_toolchain_with_progress (download and/or offline zip). On success
+// advances setup_page to the BIOS/ROM/generate step.
+void launcher_model_start_ensure_toolchain(LauncherModel* m);
+// True when Next on the toolchain page can run (auto, zip path, or already ready).
+bool launcher_model_can_advance_toolchain(const LauncherModel* m);
+// Poll prepare/rebuild/toolchain job; call once per frame while setup_preparing.
 void launcher_model_poll_prepare_disc(LauncherModel* m);
 // Dismiss the wizard once can_finish_setup is true (keeps dashboard).
 void launcher_model_finish_setup(LauncherModel* m);
