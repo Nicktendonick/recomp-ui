@@ -649,20 +649,25 @@ const LauncherTexture& verdict_texture(int verdict) {
 // placeholder verdict otherwise).
 void draw_verdict_block(const LauncherModel* m, const LauncherTheme& th, float availw) {
     const VerifyResult& v = m->verify;
+    // Keep the Serial/Region/ISO checklist mounted even before a disc is
+    // picked (setup wizard) so AutoResize modals don't jump when verify runs.
+    const bool pending = !m->rom_present;
     const char* headline =
-        v.verdict == 1 ? "Disc verified" :
-        v.verdict == 2 ? "Disc verified (warnings)" :
-        v.verdict == 3 ? "Disc verification failed" :
-                          "Disc not recognized";
+        pending          ? "No disc selected" :
+        v.verdict == 1   ? "Disc verified" :
+        v.verdict == 2   ? "Disc verified (warnings)" :
+        v.verdict == 3   ? "Disc verification failed" :
+                           "Disc not recognized";
     // th has no dedicated "bad"/error slot (only good/warn) — reuse warn for
     // the warn AND none cases (both are cautionary, matching the ROM-hash
     // line's existing amber-for-"not recognized" convention) and fall back to
-    // a plain red only for the explicit "bad" verdict.
-    LngColor headline_color = (v.verdict == 1) ? th.good
+    // a plain red only for the explicit "bad" verdict. Pending = muted.
+    LngColor headline_color = pending ? th.text_muted
+                              : (v.verdict == 1) ? th.good
                               : (v.verdict == 3) ? lng_rgba(0.945f, 0.322f, 0.322f, 1.0f)
                               : th.warn;
 
-    const LauncherTexture& icon = verdict_texture(v.verdict);
+    const LauncherTexture& icon = verdict_texture(pending ? 0 : v.verdict);
     float ih = ImGui::GetTextLineHeight() * 1.35f;
     float iw = (icon.id && icon.h > 0) ? ih * ((float)icon.w / (float)icon.h) : ih;
     float w = iw + px(6) + ImGui::CalcTextSize(headline).x;
@@ -671,22 +676,28 @@ void draw_verdict_block(const LauncherModel* m, const LauncherTheme& th, float a
         ImVec2 p = ImGui::GetCursorScreenPos();
         ImGui::GetWindowDrawList()->AddImage(tid(icon), p, ImVec2(p.x + iw, p.y + ih));
         ImGui::Dummy(ImVec2(iw, ih));
-    } else {
+    } else if (!pending) {
         state_mark(v.verdict == 1, th);   // icon failed to load: vector fallback
+    } else {
+        ImGui::Dummy(ImVec2(iw, ih));
     }
     ImGui::SameLine(0, px(6));
     ImGui::TextColored(col(headline_color), "%s", headline);
     ImGui::Dummy(ImVec2(0, px(8)));
 
-    // Checklist: Serial / Region / ISO header, each with its own pass/fail
-    // mark, derived straight from the minimal VerifyResult fields.
+    // Checklist: Serial / Region / ISO header. Before a disc is chosen, show
+    // em-dashes with no pass/fail marks so the layout still reserves the rows.
     if (ImGui::BeginTable("verdict_checklist", 3, ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("k", ImGuiTableColumnFlags_WidthFixed, px(76));
         ImGui::TableSetupColumn("v", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("m", ImGuiTableColumnFlags_WidthFixed, px(28));
-        kv_row("Serial",     v.serial[0] ? v.serial : "\xE2\x80\x94", th, true, v.serial[0] != '\0');
-        kv_row("Region",     v.region[0] ? v.region : "\xE2\x80\x94", th, true, v.region[0] != '\0');
-        kv_row("ISO header", v.iso_ok ? "OK" : "Mismatch",             th, true, v.iso_ok);
+        const char* dash = "\xE2\x80\x94";
+        kv_row("Serial",     pending ? dash : (v.serial[0] ? v.serial : dash),
+               th, !pending, v.serial[0] != '\0');
+        kv_row("Region",     pending ? dash : (v.region[0] ? v.region : dash),
+               th, !pending, v.region[0] != '\0');
+        kv_row("ISO header", pending ? dash : (v.iso_ok ? "OK" : "Mismatch"),
+               th, !pending, v.iso_ok);
         ImGui::EndTable();
     }
 }
@@ -5367,7 +5378,9 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             if (picked) launcher_model_set_rom(m, g_pick_buf);
         }
         ImGui::PopStyleVar();
-        if (m->profile && m->profile->verify.mode == 1 && m->rom_present)
+        /* Always reserve Serial/Region/ISO rows (blank until a disc is picked)
+         * so AlwaysAutoResize does not reflow the modal after Browse. */
+        if (m->profile && m->profile->verify.mode == 1)
             draw_verdict_block(m, th, ImGui::GetContentRegionAvail().x);
     }
 
