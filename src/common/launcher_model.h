@@ -48,7 +48,8 @@ typedef enum {
 typedef enum {
     LNG_ACTION_NONE = 0,   // still running
     LNG_ACTION_LAUNCH,     // boot the game with committed settings
-    LNG_ACTION_QUIT        // user quit
+    LNG_ACTION_QUIT,       // user quit
+    LNG_ACTION_RELAUNCH    // quit + host should exec rebuilt binary
 } LngAction;
 
 // Representative subset of the SNES pad for the rebind UI. This enum is the
@@ -162,8 +163,34 @@ typedef struct {
     int (*bios_verify_cb)(const char* bios_path, RecompLauncherCBiosVerify* out);
     int (*prepare_disc_cb)(const char* source_path, char* out_disc_path, size_t out_cap,
                            char* err_msg, size_t err_cap);
+    int (*prepare_with_progress_cb)(const char* source_path,
+                                    char* out_path, size_t out_cap,
+                                    char* err_msg, size_t err_cap,
+                                    RecompLauncherCPrepareProgressFn on_progress,
+                                    void* progress_ctx);
+    int (*rebuild_with_progress_cb)(const char* rom_path,
+                                    char* out_exe_path, size_t out_cap,
+                                    char* err_msg, size_t err_cap,
+                                    RecompLauncherCPrepareProgressFn on_progress,
+                                    void* progress_ctx);
     const char* prepare_disc_label;   // borrowed; NULL => default button text
     const char* prepare_disc_note;    // borrowed; NULL => default help
+    const char* prepare_section_title;   // borrowed; NULL => "Convert raw dump…"
+    const char* prepare_busy_status;     // borrowed; NULL => "Preparing disc image…"
+    const char* prepare_success_status;  // borrowed; NULL => "Disc ready."
+    const char* rebuild_busy_status;     // borrowed; NULL => "Building game…"
+    const char* rebuild_success_status;  // borrowed; NULL => "Build complete."
+    bool        prepare_use_selected_rom; // button uses current ROM (no 2nd picker)
+    bool        rebuild_after_prepare;
+    bool        relaunch_after_rebuild;
+    bool        prepare_required_before_continue;
+    bool        setup_needs_toolchain;   // wizard page 0: portable cmake/clang
+    int (*toolchain_is_ready_cb)(void);
+    int (*ensure_toolchain_with_progress_cb)(
+        int download, const char* zip_path, char* err_msg, size_t err_cap,
+        RecompLauncherCPrepareProgressFn on_progress, void* progress_ctx);
+    bool        setup_prepare_satisfied; // prepare (+ rebuild if chained) succeeded
+    char        relaunch_exe[512];       // set when rebuild requests relaunch
     // Box-art path relative to the assets dir (GameInfo.boxart_path);
     // NULL => the default "assets/img/boxart.tga".
     const char* boxart_path;
@@ -293,11 +320,17 @@ typedef struct {
     int       cfg_player;            // 0..LNG_MAX_PLAYERS-1 — which player the Controller view edits
     bool      skip_modal_open;       // "Skip the launcher on boot?" confirm
     bool      setup_wizard_open;     // first-run BIOS/ROM setup (blocking)
+    int       setup_page;            // 0 = toolchain, 1 = BIOS/ROM/generate
+    bool      setup_tc_auto;         // download portable toolchain (default true)
+    bool      setup_tc_ready;        // toolchain resolved / installed
+    char      setup_tc_zip[512];     // offline cmake-clang-v1 zip when !auto
     bool      setup_bios_ok;         // last bios_verify_cb result (or path-only ok)
     bool      setup_bios_warn;
     char      setup_bios_detail[256];
-    bool      setup_preparing;       // prepare_disc job in flight
+    bool      setup_preparing;       // prepare/rebuild/toolchain job in flight
     float     setup_prepare_pulse;   // 0..1 animation phase while preparing
+    float     setup_prepare_fraction; // 0..1 real progress, or <0 for pulse-only
+    char      setup_progress_title[128]; // progress modal title override
     char      setup_status[256];     // busy / result line under the wizard
     char      setup_error[256];
     bool      netplay_name_modal_open;
@@ -565,8 +598,9 @@ void launcher_model_set_mouse_bind(LauncherModel* m, int which, int button_index
 void launcher_model_set_gyro_sensitivity(LauncherModel* m, float value);
 
 // ---- first-run setup wizard ----
-// True when required BIOS + ROM/disc paths are present (readable). Used to
-// enable "Continue to launcher"; fingerprint mismatch is allowed here.
+// True when required BIOS + ROM/disc paths are present (readable), and when
+// prepare_required_before_continue is set, prepare (+ chained rebuild) has
+// succeeded. Fingerprint mismatch is allowed here.
 bool launcher_model_can_finish_setup(const LauncherModel* m);
 // True when BIOS (if required) and ROM/disc are ready to launch (incl. fingerprint).
 bool launcher_model_can_launch(const LauncherModel* m);
@@ -575,8 +609,16 @@ bool launcher_model_can_launch(const LauncherModel* m);
 void launcher_model_refresh_bios_status(LauncherModel* m);
 // Kick a host prepare_disc job on a background thread. No-op if no callback
 // or a job is already running. On success adopts the resulting disc path.
+// When rebuild_after_prepare is set, automatically chains into rebuild.
 void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path);
-// Poll prepare job; call once per frame from the UI while setup_preparing.
+// Kick rebuild_with_progress alone (same busy UI as prepare).
+void launcher_model_start_rebuild(LauncherModel* m);
+// Kick ensure_toolchain_with_progress (download and/or offline zip). On success
+// advances setup_page to the BIOS/ROM/generate step.
+void launcher_model_start_ensure_toolchain(LauncherModel* m);
+// True when Next on the toolchain page can run (auto, zip path, or already ready).
+bool launcher_model_can_advance_toolchain(const LauncherModel* m);
+// Poll prepare/rebuild/toolchain job; call once per frame while setup_preparing.
 void launcher_model_poll_prepare_disc(LauncherModel* m);
 // Dismiss the wizard once can_finish_setup is true (keeps dashboard).
 void launcher_model_finish_setup(LauncherModel* m);
