@@ -341,6 +341,9 @@ menu.items = rows;
 menu.item_count = sizeof(rows) / sizeof(rows[0]);
 menu.callbacks = callbacks;
 menu.theme = "n64"; /* same id used by launcher_profile_apply() */
+/* Optional for a physically small, high-density touchscreen. */
+menu.presentation_flags =
+    RECOMP_RUNTIME_UI_PRESENTATION_TOUCH_FRIENDLY;
 RecompRuntimeUi *ui = recomp_runtime_ui_create(&menu);
 ```
 

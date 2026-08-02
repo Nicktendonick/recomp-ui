@@ -18,6 +18,7 @@ extern "C" {
  *     #endif
  */
 #define RECOMP_RUNTIME_UI_HAS_TEXT 1
+#define RECOMP_RUNTIME_UI_HAS_PRESENTATION_FLAGS 1
 
 typedef struct RecompRuntimeUi RecompRuntimeUi;
 
@@ -134,7 +135,19 @@ typedef struct RecompRuntimeUiConfig {
     /* Optional platform/input vocabulary for the footer. */
     const char *accept_label;
     const char *back_label;
+
+    /*
+     * Opt-in presentation policy. The default remains the desktop/TV layout;
+     * hosts running on a physically small, high-density touch display can
+     * request larger hit targets and a near-full-screen surface without
+     * coupling the shared UI to a particular operating system.
+     */
+    uint32_t presentation_flags;
 } RecompRuntimeUiConfig;
+
+enum {
+    RECOMP_RUNTIME_UI_PRESENTATION_TOUCH_FRIENDLY = UINT32_C(1) << 0,
+};
 
 typedef uint64_t RecompRuntimeUiStandardFeatures;
 enum {
