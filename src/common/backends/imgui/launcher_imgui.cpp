@@ -5338,13 +5338,84 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
         if (mod_commit_launch(m))
             m->action = LNG_ACTION_LAUNCH;
     } else if (!can_play && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Select a valid %s first",
-                          m->rom_noun ? m->rom_noun : "ROM");
+        const char* noun = m->rom_noun ? m->rom_noun : "ROM";
+        if (m->has_bios && !m->setup_bios_ok) {
+            ImGui::SetTooltip(
+                "Select a valid BIOS first (or Clear to use the bundled "
+                "OpenBIOS when this build includes one).");
+        } else if (!m->rom_present || strcmp(m->rom_size, "--") == 0) {
+            ImGui::SetTooltip("Select a valid %s first", noun);
+        } else if (m->profile && m->profile->verify.mode == 1 &&
+                   (m->verify.verdict == 0 || m->verify.verdict == 3)) {
+            ImGui::SetTooltip("Select a verified %s first", noun);
+        } else if (m->setup_preparing) {
+            ImGui::SetTooltip("Wait for the current setup job to finish");
+        } else {
+            ImGui::SetTooltip("Select a valid %s first", noun);
+        }
     }
     if (!can_play && ImGui::IsItemClicked())
         m->setup_wizard_open = true;
     ImGui::SetItemDefaultFocus();   // gamepad/keyboard start on the primary action
     (void)win;
+}
+
+/* Compact progress-only modal while a setup job runs — closes the full
+ * first-run form so nothing else is interactive. */
+enum SetupPlatKind {
+    SETUP_PLAT_GENERIC = 0,
+    SETUP_PLAT_PSX,
+    SETUP_PLAT_GBA,
+    SETUP_PLAT_SNES,
+};
+
+static bool setup_plat_contains_ci(const char* hay, const char* needle) {
+    if (!hay || !needle || !needle[0]) return false;
+    for (const char* h = hay; *h; ++h) {
+        const char* a = h;
+        const char* b = needle;
+        while (*a && *b) {
+            char ca = *a, cb = *b;
+            if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
+            if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
+            if (ca != cb) break;
+            ++a;
+            ++b;
+        }
+        if (!*b) return true;
+    }
+    return false;
+}
+
+static SetupPlatKind setup_platform_kind(const char* platform) {
+    if (setup_plat_contains_ci(platform, "PLAYSTATION") ||
+        setup_plat_contains_ci(platform, "PSX") ||
+        setup_plat_contains_ci(platform, "PS1"))
+        return SETUP_PLAT_PSX;
+    if (setup_plat_contains_ci(platform, "GAME BOY ADVANCE") ||
+        setup_plat_contains_ci(platform, "GBA"))
+        return SETUP_PLAT_GBA;
+    if (setup_plat_contains_ci(platform, "SUPER NINTENDO") ||
+        setup_plat_contains_ci(platform, "SNES"))
+        return SETUP_PLAT_SNES;
+    return SETUP_PLAT_GENERIC;
+}
+
+static const char* kRetcommToolchainsUrl =
+    "https://github.com/TechnicallyComputers/retcomm-toolchains";
+static const char* kRetcommToolchainsReleasesUrl =
+    "https://github.com/TechnicallyComputers/retcomm-toolchains/releases";
+
+/* TextLinkOpenURL is 1.91+; HOST_IMGUI may be older — fall back to a button. */
+static void setup_url_link(const char* label, const char* url) {
+#if defined(IMGUI_VERSION_NUM) && IMGUI_VERSION_NUM >= 19100
+    ImGui::TextLinkOpenURL(label, url);
+#else
+    if (ImGui::SmallButton(label))
+        SDL_OpenURL(url);
+#endif
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", url);
 }
 
 /* Compact progress-only modal while a setup job runs — closes the full
@@ -5437,10 +5508,6 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     const float wrap_x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
     const char* noun = (m->rom_noun && m->rom_noun[0]) ? m->rom_noun : "ROM";
     const char* game = (m->game_name && m->game_name[0]) ? m->game_name : "this game";
-    const SystemProfile* prof = (const SystemProfile*)m->profile;
-    const bool is_gba = prof && prof->id && std::strcmp(prof->id, "gba") == 0;
-    const bool is_disc = prof && prof->verify.mode == 1;
-    (void)is_disc;
 
     /* ---- Page 0: portable toolchain ------------------------------------ */
     if (m->setup_needs_toolchain && m->setup_page == 0) {
@@ -5457,9 +5524,15 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::TextUnformatted("1. Portable toolchain");
         ImGui::PushTextWrapPos(wrap_x);
         ImGui::TextColored(col(th.text_muted),
-            "Downloaded from TechnicallyComputers/retcomm-toolchains and cached "
-            "for reuse across titles. Uncheck to pick a local zip instead.");
+            "Automatic download fetches the cmake-clang-v1 pack and caches it "
+            "for reuse across titles. Uncheck to browse a local zip instead "
+            "(for offline machines, grab a release asset from the repo below).");
         ImGui::PopTextWrapPos();
+        ImGui::Dummy(ImVec2(0, px(4)));
+        ImGui::TextColored(col(th.text_muted), "Source / manual download:");
+        ImGui::SameLine();
+        setup_url_link("TechnicallyComputers/retcomm-toolchains",
+                       kRetcommToolchainsUrl);
         ImGui::Dummy(ImVec2(0, px(6)));
 
         if (ImGui::Checkbox("Download portable toolchain automatically##tc",
@@ -5471,6 +5544,14 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         if (!m->setup_tc_auto) {
             ImGui::Dummy(ImVec2(0, px(8)));
             ImGui::TextUnformatted("Toolchain zip");
+            ImGui::PushTextWrapPos(wrap_x);
+            ImGui::TextColored(col(th.text_muted),
+                "Select a cmake-clang-v1-*.zip from "
+                "TechnicallyComputers/retcomm-toolchains releases.");
+            ImGui::PopTextWrapPos();
+            setup_url_link("Open retcomm-toolchains releases",
+                           kRetcommToolchainsReleasesUrl);
+            ImGui::Dummy(ImVec2(0, px(4)));
             const char* zp = m->setup_tc_zip[0] ? m->setup_tc_zip
                                                 : "(none selected)";
             char zelided[220];
@@ -5540,20 +5621,33 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     }
 
     /* ---- Page 1: BIOS / disc / generate -------------------------------- */
+    const SetupPlatKind plat = setup_platform_kind(m->platform);
+
     ImGui::TextColored(col(th.accent), "Setup required");
     ImGui::PushTextWrapPos(wrap_x);
-    if (is_gba) {
-        ImGui::TextColored(col(th.text_muted),
-            "%s requires both a playable %s and a retail Game Boy Advance "
-            "BIOS dump. This build does not include or substitute a BIOS. "
-            "Select the files below (you must legally own these dumps).",
-            game, noun);
-    } else if (m->has_bios) {
+    if (plat == SETUP_PLAT_PSX && m->has_bios) {
         ImGui::TextColored(col(th.text_muted),
             "%s needs a playable %s before you can launch. This build includes "
             "a bundled BIOS (OpenBIOS) by default — a retail SCPH1001.BIN dump "
-            "is optional. Pick your %s below (you must legally own these dumps).",
+            "is optional. Prefer a Redump-style .cue (not a lone .bin) so "
+            "multitrack discs stay intact. Pick your %s below (you must "
+            "legally own these dumps).",
             game, noun, noun);
+    } else if (plat == SETUP_PLAT_GBA && m->has_bios) {
+        ImGui::TextColored(col(th.text_muted),
+            "%s needs a Game Boy Advance BIOS dump and a playable %s before "
+            "you can launch. Pick both below (you must legally own these dumps).",
+            game, noun);
+    } else if (plat == SETUP_PLAT_SNES) {
+        ImGui::TextColored(col(th.text_muted),
+            "%s needs a playable Super Nintendo %s before you can launch. "
+            "Pick your file below (you must legally own this dump).",
+            game, noun);
+    } else if (m->has_bios) {
+        ImGui::TextColored(col(th.text_muted),
+            "%s needs a BIOS image and a playable %s before you can launch. "
+            "Pick both below (you must legally own these dumps).",
+            game, noun);
     } else {
         ImGui::TextColored(col(th.text_muted),
             "%s needs a playable %s before you can launch. Pick your file below "
@@ -5565,21 +5659,32 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
 
     if (m->has_bios) {
         const bool has_pick = m->s.bios_path[0] != 0;
-        ImGui::TextUnformatted(is_gba ? "1. Game Boy Advance BIOS (required)"
-                                      : "1. PlayStation BIOS (optional)");
+        const bool offers_bundled = (plat == SETUP_PLAT_PSX);
+        const char* bios_section =
+            (plat == SETUP_PLAT_GBA) ? "1. GBA BIOS (required)"
+            : (plat == SETUP_PLAT_PSX) ? "1. PlayStation BIOS (optional)"
+                                      : "1. BIOS";
+        const char* bios_help =
+            (plat == SETUP_PLAT_GBA)
+                ? "Browse for your gba_bios.bin dump (16 KB, SHA-1 "
+                  "300c20df… — dumped from a Game Boy Advance). Setup packages "
+                  "do not ship a redistributable GBA BIOS."
+            : (plat == SETUP_PLAT_PSX)
+                ? "Default: bundled OpenBIOS. Optionally browse for your own "
+                  "SCPH1001.BIN (exactly 512 KB, dumped from your console)."
+                : "Browse for a BIOS image required by this console.";
+        const char* empty_bios_label =
+            offers_bundled ? "Bundled BIOS (OpenBIOS)" : "(none selected)";
+        const char* bios_picker =
+            (plat == SETUP_PLAT_GBA) ? "Select GBA BIOS (gba_bios.bin)"
+            : (plat == SETUP_PLAT_PSX) ? "Select PlayStation BIOS (SCPH1001.BIN)"
+                                      : "Select BIOS file";
+
+        ImGui::TextUnformatted(bios_section);
         ImGui::PushTextWrapPos(wrap_x);
-        if (is_gba)
-            ImGui::TextColored(col(th.text_muted),
-                "Select gba_bios.bin (exactly 16 KB, dumped from your console). "
-                "The canonical retail BIOS is SHA-1 verified before launch.");
-        else
-            ImGui::TextColored(col(th.text_muted),
-                "Default: bundled OpenBIOS. Optionally browse for your own "
-                "SCPH1001.BIN (exactly 512 KB, dumped from your console).");
+        ImGui::TextColored(col(th.text_muted), "%s", bios_help);
         ImGui::PopTextWrapPos();
-        const char* bp = has_pick ? m->s.bios_path
-                                  : (is_gba ? "(none selected)"
-                                            : "Bundled BIOS (OpenBIOS)");
+        const char* bp = has_pick ? m->s.bios_path : empty_bios_label;
         char belided[220];
         elide_left(bp, px(300), belided, sizeof(belided));
         ImGui::AlignTextToFramePadding();
@@ -5592,15 +5697,11 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         if (ImGui::Button("Browse BIOS##setup", ImVec2(px(120), px(32)))) {
             char buf[512];
             static const char* kBiosPatterns[] = { "*.bin", "*.rom" };
-            if (launcher_pick_file(
-                                   is_gba
-                                       ? "Select Game Boy Advance BIOS (gba_bios.bin)"
-                                       : "Select PlayStation BIOS (SCPH1001.BIN)",
-                                   kBiosPatterns, 2, "BIOS image (.bin .rom)",
-                                   buf, sizeof(buf)))
+            if (launcher_pick_file(bios_picker, kBiosPatterns, 2,
+                                   "BIOS image (.bin .rom)", buf, sizeof(buf)))
                 launcher_model_set_bios_path(m, buf);
         }
-        if (has_pick && !is_gba) {
+        if (has_pick && offers_bundled) {
             ImGui::SameLine();
             if (ImGui::Button("Use bundled##setup", ImVec2(px(120), px(32))))
                 launcher_model_set_bios_path(m, "");
@@ -5620,10 +5721,21 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
 
     ImGui::Text("%s. %s image", m->has_bios ? "2" : "1", noun);
     ImGui::PushTextWrapPos(wrap_x);
-    ImGui::TextColored(col(th.text_muted),
-        is_disc
-            ? "Prefer a .cue with its .bin beside it (MODE2/2352). Raw dumps may need conversion."
-            : "Select your game ROM file.");
+    {
+        const char* media_help =
+            (plat == SETUP_PLAT_PSX)
+                ? "Select the .cue sheet (MODE2/2352), not the .bin track file. "
+                  "The .cue keeps multitrack / audio-track layout correct for "
+                  "generate and boot. Cooked .iso dumps are OK — Generate "
+                  "converts them to a working .bin/.cue, then verifies the "
+                  "result against the game’s known digests."
+            : (plat == SETUP_PLAT_GBA)
+                ? "Select your verified Game Boy Advance ROM (.gba)."
+            : (plat == SETUP_PLAT_SNES)
+                ? "Select your Super Nintendo ROM (.sfc / .smc)."
+                : "Select your game ROM file.";
+        ImGui::TextColored(col(th.text_muted), "%s", media_help);
+    }
     ImGui::PopTextWrapPos();
     {
         const char* rp = m->rom_present ? m->rom_full : "(none selected)";
@@ -5644,7 +5756,11 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         if (ImGui::Button(browse_lbl, ImVec2(px(128), px(32)))) {
             const SystemProfile* prof = (const SystemProfile*)m->profile;
             char title[96];
-            std::snprintf(title, sizeof(title), "Select %s", noun);
+            if (plat == SETUP_PLAT_PSX)
+                std::snprintf(title, sizeof(title),
+                              "Select %s (.cue preferred)", noun);
+            else
+                std::snprintf(title, sizeof(title), "Select %s", noun);
             bool picked = false;
             if (prof && prof->rom_filter.pattern_count > 0)
                 picked = launcher_pick_file(title, prof->rom_filter.patterns,
@@ -5658,6 +5774,18 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::PopStyleVar();
         if (m->profile && m->profile->verify.mode == 1)
             draw_verdict_block(m, th, ImGui::GetContentRegionAvail().x);
+        if (plat == SETUP_PLAT_PSX && m->rom_present && m->rom_full[0]) {
+            const char* ext = strrchr(m->rom_full, '.');
+            if (ext && (lps_streq_ci(ext, ".bin") || lps_streq_ci(ext, ".img"))) {
+                ImGui::PushTextWrapPos(wrap_x);
+                ImGui::TextColored(col(th.warn),
+                    "You picked a track image (%s). Prefer the matching .cue "
+                    "in the same folder so multitrack discs are handled "
+                    "correctly.",
+                    ext);
+                ImGui::PopTextWrapPos();
+            }
+        }
     }
 
     if (m->prepare_disc_cb || m->prepare_with_progress_cb) {
@@ -5668,24 +5796,36 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             std::snprintf(section_buf, sizeof(section_buf), "%s. %s",
                           m->has_bios ? "3" : "2", m->prepare_section_title);
             section = section_buf;
+        } else if (plat == SETUP_PLAT_PSX) {
+            section = m->has_bios ? "3. Generate from disc"
+                                  : "2. Generate from disc";
         } else {
             section = m->has_bios ? "3. Convert raw dump (optional)"
                                   : "2. Convert raw dump (optional)";
         }
         ImGui::TextUnformatted(section);
         ImGui::PushTextWrapPos(wrap_x);
-        ImGui::TextColored(col(th.text_muted), "%s",
+        const char* prep_note =
             (m->prepare_disc_note && m->prepare_disc_note[0])
                 ? m->prepare_disc_note
-                : "If your disc image is a raw dump that this game cannot boot "
-                  "directly, convert it here. Output is written next to the game.");
+                : (plat == SETUP_PLAT_PSX
+                       ? "Uses the selected .cue (or converts a cooked .iso "
+                         "to MODE2/2352 .bin/.cue) with the local SDK, then "
+                         "verifies digests against the game identity. Always "
+                         "point Generate at the .cue when both files exist."
+                       : "If your disc image is a raw dump that this game "
+                         "cannot boot directly, convert it here. Output is "
+                         "written next to the game.");
+        ImGui::TextColored(col(th.text_muted), "%s", prep_note);
         ImGui::PopTextWrapPos();
         const char* prep_lbl = (m->prepare_disc_label && m->prepare_disc_label[0])
                                    ? m->prepare_disc_label
                                    : ((m->rebuild_after_prepare &&
                                        m->rebuild_with_progress_cb)
                                           ? "Generate & rebuild…"
-                                          : "Convert raw dump…");
+                                          : (plat == SETUP_PLAT_PSX
+                                                 ? "Prepare disc…"
+                                                 : "Convert raw dump…"));
         const bool use_selected = m->prepare_use_selected_rom;
         const bool can_prep_selected = use_selected && m->rom_present &&
                                        m->rom_full[0] &&
@@ -5698,10 +5838,16 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             } else {
                 char buf[512];
                 static const char* kDumpPatterns[] = {
-                    "*.iso", "*.bin", "*.img", "*.*" };
-                if (launcher_pick_file("Select raw disc dump to convert",
-                                       kDumpPatterns, 4, "Disc dump",
-                                       buf, sizeof(buf)))
+                    "*.cue", "*.iso", "*.bin", "*.img", "*.*" };
+                if (launcher_pick_file(
+                        plat == SETUP_PLAT_PSX
+                            ? "Select disc (.cue preferred; .iso OK)"
+                            : "Select raw disc dump to convert",
+                        kDumpPatterns, 5,
+                        plat == SETUP_PLAT_PSX
+                            ? "PlayStation disc (.cue .iso .bin)"
+                            : "Disc dump",
+                        buf, sizeof(buf)))
                     launcher_model_start_prepare_disc(m, buf);
             }
         }
