@@ -478,6 +478,11 @@ typedef struct RecompLauncherCBiosVerify {
     char detail[160];  // short status for the UI
 } RecompLauncherCBiosVerify;
 
+/* Optional progress callback for prepare_with_progress (worker thread).
+ * pct is 0..1 when known; negative means indeterminate. message may be NULL. */
+typedef void (*RecompLauncherCPrepareProgressFn)(void* ctx, float pct,
+                                                 const char* message);
+
 typedef struct RecompLauncherCMemcard {
     int           valid;          // 128 KB + "MC" magic present
     int           used_blocks;    // 0..15
@@ -738,6 +743,7 @@ typedef struct RecompLauncherCGameInfo {
      * discovery, sensor selection, and axis mapping remain host-owned. */
     int has_gyro_controls;
 
+<<<<<<< HEAD
     /* Add independent checkboxes to Display settings. The host maps their
      * committed Settings values onto renderer configuration. */
     int has_sharp_filter;
@@ -749,6 +755,26 @@ typedef struct RecompLauncherCGameInfo {
      * NULL/0 keeps every existing single-display launcher unchanged. */
     const char* const* display_layout_labels;
     int num_display_layouts;
+=======
+    /* ---- prepare job UX (appended; disc convert / local codegen) ---------
+     * prepare_use_selected_rom: 1 = the prepare button uses the already-
+     * picked ROM/disc (no second file picker). Cart codegen hosts use this.
+     * prepare_section_title / prepare_busy_status / prepare_success_status
+     * override the default "Convert raw dump…" copy when non-NULL.
+     *
+     * prepare_with_progress: when non-NULL, preferred over prepare_disc.
+     * Same success contract (return 1 + out_path); may invoke on_progress
+     * from the worker thread. Zero-init leaves legacy prepare_disc behavior. */
+    int prepare_use_selected_rom;
+    const char* prepare_section_title;
+    const char* prepare_busy_status;
+    const char* prepare_success_status;
+    int (*prepare_with_progress)(const char* source_path,
+                                 char* out_path, size_t out_cap,
+                                 char* err_msg, size_t err_cap,
+                                 RecompLauncherCPrepareProgressFn on_progress,
+                                 void* progress_ctx);
+>>>>>>> 708fe2a (Add progress-aware setup prepare for local codegen.)
 } RecompLauncherCGameInfo;
 
 // Returns: 0 = LAUNCH (boot out_rom_path with the edited *io),

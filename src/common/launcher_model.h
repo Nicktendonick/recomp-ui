@@ -164,8 +164,17 @@ typedef struct {
     int (*bios_verify_cb)(const char* bios_path, RecompLauncherCBiosVerify* out);
     int (*prepare_disc_cb)(const char* source_path, char* out_disc_path, size_t out_cap,
                            char* err_msg, size_t err_cap);
+    int (*prepare_with_progress_cb)(const char* source_path,
+                                    char* out_path, size_t out_cap,
+                                    char* err_msg, size_t err_cap,
+                                    RecompLauncherCPrepareProgressFn on_progress,
+                                    void* progress_ctx);
     const char* prepare_disc_label;   // borrowed; NULL => default button text
     const char* prepare_disc_note;    // borrowed; NULL => default help
+    const char* prepare_section_title;   // borrowed; NULL => "Convert raw dump…"
+    const char* prepare_busy_status;     // borrowed; NULL => "Preparing disc image…"
+    const char* prepare_success_status;  // borrowed; NULL => "Disc ready."
+    bool        prepare_use_selected_rom; // button uses current ROM (no 2nd picker)
     // Box-art path relative to the assets dir (GameInfo.boxart_path);
     // NULL => the default "assets/img/boxart.tga".
     const char* boxart_path;
@@ -304,6 +313,7 @@ typedef struct {
     char      setup_bios_detail[256];
     bool      setup_preparing;       // prepare_disc job in flight
     float     setup_prepare_pulse;   // 0..1 animation phase while preparing
+    float     setup_prepare_fraction; // 0..1 real progress, or <0 for pulse-only
     char      setup_status[256];     // busy / result line under the wizard
     char      setup_error[256];
     bool      netplay_name_modal_open;

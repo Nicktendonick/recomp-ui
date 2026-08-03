@@ -5297,11 +5297,15 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             draw_verdict_block(m, th, px(480));
     }
 
-    /* ---- Optional prepare_disc ---- */
-    if (m->prepare_disc_cb) {
+    /* ---- Optional prepare job (disc convert / local codegen) ---- */
+    if (m->prepare_disc_cb || m->prepare_with_progress_cb) {
         ImGui::Dummy(ImVec2(0, px(12)));
-        ImGui::TextUnformatted(m->has_bios ? "3. Convert raw dump (optional)"
-                                           : "2. Convert raw dump (optional)");
+        const char* section =
+            (m->prepare_section_title && m->prepare_section_title[0])
+                ? m->prepare_section_title
+                : (m->has_bios ? "3. Convert raw dump (optional)"
+                               : "2. Convert raw dump (optional)");
+        ImGui::TextUnformatted(section);
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
         ImGui::TextColored(col(th.text_muted), "%s",
             (m->prepare_disc_note && m->prepare_disc_note[0])
@@ -5312,13 +5316,29 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         const char* prep_lbl = (m->prepare_disc_label && m->prepare_disc_label[0])
                                    ? m->prepare_disc_label
                                    : "Convert raw dump…";
+        const bool use_selected = m->prepare_use_selected_rom;
+        const bool can_prep_selected = use_selected && m->rom_present &&
+                                       m->rom_full[0] &&
+                                       strcmp(m->rom_size, "--") != 0;
+        if (use_selected && !can_prep_selected) ImGui::BeginDisabled();
         if (ImGui::Button(prep_lbl, ImVec2(px(220), px(32)))) {
-            char buf[512];
-            static const char* kDumpPatterns[] = { "*.iso", "*.bin", "*.img", "*.*" };
-            if (launcher_pick_file("Select raw disc dump to convert",
-                                   kDumpPatterns, 4, "Disc dump",
-                                   buf, sizeof(buf)))
-                launcher_model_start_prepare_disc(m, buf);
+            if (use_selected) {
+                if (can_prep_selected)
+                    launcher_model_start_prepare_disc(m, m->rom_full);
+            } else {
+                char buf[512];
+                static const char* kDumpPatterns[] = {
+                    "*.iso", "*.bin", "*.img", "*.*" };
+                if (launcher_pick_file("Select raw disc dump to convert",
+                                       kDumpPatterns, 4, "Disc dump",
+                                       buf, sizeof(buf)))
+                    launcher_model_start_prepare_disc(m, buf);
+            }
+        }
+        if (use_selected && !can_prep_selected) {
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("Select a verified %s first", noun);
         }
     }
 
@@ -5329,7 +5349,10 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::Dummy(ImVec2(0, px(10)));
         ImGui::TextColored(col(th.accent), "%s",
                            m->setup_status[0] ? m->setup_status : "Working…");
-        ImGui::ProgressBar(m->setup_prepare_pulse, ImVec2(-1, px(8)), "");
+        const float bar = (m->setup_prepare_fraction >= 0.0f)
+                              ? m->setup_prepare_fraction
+                              : m->setup_prepare_pulse;
+        ImGui::ProgressBar(bar, ImVec2(-1, px(8)), "");
     } else if (m->setup_status[0]) {
         ImGui::Dummy(ImVec2(0, px(8)));
         ImGui::TextColored(col(th.good), "%s", m->setup_status);
