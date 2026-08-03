@@ -82,8 +82,9 @@ typedef struct RecompLauncherCNetplayLaunch {
     int      max_slots; /* lobby seat ceiling (2..RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS) */
     /* Seated players at launch — delay-sync slot_count. 0 = unknown / use max_slots. */
     int      player_count;
-    /* Host match_caps: opt into lobby-server UDP input relay (0/1).
-     * 3+ defaults to host-as-relay unless this is set. */
+    /* Host match_caps: lobby UDP SFU star (0/1). Online WS start always
+     * opens the SFU; this flag stays for launch/diagnostics. LAN/direct
+     * keeps host-as-relay / P2P when unset. */
     int      force_input_relay;
     /* Host match_caps: ICE relay-only / Force TURN for UDP (0/1). */
     int      force_turn;
@@ -169,8 +170,8 @@ typedef struct RecompLauncherCNetplayCallbacks {
     /* Optional host waiting-room settings. input_delay is frames, clamped 2..20. */
     int  (*input_delay_get)(void* ctx);
     int  (*input_delay_set)(void* ctx, int delay_frames);
-    /* Optional: host opt-in to server UDP input relay (0/1).
-     * 3+ lobbies default to host-as-relay unless this is enabled. */
+    /* Optional: lobby UDP SFU preference (0/1). Online start always SFU;
+     * LAN/direct may clear this for host-as-relay. */
     int  (*force_input_relay_get)(void* ctx);
     int  (*force_input_relay_set)(void* ctx, int force);
     /* Optional: current room seat ceiling (2..RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS).

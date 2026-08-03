@@ -73,7 +73,7 @@ static const SystemProfile kSystemProfilePsx = {
     /* controller */ {
         kPsxPadButtons, LNG_PSX_PAD_BUTTON_COUNT,     // real PSX pad vocabulary (Triangle/Circle/Cross/Square/L1-2/R1-2/L3/R3)
         "pad.tga", "pad_analog.tga", "pad_digital.tga",
-        /* max_players */ 5, /* PSX + multitap ceiling; game num_players may be lower */
+        /* max_players */ 8, /* dual multitap ceiling; game num_players may be lower */
         /* has_pad_mode */ 1,
     },
     // MEMCARD is PSX's real target shape (2 slots): the standalone "save" panel
