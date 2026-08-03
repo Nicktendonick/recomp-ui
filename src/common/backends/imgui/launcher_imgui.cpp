@@ -2604,12 +2604,6 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
                         motion_pad = &g_pads[i];
                         break;
                     }
-            } else {
-                for (int i = 0; i < g_pad_count; ++i)
-                    if (g_pads[i].has_gyro) {
-                        motion_pad = &g_pads[i];
-                        break;
-                    }
             }
 
             const float rate = motion_pad && motion_pad->has_gyro
