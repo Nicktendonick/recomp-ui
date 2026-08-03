@@ -1149,6 +1149,7 @@ static void lm_persist_setup_sidecars(LauncherModel* m) {
     const char* rom = (m && m->rom_full[0]) ? m->rom_full : NULL;
     const char* bios =
         (m && m->has_bios && m->s.bios_path[0]) ? m->s.bios_path : NULL;
+    /* PSX hosts read disc.cfg; cart hosts read rom.cfg — write both names. */
     lm_write_sidecar_in_dir(NULL, "rom.cfg", rom);
     lm_write_sidecar_in_dir(NULL, "disc.cfg", rom);
     lm_write_sidecar_in_dir(NULL, "bios.cfg", bios);
