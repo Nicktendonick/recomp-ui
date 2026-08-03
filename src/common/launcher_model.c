@@ -416,6 +416,10 @@ void launcher_model_init(LauncherModel* m,
     m->setup_tc_auto = true;
     m->setup_tc_ready = false;
     m->setup_tc_zip[0] = '\0';
+    m->setup_bios_needs_regen = false;
+    m->bios_confirm_open = false;
+    m->bios_pending_path[0] = '\0';
+    m->bios_play_modal_open = false;
     m->setup_preparing = false;
     m->setup_prepare_pulse = 0.0f;
     m->setup_prepare_fraction = -1.0f;
@@ -1021,6 +1025,7 @@ void launcher_model_refresh_bios_status(LauncherModel* m) {
     if (!m) return;
     m->setup_bios_ok = false;
     m->setup_bios_warn = false;
+    m->setup_bios_needs_regen = false;
     m->setup_bios_detail[0] = '\0';
     if (!m->has_bios) {
         m->setup_bios_ok = true;
@@ -1040,6 +1045,7 @@ void launcher_model_refresh_bios_status(LauncherModel* m) {
             }
             m->setup_bios_ok = bv.ok != 0;
             m->setup_bios_warn = bv.warn != 0;
+            m->setup_bios_needs_regen = bv.needs_regen != 0;
             if (bv.detail[0])
                 safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
                           bv.detail);
@@ -1070,6 +1076,7 @@ void launcher_model_refresh_bios_status(LauncherModel* m) {
     }
     m->setup_bios_ok = bv.ok != 0;
     m->setup_bios_warn = bv.warn != 0;
+    m->setup_bios_needs_regen = bv.needs_regen != 0;
     safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail), bv.detail);
 }
 
@@ -1197,6 +1204,137 @@ void launcher_model_set_bios_path(LauncherModel* m, const char* path) {
     }
     launcher_model_refresh_bios_status(m);
     lm_persist_setup_sidecars(m);
+}
+
+static void lm_normalize_bios_path(const char* path, char* out, size_t out_cap) {
+    if (!out || out_cap == 0) return;
+    out[0] = '\0';
+    if (!path || !path[0]) return;
+#if defined(_WIN32)
+    {
+        char abs[MAX_PATH];
+        DWORD n = GetFullPathNameA(path, (DWORD)sizeof(abs), abs, NULL);
+        safe_copy(out, out_cap,
+                  (n > 0 && n < (DWORD)sizeof(abs)) ? abs : path);
+    }
+#else
+    {
+        char* rp = realpath(path, NULL);
+        safe_copy(out, out_cap, rp ? rp : path);
+        free(rp);
+    }
+#endif
+}
+
+static int lm_bios_paths_equal(const char* a, const char* b) {
+    if ((!a || !a[0]) && (!b || !b[0])) return 1;
+    if (!a || !a[0] || !b || !b[0]) return 0;
+#if defined(_WIN32)
+    return _stricmp(a, b) == 0;
+#else
+    return strcmp(a, b) == 0;
+#endif
+}
+
+void launcher_model_request_bios_path(LauncherModel* m, const char* path) {
+    char normalized[512];
+    RecompLauncherCBiosVerify bv;
+    if (!m) return;
+    lm_normalize_bios_path(path, normalized, sizeof(normalized));
+    if (lm_bios_paths_equal(m->s.bios_path, normalized))
+        return;
+
+    memset(&bv, 0, sizeof(bv));
+    if (m->bios_verify_cb) {
+        if (!m->bios_verify_cb(normalized, &bv)) {
+            /* Verifier hard-failed — still stage confirm with a clear detail. */
+            safe_copy(bv.detail, sizeof(bv.detail), "BIOS verification failed.");
+            bv.needs_regen = 1;
+        }
+    } else {
+        /* No host callback: treat any change as immediate. */
+        launcher_model_set_bios_path(m, normalized);
+        return;
+    }
+
+    /* Already Play-ready in this binary — apply without a regen confirm. */
+    if (bv.ok && !bv.needs_regen) {
+        launcher_model_set_bios_path(m, normalized);
+        return;
+    }
+
+    /* Needs Generate & rebuild (or is otherwise not Play-ready): confirm first. */
+    safe_copy(m->bios_pending_path, sizeof(m->bios_pending_path), normalized);
+    if (bv.detail[0])
+        safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail), bv.detail);
+    else
+        safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
+                  "Switching BIOS requires Generate & rebuild.");
+    m->bios_confirm_open = true;
+}
+
+void launcher_model_bios_confirm_accept(LauncherModel* m) {
+    if (!m) return;
+    m->bios_confirm_open = false;
+    launcher_model_set_bios_path(m, m->bios_pending_path);
+    m->bios_pending_path[0] = '\0';
+    /* If the saved choice still isn't linked, open the setup wizard so the
+     * player can Generate & rebuild with this BIOS. */
+    if (m->setup_bios_needs_regen || !m->setup_bios_ok) {
+        m->setup_wizard_open = true;
+        m->setup_page = 1;
+        if (m->setup_needs_toolchain && !m->setup_tc_ready)
+            m->setup_page = 0;
+    }
+}
+
+void launcher_model_bios_confirm_cancel(LauncherModel* m) {
+    if (!m) return;
+    m->bios_confirm_open = false;
+    m->bios_pending_path[0] = '\0';
+    launcher_model_refresh_bios_status(m);
+}
+
+bool launcher_model_bios_blocks_play(const LauncherModel* m) {
+    if (!m || !m->has_bios) return false;
+    if (m->setup_bios_ok) return false;
+    /* Disc/ROM must otherwise look ready — otherwise the normal Play disable
+     * / setup-wizard path is enough. */
+    if (!m->rom_present || strcmp(m->rom_size, "--") == 0) return false;
+    if (m->profile && m->profile->verify.mode == 1) {
+        if (m->verify.verdict == 0 || m->verify.verdict == 3) return false;
+    }
+    return m->setup_bios_needs_regen || m->s.bios_path[0] != '\0';
+}
+
+void launcher_model_bios_play_prompt(LauncherModel* m) {
+    if (!m) return;
+    m->bios_play_modal_open = true;
+}
+
+void launcher_model_bios_play_use_openbios(LauncherModel* m) {
+    if (!m) return;
+    m->bios_play_modal_open = false;
+    launcher_model_set_bios_path(m, "");
+}
+
+void launcher_model_bios_play_generate(LauncherModel* m) {
+    if (!m) return;
+    m->bios_play_modal_open = false;
+    m->setup_wizard_open = true;
+    m->setup_page = 1;
+    if (m->setup_needs_toolchain && !m->setup_tc_ready)
+        m->setup_page = 0;
+    if (m->rom_present && m->rom_full[0] &&
+        (m->prepare_with_progress_cb || m->prepare_disc_cb)) {
+        /* Kick Generate & rebuild with the currently saved BIOS + disc. */
+        launcher_model_start_prepare_disc(m, m->rom_full);
+    }
+}
+
+void launcher_model_bios_play_cancel(LauncherModel* m) {
+    if (!m) return;
+    m->bios_play_modal_open = false;
 }
 
 bool launcher_model_can_finish_setup(const LauncherModel* m) {
