@@ -2513,6 +2513,19 @@ void draw_settings(LauncherModel* m, const LauncherTheme& th) {
     if (hotkeys_p) hotkeys_p->draw(m, &th);
 }
 
+static bool enabled_camera_controls(const LauncherModel* m) {
+    const auto* mods = m ? m->mods : nullptr;
+    if (!mods || !mods->feature_count || !mods->feature_get) return false;
+    const int count = mods->feature_count(mods->ctx);
+    for (int index = 0; index < count; ++index) {
+        RecompLauncherCModFeature feature{};
+        if (mods->feature_get(mods->ctx, index, &feature) &&
+            feature.enabled && feature.camera_controls)
+            return true;
+    }
+    return false;
+}
+
 // CONTROLLER-view rebind page: input source + deadzone, and the keyboard
 // bindings grid — reached from the dashboard CONTROLLER panel's Configure
 // button. The bindings grid walks the ACTIVE SystemProfile's
@@ -2687,6 +2700,82 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
                 "A compatible controller motion sensor is used automatically. "
                 "Mouse drag remains available as a fallback.");
             ImGui::PopStyleColor();
+        } end_panel();
+    }
+
+    /* Voxel/3D camera bindings are feature-driven, not a permanent NES
+     * capability. The card appears only while at least one enabled feature
+     * advertises camera_controls, and only on Player 1's page because the
+     * presentation camera is global. */
+    if (p == 0 && enabled_camera_controls(m)) {
+        static const char* kActionLabels[LNG_CAMERA_BIND_COUNT] = {
+            "Look up", "Look down", "Look left", "Look right",
+            "Roll left", "Roll right", "Zoom in", "Zoom out",
+            "Sprites smaller", "Sprites larger", "Reset view",
+            "Toggle Voxel 3D",
+        };
+        static const char* kPadDefaults[LNG_CAMERA_BIND_COUNT] = {
+            "Right stick up", "Right stick down",
+            "Right stick left", "Right stick right",
+            "-", "-", "-", "-", "-", "-", "-", "-",
+        };
+        launcher_binds_refresh_camera(m);
+        if (begin_panel("cfg_camera", 0)) {
+            eyebrow("3D CAMERA");
+            ImGui::TextColored(
+                col(th.text_muted),
+                "Active while the enabled Voxel mod is running. Right-stick "
+                "look is the gamepad default; keyboard actions use the numpad.");
+            ImGui::Spacing();
+            if (ImGui::BeginTable(
+                    "camera_binds", 3,
+                    ImGuiTableFlags_SizingStretchProp |
+                    ImGuiTableFlags_RowBg)) {
+                ImGui::TableSetupColumn("Action",
+                                        ImGuiTableColumnFlags_WidthStretch,
+                                        1.2f);
+                ImGui::TableSetupColumn("Keyboard",
+                                        ImGuiTableColumnFlags_WidthStretch,
+                                        1.0f);
+                ImGui::TableSetupColumn("Gamepad default",
+                                        ImGuiTableColumnFlags_WidthStretch,
+                                        1.0f);
+                ImGui::TableHeadersRow();
+                for (int action = 0; action < LNG_CAMERA_BIND_COUNT;
+                     ++action) {
+                    ImGui::PushID(action);
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextUnformatted(kActionLabels[action]);
+                    ImGui::TableSetColumnIndex(1);
+                    const bool capturing =
+                        m->camera_capturing &&
+                        m->capture_camera == action;
+                    if (capturing)
+                        ImGui::PushStyleColor(
+                            ImGuiCol_Button, col(th.accent));
+                    if (ImGui::Button(
+                            capturing ? "[ press a key... ]"
+                                      : m->camera_binds[action],
+                            ImVec2(-FLT_MIN, 0)))
+                        launcher_model_begin_camera_capture(m, action);
+                    if (capturing) ImGui::PopStyleColor();
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextColored(
+                        col(th.text_muted), "%s",
+                        kPadDefaults[action]);
+                    ImGui::PopID();
+                }
+                ImGui::EndTable();
+            }
+            ImGui::Spacing();
+            if (ImGui::Button("Reset Camera Bindings"))
+                launcher_binds_reset_camera(m);
+            if (m->camera_capturing)
+                ImGui::TextColored(
+                    col(th.warn), "Listening... (Esc cancels)");
         } end_panel();
     }
 
@@ -4942,6 +5031,23 @@ static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
                 ImGui::TextWrapped("%s", feature.description);
             ImGui::Spacing();
 
+            if (feature.camera_controls) {
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::TextColored(col(th.accent), "3D camera controls");
+                ImGui::TextWrapped(
+                    feature.enabled
+                        ? "This mod adds live camera input. Review the current "
+                          "right-stick and keyboard bindings before playing."
+                        : "Enable this feature to expose its camera bindings "
+                          "on the Controller page.");
+                if (feature.enabled &&
+                    ImGui::Button("Review Camera Bindings")) {
+                    launcher_model_open_config(m, 0);
+                }
+                ImGui::Spacing();
+            }
+
             // The list-row checkbox is the single enable/disable control.
             // The detail pane owns configuration values only.
             draw_mod_feature_diagnostics(m, th, feature);
@@ -5926,12 +6032,23 @@ static bool raw_input_is_mapped(SDL_JoystickID which, bool is_axis, int raw_inde
 #endif
 
 bool try_capture(LauncherModel* m, const SDL_Event& ev) {
-    if (!m->capturing && !m->hk_capturing) return false;
+    if (!m->capturing && !m->hk_capturing &&
+        !m->camera_capturing)
+        return false;
 
     // ESC cancels any capture — keyboard, pad, or hotkey.
     if (ev.type == SDL_EVENT_KEY_DOWN && LNG_EVKEY(ev) == SDLK_ESCAPE) {
         launcher_model_cancel_capture(m);
         launcher_model_cancel_hk_capture(m);
+        launcher_model_cancel_camera_capture(m);
+        return true;
+    }
+
+    if (m->camera_capturing) {
+        if (ev.type != SDL_EVENT_KEY_DOWN) return true;
+        launcher_binds_set_camera(
+            m, m->capture_camera, (int)LNG_EVSCAN(ev));
+        launcher_model_cancel_camera_capture(m);
         return true;
     }
 

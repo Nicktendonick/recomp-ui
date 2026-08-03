@@ -248,6 +248,16 @@ static void reload_player_display(LauncherModel* m, int player) {
     }
 }
 
+void launcher_binds_refresh_camera(LauncherModel* m) {
+    if (!m || !is_nes_profile(m)) return;
+    for (int action = 0; action < LNG_CAMERA_BIND_COUNT; ++action) {
+        copy_str(
+            m->camera_binds[action], sizeof(m->camera_binds[action]),
+            scancode_label((SDL_Scancode)rui_nes_camera_bind_get(
+                keybinds_file_path(), action)));
+    }
+}
+
 // ---- config.ini [KeyMap] surgical read/write (ported from the legacy launcher) --
 
 static int ieq(const char* a, size_t alen, const char* b) {
@@ -436,6 +446,7 @@ void launcher_binds_load(LauncherModel* m, const char* config_path_in, const cha
         recompui_keybinds_init(NULL);              // load/generate keybinds.ini (exe-anchored)
     }
     launcher_binds_refresh(m);
+    launcher_binds_refresh_camera(m);
     reload_hotkey_display(m);
 }
 
@@ -454,6 +465,21 @@ int launcher_binds_wants_pad_capture(const LauncherModel* m, int player) {
 // Called by launcher_model_toggle_zapper_* on every flip.
 void launcher_binds_set_zapper(int mouse_enabled, int crosshair) {
     rui_nes_zapper_set(keybinds_file_path(), mouse_enabled, crosshair);
+}
+
+void launcher_binds_set_camera(LauncherModel* m, int action, int scancode) {
+    if (!m || !is_nes_profile(m) ||
+        action < 0 || action >= LNG_CAMERA_BIND_COUNT)
+        return;
+    rui_nes_camera_bind_set(keybinds_file_path(), action, scancode);
+    copy_str(m->camera_binds[action], sizeof(m->camera_binds[action]),
+             scancode_label((SDL_Scancode)scancode));
+}
+
+void launcher_binds_reset_camera(LauncherModel* m) {
+    if (!m || !is_nes_profile(m)) return;
+    rui_nes_camera_bind_reset(keybinds_file_path());
+    launcher_binds_refresh_camera(m);
 }
 
 void launcher_binds_set_button(LauncherModel* m, int player, int b, int scancode) {

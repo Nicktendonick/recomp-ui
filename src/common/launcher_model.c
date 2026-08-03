@@ -2005,6 +2005,7 @@ void launcher_model_begin_capture_slot(LauncherModel* m, int b, int slot) {
     if (bc > LNG_MAX_BUTTONS) bc = LNG_MAX_BUTTONS;
     if (b < 0 || b >= bc) return;
     m->hk_capturing  = false;
+    m->camera_capturing = false;
     m->capturing     = true;
     m->capture_btn   = b;
     m->capture_slot  = (slot == 1) ? 1 : 0;
@@ -2025,10 +2026,24 @@ void launcher_model_cancel_capture(LauncherModel* m) {
 void launcher_model_begin_hk_capture(LauncherModel* m, LngHotkey h) {
     if (h < 0 || h >= LNG_HK_COUNT) return;
     m->capturing    = false;
+    m->camera_capturing = false;
     m->hk_capturing = true;
     m->capture_hk   = h;
 }
 void launcher_model_cancel_hk_capture(LauncherModel* m) { m->hk_capturing = false; }
+
+void launcher_model_begin_camera_capture(LauncherModel* m, int action) {
+    if (!m || action < 0 || action >= LNG_CAMERA_BIND_COUNT) return;
+    m->capturing = false;
+    m->capture_pad = false;
+    m->hk_capturing = false;
+    m->camera_capturing = true;
+    m->capture_camera = action;
+}
+
+void launcher_model_cancel_camera_capture(LauncherModel* m) {
+    if (m) m->camera_capturing = false;
+}
 
 const char* launcher_model_scale_label(const LauncherModel* m) {
     static char buf[8];

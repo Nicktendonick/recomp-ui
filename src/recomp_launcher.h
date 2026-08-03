@@ -222,6 +222,10 @@ typedef struct RecompLauncherCModFeature {
     int  enabled;
     int  option_count;
     int  has_error;
+    /* Feature exposes a live 3D camera. When enabled, the Controller page
+     * conditionally presents camera bindings and the Mods detail links there.
+     * Appended for ABI stability; zero keeps every existing feature unchanged. */
+    int  camera_controls;
 } RecompLauncherCModFeature;
 
 typedef struct RecompLauncherCModOption {
