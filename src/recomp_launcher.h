@@ -446,6 +446,32 @@ struct RecompLauncherCSettings {
     // Multiplier applied by the host to a controller's angular-rate sensor.
     // 0 means unset and is seeded to 1.0 by the launcher model.
     float gyro_sensitivity;    // 0.25..4.00, 1.00 = game default
+
+    // ---- optional presentation enhancements (capability-gated) -----------
+    // Appended additively so zero-initialized existing consumers keep their
+    // current settings surface and behavior.
+    int sharp_filter;           // integer prescale + fractional linear finish
+    int affine_filter;          // selective game-authorized affine smoothing
+
+    // ---- cartridge light sensor (GameInfo.has_solar_sensor games) ---------
+    // Appended additively. A few GBA cartridges carry a photodiode the game
+    // reads as gameplay input -- Boktai's Gun del Sol charges from real
+    // sunlight -- so "how bright is it where the player is" is a launch
+    // setting, not an emulator preference.
+    //
+    // solar_zip is a POSTAL CODE, deliberately text: many are not numeric
+    // ("SW1A", "K1A"). Empty means the host must not consult any network.
+    char solar_zip[16];
+    char solar_country[8];      // Zippopotam-style code: us, ca, gb, de, ...
+    int  solar_source;          // 0 = live local weather, 1 = fixed level
+    int  solar_manual_step;     // 0..8, used when solar_source == 1
+    int  solar_full_sun;        // W/m^2 that reads as full sun; 0 = host default
+
+    // ---- multi-display layout --------------------------------------------
+    // Index into GameInfo.display_layout_labels. This is intentionally
+    // independent of aspect/widescreen: it describes physical host windows,
+    // not how a game's camera is rendered inside one of them.
+    int display_layout;
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
@@ -664,6 +690,12 @@ typedef struct RecompLauncherCGameInfo {
     // keybinds.ini [zapper] section) alongside the pad UI.
     int  zapper;
 
+    // Cartridge light sensor: 1 adds a Solar sensor panel to Settings, where
+    // the player sets the location its brightness is read from. Games without
+    // the hardware pass 0 and the panel never composes, so every existing
+    // consumer is byte-for-byte unchanged.
+    int  has_solar_sensor;
+
     // Live aspect-driven view capability. When present, Display settings show
     // an Adaptive view toggle. Adaptive + fullscreen leaves the fixed aspect
     // control visible but disabled because the display chooses the live width.
@@ -723,6 +755,18 @@ typedef struct RecompLauncherCGameInfo {
      * sensitivity slider. The launcher only edits Settings.gyro_sensitivity;
      * discovery, sensor selection, and axis mapping remain host-owned. */
     int has_gyro_controls;
+
+    /* Add independent checkboxes to Display settings. The host maps their
+     * committed Settings values onto renderer configuration. */
+    int has_sharp_filter;
+    int has_affine_filter;
+
+    /* ---- multi-display layout -------------------------------------------
+     * Optional host-defined Display row. Settings.display_layout cycles over
+     * these labels. Nintendo DS uses {"Stacked window","Separate windows"}.
+     * NULL/0 keeps every existing single-display launcher unchanged. */
+    const char* const* display_layout_labels;
+    int num_display_layouts;
 
     /* ---- prepare job UX (appended; disc convert / local codegen) ---------
      * prepare_use_selected_rom: 1 = the prepare button uses the already-

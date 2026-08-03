@@ -148,12 +148,14 @@ static const char* genesis_binds_file_path(void) {
 static const char* kHotkeyKey[LNG_HK_COUNT] = {
     "Fullscreen", "Reset", "Pause", "PauseDimmed", "Turbo",
     "WindowBigger", "WindowSmaller", "VolumeUp", "VolumeDown",
-    "DisplayPerf", "ToggleRenderer"
+    "DisplayPerf", "ToggleRenderer",
+    "SolarBrighter", "SolarDimmer", "SolarLive"
 };
 // Built-in defaults (shown when config.ini has no line; "" = unbound).
 static const char* kHotkeyDef[LNG_HK_COUNT] = {
     "Alt+Return", "Ctrl+R", "Shift+P", "P", "Tab",
-    "", "", "", "", "F", "R"
+    "", "", "", "", "F", "R",
+    "", "", ""
 };
 
 static void copy_str(char* d, size_t cap, const char* s) {
