@@ -450,11 +450,14 @@ void launcher_model_init(LauncherModel* m,
         }
     }
 
-    /* First-run setup: host can force it, or we open when ROM/BIOS is missing. */
+    /* First-run setup: host can force it, or we open when ROM/BIOS is missing.
+     * A selected BIOS that merely needs Generate & rebuild (needs_regen) is
+     * handled by the Switch-BIOS / PLAY prompts — not the full wizard. */
     {
         const int force = game && game->needs_setup;
         const int missing_rom = !m->rom_present || strcmp(m->rom_size, "--") == 0;
-        const int missing_bios = m->has_bios && !m->setup_bios_ok;
+        const int missing_bios = m->has_bios && !m->setup_bios_ok &&
+                                 !m->setup_bios_needs_regen;
         if (force || missing_rom || missing_bios)
             m->setup_wizard_open = true;
     }
@@ -1236,6 +1239,31 @@ static int lm_bios_paths_equal(const char* a, const char* b) {
 #endif
 }
 
+void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path);
+
+/* Apply pending/current BIOS and start Generate & rebuild without the full
+ * first-run wizard (progress modal only). Falls back to the wizard when the
+ * disc or toolchain is missing. */
+static void lm_bios_kick_generate(LauncherModel* m) {
+    if (!m) return;
+    m->setup_wizard_open = false;
+    m->bios_confirm_open = false;
+    m->bios_play_modal_open = false;
+    if (m->setup_needs_toolchain && !m->setup_tc_ready) {
+        m->setup_wizard_open = true;
+        m->setup_page = 0;
+        return;
+    }
+    if (m->rom_present && m->rom_full[0] &&
+        (m->prepare_with_progress_cb || m->prepare_disc_cb)) {
+        launcher_model_start_prepare_disc(m, m->rom_full);
+        return;
+    }
+    /* Need a disc pick — open the setup page, not a silent no-op. */
+    m->setup_wizard_open = true;
+    m->setup_page = 1;
+}
+
 void launcher_model_request_bios_path(LauncherModel* m, const char* path) {
     char normalized[512];
     RecompLauncherCBiosVerify bv;
@@ -1257,7 +1285,33 @@ void launcher_model_request_bios_path(LauncherModel* m, const char* path) {
         return;
     }
 
-    /* Already Play-ready in this binary — apply without a regen confirm. */
+    /* Invalid dump (missing/wrong size) — keep the previous selection. */
+    if (!bv.ok && !bv.needs_regen && normalized[0]) {
+        if (bv.detail[0])
+            safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
+                      bv.detail);
+        return;
+    }
+
+    /* Codegen hosts: any BIOS switch (retail <-> OpenBIOS) goes through
+     * Generate & rebuild confirm — toolchain + disc are already in the model. */
+    if (m->prepare_with_progress_cb) {
+        safe_copy(m->bios_pending_path, sizeof(m->bios_pending_path),
+                  normalized);
+        if (bv.detail[0])
+            safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
+                      bv.detail);
+        else if (!normalized[0])
+            safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
+                      "Switch to OpenBIOS and Generate & rebuild.");
+        else
+            safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
+                      "Switching BIOS requires Generate & rebuild.");
+        m->bios_confirm_open = true;
+        return;
+    }
+
+    /* Non-codegen: Play-ready choices apply immediately. */
     if (bv.ok && !bv.needs_regen) {
         launcher_model_set_bios_path(m, normalized);
         return;
@@ -1278,14 +1332,8 @@ void launcher_model_bios_confirm_accept(LauncherModel* m) {
     m->bios_confirm_open = false;
     launcher_model_set_bios_path(m, m->bios_pending_path);
     m->bios_pending_path[0] = '\0';
-    /* If the saved choice still isn't linked, open the setup wizard so the
-     * player can Generate & rebuild with this BIOS. */
-    if (m->setup_bios_needs_regen || !m->setup_bios_ok) {
-        m->setup_wizard_open = true;
-        m->setup_page = 1;
-        if (m->setup_needs_toolchain && !m->setup_tc_ready)
-            m->setup_page = 0;
-    }
+    /* Same path as the wizard's Generate & rebuild — no full setup UI. */
+    lm_bios_kick_generate(m);
 }
 
 void launcher_model_bios_confirm_cancel(LauncherModel* m) {
@@ -1297,14 +1345,18 @@ void launcher_model_bios_confirm_cancel(LauncherModel* m) {
 
 bool launcher_model_bios_blocks_play(const LauncherModel* m) {
     if (!m || !m->has_bios) return false;
-    if (m->setup_bios_ok) return false;
+    if (m->setup_preparing) return false;
     /* Disc/ROM must otherwise look ready — otherwise the normal Play disable
      * / setup-wizard path is enough. */
     if (!m->rom_present || strcmp(m->rom_size, "--") == 0) return false;
     if (m->profile && m->profile->verify.mode == 1) {
         if (m->verify.verdict == 0 || m->verify.verdict == 3) return false;
     }
-    return m->setup_bios_needs_regen || m->s.bios_path[0] != '\0';
+    /* Linked-backend mismatch (needs_regen) always blocks Play. */
+    if (m->setup_bios_needs_regen) return true;
+    /* Retail path that isn't Play-ready in this binary. */
+    if (!m->setup_bios_ok && m->s.bios_path[0]) return true;
+    return false;
 }
 
 void launcher_model_bios_play_prompt(LauncherModel* m) {
@@ -1315,21 +1367,14 @@ void launcher_model_bios_play_prompt(LauncherModel* m) {
 void launcher_model_bios_play_use_openbios(LauncherModel* m) {
     if (!m) return;
     m->bios_play_modal_open = false;
-    launcher_model_set_bios_path(m, "");
+    /* Route through request so codegen hosts get Generate & rebuild confirm. */
+    launcher_model_request_bios_path(m, "");
 }
 
 void launcher_model_bios_play_generate(LauncherModel* m) {
     if (!m) return;
     m->bios_play_modal_open = false;
-    m->setup_wizard_open = true;
-    m->setup_page = 1;
-    if (m->setup_needs_toolchain && !m->setup_tc_ready)
-        m->setup_page = 0;
-    if (m->rom_present && m->rom_full[0] &&
-        (m->prepare_with_progress_cb || m->prepare_disc_cb)) {
-        /* Kick Generate & rebuild with the currently saved BIOS + disc. */
-        launcher_model_start_prepare_disc(m, m->rom_full);
-    }
+    lm_bios_kick_generate(m);
 }
 
 void launcher_model_bios_play_cancel(LauncherModel* m) {

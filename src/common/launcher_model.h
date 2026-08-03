@@ -520,9 +520,10 @@ const char* launcher_model_language_label(const LauncherModel* m);
 void launcher_model_cycle_deadzone_pct(LauncherModel* m);      // 0..50 step 5, wraps; mirrors both players
 const char* launcher_model_deadzone_pct_label(const LauncherModel* m);  // "37%"
 void launcher_model_set_bios_path(LauncherModel* m, const char* path);
-/* Request a BIOS change. Persists immediately when the new choice is already
- * Play-ready; otherwise opens bios_confirm_open (regen required). */
+/* Request a BIOS change. Codegen hosts always confirm (Generate & rebuild);
+ * other hosts persist immediately when the choice is already Play-ready. */
 void launcher_model_request_bios_path(LauncherModel* m, const char* path);
+/* Confirm accept: save pending BIOS and kick Generate & rebuild (no wizard). */
 void launcher_model_bios_confirm_accept(LauncherModel* m);
 void launcher_model_bios_confirm_cancel(LauncherModel* m);
 /* Play clicked while setup_bios_needs_regen (or !ok with a saved path). */

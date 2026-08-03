@@ -2217,7 +2217,7 @@ void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
         if (!has_pick) ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
             ImGui::SetTooltip(has_pick
-                                  ? "Clear the retail BIOS path and use OpenBIOS."
+                                  ? "Switch to OpenBIOS and Generate & rebuild."
                                   : "OpenBIOS is already selected.");
     } else if (has_pick) {
         ImGui::SameLine(0.0f, gap);
@@ -5348,7 +5348,8 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
     const bool bios_block = launcher_model_bios_blocks_play(m);
     const bool play_enabled = can_play || bios_block;
     if (neon_cta("##play", "PLAY", ImVec2(play_w, play_h), play_enabled)) {
-        if (bios_block && !can_play)
+        /* Prefer mismatch prompt over launch even if can_play races true. */
+        if (bios_block)
             launcher_model_bios_play_prompt(m);
         else if (mod_commit_launch(m))
             m->action = LNG_ACTION_LAUNCH;
@@ -5947,8 +5948,9 @@ void draw_bios_confirm_modal(LauncherModel* m, const LauncherTheme& th) {
         return;
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(420));
     ImGui::TextWrapped(
-        "This BIOS is not compiled into the current build. Switching requires "
-        "Generate & rebuild (BIOS C + game binary) before Play will work.");
+        "Switching BIOS regenerates BIOS C and rebuilds the game binary with "
+        "your current disc and toolchain. This is the same as Generate & "
+        "rebuild in first-run setup.");
     if (m->bios_pending_path[0]) {
         ImGui::Dummy(ImVec2(0, px(8)));
         ImGui::TextColored(col(th.text_muted), "Selected:");
@@ -5963,8 +5965,16 @@ void draw_bios_confirm_modal(LauncherModel* m, const LauncherTheme& th) {
     }
     ImGui::PopTextWrapPos();
     ImGui::Dummy(ImVec2(0, px(12)));
-    if (ImGui::Button("Save & continue", ImVec2(px(160), px(32))))
+    const bool can_gen = m->rom_present && m->rom_full[0] &&
+                         (m->prepare_with_progress_cb || m->prepare_disc_cb);
+    if (!can_gen) ImGui::BeginDisabled();
+    if (ImGui::Button("Generate & rebuild…", ImVec2(px(200), px(32))))
         launcher_model_bios_confirm_accept(m);
+    if (!can_gen) {
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Select a disc image first");
+    }
     ImGui::SameLine();
     if (ImGui::Button("Cancel", ImVec2(px(100), px(32))))
         launcher_model_bios_confirm_cancel(m);
@@ -5981,12 +5991,16 @@ void draw_bios_play_modal(LauncherModel* m, const LauncherTheme& th) {
         return;
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(440));
     ImGui::TextWrapped(
-        "The selected BIOS is not linked in this build. Generate & rebuild "
-        "with it, or switch back to OpenBIOS to Play.");
+        "The selected BIOS is not compiled into this build. Generate & rebuild "
+        "with it (same disc and toolchain), or cancel and keep playing with "
+        "the current binary.");
     if (m->s.bios_path[0]) {
         ImGui::Dummy(ImVec2(0, px(8)));
         ImGui::TextColored(col(th.text_muted), "Current selection:");
         ImGui::TextWrapped("%s", m->s.bios_path);
+    } else {
+        ImGui::Dummy(ImVec2(0, px(8)));
+        ImGui::TextColored(col(th.text_muted), "Current selection: OpenBIOS");
     }
     if (m->setup_bios_detail[0]) {
         ImGui::Dummy(ImVec2(0, px(6)));
@@ -6004,9 +6018,6 @@ void draw_bios_play_modal(LauncherModel* m, const LauncherTheme& th) {
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
             ImGui::SetTooltip("Select a disc image first");
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Use OpenBIOS", ImVec2(px(140), px(32))))
-        launcher_model_bios_play_use_openbios(m);
     ImGui::SameLine();
     if (ImGui::Button("Cancel", ImVec2(px(100), px(32))))
         launcher_model_bios_play_cancel(m);
