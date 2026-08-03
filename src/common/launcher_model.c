@@ -20,6 +20,10 @@
 #  include <windows.h>
 #else
 #  include <pthread.h>
+#  include <unistd.h>
+#if defined(__APPLE__)
+#  include <mach-o/dyld.h>
+#endif
 #endif
 
 // 32040 = the SNES S-DSP's native output rate; kept reachable in the cycle so
@@ -129,6 +133,8 @@ void launcher_model_init(LauncherModel* m,
         m->disc_verify_cb       = game->disc_verify;      // real disc verdict (PSX), or NULL
         m->memcard_inspect_cb   = game->memcard_inspect;  // real memcard summary (PSX), or NULL
         m->bios_verify_cb       = game->bios_verify;
+        m->persist_setup_cb     = game->persist_setup;
+        m->persist_setup_ctx    = game->persist_setup_ctx;
         m->prepare_disc_cb      = game->prepare_disc;
         m->prepare_with_progress_cb = game->prepare_with_progress;
         m->rebuild_with_progress_cb = game->rebuild_with_progress;
@@ -982,9 +988,119 @@ void launcher_model_refresh_bios_status(LauncherModel* m) {
     safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail), bv.detail);
 }
 
+/* Write/clear a one-line sidecar in dir (dir may be NULL => cwd "."). */
+static void lm_write_sidecar_in_dir(const char* dir, const char* name,
+                                    const char* value) {
+    char path[1100];
+    if (!name || !name[0]) return;
+    if (dir && dir[0]) {
+        size_t n = strlen(dir);
+        int need = (n > 0 && dir[n - 1] != '/' && dir[n - 1] != '\\');
+        if ((size_t)snprintf(path, sizeof(path), "%s%s%s", dir, need ? "/" : "",
+                             name) >= sizeof(path))
+            return;
+    } else {
+        if ((size_t)snprintf(path, sizeof(path), "%s", name) >= sizeof(path))
+            return;
+    }
+    if (!value || !value[0]) {
+        remove(path);
+        return;
+    }
+    FILE* f = fopen(path, "w");
+    if (!f) return;
+    fprintf(f, "%s\n", value);
+    fclose(f);
+}
+
+static int lm_running_exe_dir(char* out, size_t cap) {
+    if (!out || cap < 2) return 0;
+    out[0] = '\0';
+#if defined(_WIN32)
+    {
+        char mod[MAX_PATH];
+        DWORD n = GetModuleFileNameA(NULL, mod, MAX_PATH);
+        char* slash;
+        if (n == 0 || n >= MAX_PATH) return 0;
+        slash = strrchr(mod, '\\');
+        if (!slash) slash = strrchr(mod, '/');
+        if (!slash) return 0;
+        *slash = '\0';
+        if ((size_t)snprintf(out, cap, "%s", mod) >= cap) return 0;
+        return 1;
+    }
+#elif defined(__APPLE__)
+    {
+        char mod[1024];
+        uint32_t n = (uint32_t)sizeof(mod);
+        char* slash;
+        if (_NSGetExecutablePath(mod, &n) != 0) return 0;
+        slash = strrchr(mod, '/');
+        if (!slash) return 0;
+        *slash = '\0';
+        if ((size_t)snprintf(out, cap, "%s", mod) >= cap) return 0;
+        return 1;
+    }
+#else
+    {
+        char mod[1024];
+        ssize_t n = readlink("/proc/self/exe", mod, sizeof(mod) - 1);
+        char* slash;
+        if (n <= 0) return 0;
+        mod[n] = '\0';
+        slash = strrchr(mod, '/');
+        if (!slash) return 0;
+        *slash = '\0';
+        if ((size_t)snprintf(out, cap, "%s", mod) >= cap) return 0;
+        return 1;
+    }
+#endif
+}
+
+/* Persist ROM/BIOS picks where codegen hosts and the relaunched exe look:
+ * cwd, running-exe dir, and (when known) the rebuild output dir. */
+static void lm_persist_setup_sidecars(LauncherModel* m) {
+    char exe_dir[1024];
+    const char* rom = (m && m->rom_full[0]) ? m->rom_full : NULL;
+    const char* bios =
+        (m && m->has_bios && m->s.bios_path[0]) ? m->s.bios_path : NULL;
+    const char* rom_name = "rom.cfg";
+    /* PSX hosts read disc.cfg; cart hosts read rom.cfg — write both names. */
+    lm_write_sidecar_in_dir(NULL, "rom.cfg", rom);
+    lm_write_sidecar_in_dir(NULL, "disc.cfg", rom);
+    lm_write_sidecar_in_dir(NULL, "bios.cfg", bios);
+    if (lm_running_exe_dir(exe_dir, sizeof(exe_dir))) {
+        lm_write_sidecar_in_dir(exe_dir, "rom.cfg", rom);
+        lm_write_sidecar_in_dir(exe_dir, "disc.cfg", rom);
+        lm_write_sidecar_in_dir(exe_dir, "bios.cfg", bios);
+    }
+    if (m && m->relaunch_exe[0]) {
+        char rdir[1024];
+        char* slash = strrchr(m->relaunch_exe, '/');
+        char* bslash = strrchr(m->relaunch_exe, '\\');
+        char* cut = slash;
+        if (bslash && (!cut || bslash > cut)) cut = bslash;
+        if (cut && cut > m->relaunch_exe) {
+            size_t n = (size_t)(cut - m->relaunch_exe);
+            if (n < sizeof(rdir)) {
+                memcpy(rdir, m->relaunch_exe, n);
+                rdir[n] = '\0';
+                lm_write_sidecar_in_dir(rdir, "rom.cfg", rom);
+                lm_write_sidecar_in_dir(rdir, "disc.cfg", rom);
+                lm_write_sidecar_in_dir(rdir, "bios.cfg", bios);
+            }
+        }
+    }
+    (void)rom_name;
+    if (m && m->persist_setup_cb)
+        m->persist_setup_cb(m->persist_setup_ctx, rom ? rom : "",
+                            bios ? bios : "");
+}
+
 void launcher_model_set_bios_path(LauncherModel* m, const char* path) {
     safe_copy(m->s.bios_path, sizeof(m->s.bios_path), path ? path : "");
     launcher_model_refresh_bios_status(m);
+    lm_persist_setup_sidecars(m);
 }
 
 bool launcher_model_can_finish_setup(const LauncherModel* m) {
@@ -1238,14 +1354,11 @@ void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path
     if (!m || m->setup_preparing) return;
     if (!m->prepare_with_progress_cb && !m->prepare_disc_cb) return;
     if (!source_path || !source_path[0]) return;
-    /* Persist BIOS pick for codegen hosts that stage/regenerate backends. */
-    if (m->has_bios && m->s.bios_path[0]) {
-        FILE* bf = fopen("bios.cfg", "w");
-        if (bf) {
-            fprintf(bf, "%s\n", m->s.bios_path);
-            fclose(bf);
-        }
-    }
+    /* Persist ROM/BIOS for codegen hosts (project root + exe dirs + cwd). */
+    if (source_path && source_path[0] &&
+        (!m->rom_full[0] || strcmp(m->rom_full, source_path) != 0))
+        launcher_model_set_rom(m, source_path);
+    lm_persist_setup_sidecars(m);
     memset(&g_prep_job, 0, sizeof(g_prep_job));
     g_prep_job.m = m;
     g_prep_job.kind = PREP_JOB_PREPARE;
@@ -1312,6 +1425,8 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
     if (kind == PREP_JOB_REBUILD) {
         if (result && out_path[0]) {
             safe_copy(m->relaunch_exe, sizeof(m->relaunch_exe), out_path);
+            /* Sidecars beside build/<exe> before the host execs it. */
+            lm_persist_setup_sidecars(m);
             m->setup_prepare_satisfied = true;
             safe_copy(m->setup_status, sizeof(m->setup_status),
                       (m->rebuild_success_status && m->rebuild_success_status[0])

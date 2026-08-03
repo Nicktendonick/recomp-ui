@@ -161,6 +161,9 @@ typedef struct {
     int (*disc_verify_cb)(const char* disc_path, RecompLauncherCDiscVerify* out);
     int (*memcard_inspect_cb)(const char* card_path, RecompLauncherCMemcard* out);
     int (*bios_verify_cb)(const char* bios_path, RecompLauncherCBiosVerify* out);
+    /* Optional host flush for first-run picks (project-root bios.cfg / disc.cfg). */
+    int (*persist_setup_cb)(void* ctx, const char* rom_path, const char* bios_path);
+    void*       persist_setup_ctx;
     int (*prepare_disc_cb)(const char* source_path, char* out_disc_path, size_t out_cap,
                            char* err_msg, size_t err_cap);
     int (*prepare_with_progress_cb)(const char* source_path,
