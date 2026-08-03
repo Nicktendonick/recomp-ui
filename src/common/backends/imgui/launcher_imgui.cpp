@@ -1877,8 +1877,15 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
 
     if (m->has_supersampling) {
         row_label("Supersampling", th);
-        if (ImGui::Button(launcher_model_supersampling_label(m), ImVec2(px(90), px(30))))
+        if (ImGui::Button(launcher_model_supersampling_label(m), ImVec2(px(120), px(30))))
             launcher_model_cycle_supersampling(m);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+            ImGui::SetTooltip(
+                "Internal-resolution SSAA.\n"
+                "Offline: full software/GL supersampling.\n"
+                "Netplay (OpenGL): present quality via GPU FBO;\n"
+                "CPU VRAM authority stays at 1x for snaps/digests.");
+        }
     }
 
     // Universal fullscreen row (every console — no longer gated on the
@@ -2973,7 +2980,7 @@ static int np_lobby_max_peer_rtt_ms(LauncherModel* m,
     for (int mi = 0; mi < nmem; ++mi) {
         RecompLauncherCNetplayMember mem{};
         if (!np->member_get(np->ctx, mi, &mem)) continue;
-        if (mem.is_host) continue;
+        if (mem.is_local) continue;
         if (mem.latency_ms > max_rtt) max_rtt = mem.latency_ms;
     }
     (void)m;
@@ -3678,7 +3685,8 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                 ImGui::TextColored(col(th.text_muted), "Waiting");
             ImGui::TableSetColumnIndex(4);
             table_row_vcenter(member_row_h, text_h);
-            if (occupied[slot] && !slots[slot].is_host &&
+            /* RTT to that seat from local peer — never on the local row. */
+            if (occupied[slot] && !slots[slot].is_local &&
                 slots[slot].latency_ms >= 0) {
                 ImGui::Text("%d ms", slots[slot].latency_ms);
             } else {
@@ -3835,17 +3843,25 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                 const int max_rtt = np_lobby_max_peer_rtt_ms(m, np);
                 /* Auto D: rollback uses §59 WAN-aware tiers; delay-sync uses
                  * the padded one-way formula. Manual keeps Lobby Settings.
-                 * Forced TURN: lobby probe is a different (friendlier) path —
-                 * floor D at 5 so Play doesn't start a D=6 link at D=3. */
+                 * Forced TURN: lobby ICE underestimates match-path load —
+                 * pad RTT before the tier table and floor D at 6. */
                 if (!m->netplay_manual_input_delay && np->input_delay_set) {
-                    int delay = use_rb
-                        ? np_rb_delay_frames_from_rtt_ms(max_rtt)
-                        : np_delay_frames_from_rtt_ms(max_rtt);
                     bool force_turn = m->netplay_force_turn;
                     if (np->force_turn_get)
                         force_turn = np->force_turn_get(np->ctx) != 0;
-                    if (use_rb && force_turn && delay < 5)
-                        delay = 5;
+                    int rtt_for_d = max_rtt;
+                    if (use_rb && force_turn) {
+                        /* Relay jitter + pump asymmetry; soak §587 host
+                         * mid-match rtt_raw≈90 while lobby guest REPORT≈30. */
+                        if (rtt_for_d < 80)
+                            rtt_for_d = 80;
+                        rtt_for_d += 40;
+                    }
+                    int delay = use_rb
+                        ? np_rb_delay_frames_from_rtt_ms(rtt_for_d)
+                        : np_delay_frames_from_rtt_ms(max_rtt);
+                    if (use_rb && force_turn && delay < 6)
+                        delay = 6;
                     m->netplay_lobby_input_delay = delay;
                     (void)np->input_delay_set(np->ctx, delay);
                 }

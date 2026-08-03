@@ -304,7 +304,23 @@ void launcher_model_init(LauncherModel* m,
         m->s.screen_kind = clampi(m->s.screen_kind, 0, sk_n - 1);
     }
     if (m->has_texture_filter) m->s.texture_filter = m->s.texture_filter ? 1 : 0;
-    if (m->has_renderer)      m->s.renderer      = m->s.renderer ? 1 : 0;
+    if (m->has_renderer) {
+        if (m->renderer_labels && m->num_renderers > 0) {
+            /* Multi-label cycle (Software / OpenGL / Vulkan). Prefer OpenGL
+             * when the seeded index is out of range — never snap to Software
+             * just because memset left renderer at 0 and the host forgot a seed. */
+            if (m->s.renderer < 0 || m->s.renderer >= m->num_renderers) {
+                int def = 0;
+                for (int i = 0; i < m->num_renderers; ++i) {
+                    const char* lab = m->renderer_labels[i];
+                    if (lab && strstr(lab, "OpenGL")) { def = i; break; }
+                }
+                m->s.renderer = def;
+            }
+        } else {
+            m->s.renderer = m->s.renderer ? 1 : 0;
+        }
+    }
     if (m->has_frame_interp) {
         int ok = 0;
         for (int i = 0; i < kInterpFpsCount; ++i)
@@ -797,9 +813,14 @@ void launcher_model_cycle_supersampling(LauncherModel* m) {
 }
 
 const char* launcher_model_supersampling_label(const LauncherModel* m) {
-    static char buf[8];
+    /* Settings SSAA: offline full SW/GL path; netplay dual-raster uses this
+     * for OpenGL present quality while SW authority stays 1×. */
+    static char buf[24];
     int v = clampi(m->s.supersampling ? m->s.supersampling : 1, 1, 4);
-    snprintf(buf, sizeof(buf), "%dx", v);
+    if (v <= 1)
+        snprintf(buf, sizeof(buf), "1x");
+    else
+        snprintf(buf, sizeof(buf), "%dx", v);
     return buf;
 }
 
