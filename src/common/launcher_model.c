@@ -1437,7 +1437,7 @@ void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path
     if (!m || m->setup_preparing) return;
     if (!m->prepare_with_progress_cb && !m->prepare_disc_cb) return;
     if (!source_path || !source_path[0]) return;
-    /* Persist ROM/BIOS for codegen hosts (cwd + exe dirs + optional host hook). */
+    /* Persist ROM/BIOS for codegen hosts (project root + exe dirs + cwd). */
     if (source_path && source_path[0] &&
         (!m->rom_full[0] || strcmp(m->rom_full, source_path) != 0))
         launcher_model_set_rom(m, source_path);
