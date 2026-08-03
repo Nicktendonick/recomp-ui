@@ -61,8 +61,10 @@ typedef struct RecompLauncherCNetplayMember {
     char display_name[64];
     int  ready;
     int  is_host;
-    /* Round-trip ms to the lobby host; -1 when unknown or this row is host. */
+    /* Round-trip ms from the local peer *to* this seat; -1 unknown / self. */
     int  latency_ms;
+    /* 1 when this row is the local client's seat (never show self-RTT). */
+    int  is_local;
 } RecompLauncherCNetplayMember;
 
 typedef struct RecompLauncherCNetplayLaunch {

@@ -3843,7 +3843,8 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                 ImGui::TextColored(col(th.text_muted), "Waiting");
             ImGui::TableSetColumnIndex(4);
             table_row_vcenter(member_row_h, text_h);
-            if (occupied[slot] && !slots[slot].is_host &&
+            /* RTT to that seat from local peer — never on the local row. */
+            if (occupied[slot] && !slots[slot].is_local &&
                 slots[slot].latency_ms >= 0) {
                 ImGui::Text("%d ms", slots[slot].latency_ms);
             } else {
@@ -3994,7 +3995,7 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                         RecompLauncherCNetplayMember mem{};
                         if (!np->member_get || !np->member_get(np->ctx, mi, &mem))
                             continue;
-                        if (mem.is_host) continue;
+                        if (mem.is_local) continue;
                         if (mem.latency_ms > max_rtt) max_rtt = mem.latency_ms;
                     }
                     const int delay = np_delay_frames_from_rtt_ms(max_rtt);
