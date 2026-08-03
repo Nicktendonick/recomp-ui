@@ -1052,7 +1052,8 @@ void launcher_model_refresh_bios_status(LauncherModel* m) {
             }
             m->setup_bios_ok = bv.ok != 0;
             m->setup_bios_warn = bv.warn != 0;
-            m->setup_bios_needs_regen = bv.needs_regen != 0;
+            /* Empty path is OpenBIOS — never treat as needing regen. */
+            m->setup_bios_needs_regen = false;
             if (bv.detail[0])
                 safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
                           bv.detail);
@@ -1062,6 +1063,7 @@ void launcher_model_refresh_bios_status(LauncherModel* m) {
             return;
         }
         m->setup_bios_ok = true;
+        m->setup_bios_needs_regen = false;
         safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
                   "Using OpenBIOS.");
         return;
@@ -1308,9 +1310,10 @@ void launcher_model_request_bios_path(LauncherModel* m, const char* path) {
     memset(&bv, 0, sizeof(bv));
     if (m->bios_verify_cb) {
         if (!m->bios_verify_cb(normalized, &bv)) {
-            /* Verifier hard-failed — still stage confirm with a clear detail. */
             safe_copy(bv.detail, sizeof(bv.detail), "BIOS verification failed.");
-            bv.needs_regen = 1;
+            /* OpenBIOS never regenerates; retail may still need Generate. */
+            bv.needs_regen = normalized[0] ? 1 : 0;
+            bv.ok = 0;
         }
     } else {
         /* No host callback: treat any change as immediate. */
@@ -1318,45 +1321,43 @@ void launcher_model_request_bios_path(LauncherModel* m, const char* path) {
         return;
     }
 
+    /* OpenBIOS (empty path): always hot-swap when accepted. Never open the
+     * Generate & rebuild confirm — Play uses the bundled backend already
+     * linked (or the setup host will emit it on first Generate for game C). */
+    if (!normalized[0]) {
+        if (bv.ok) {
+            launcher_model_set_bios_path(m, "");
+            return;
+        }
+        if (bv.detail[0])
+            safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
+                      bv.detail);
+        return;
+    }
+
     /* Invalid dump (missing/wrong size) — keep the previous selection. */
-    if (!bv.ok && !bv.needs_regen && normalized[0]) {
+    if (!bv.ok && !bv.needs_regen) {
         if (bv.detail[0])
             safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
                       bv.detail);
         return;
     }
 
-    /* Codegen hosts: any BIOS switch (retail <-> OpenBIOS) goes through
-     * Generate & rebuild confirm — toolchain + disc are already in the model. */
-    if (m->prepare_with_progress_cb) {
-        safe_copy(m->bios_pending_path, sizeof(m->bios_pending_path),
-                  normalized);
-        if (bv.detail[0])
-            safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
-                      bv.detail);
-        else if (!normalized[0])
-            safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
-                      "Switch to OpenBIOS and Generate & rebuild.");
-        else
-            safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
-                      "Switching BIOS requires Generate & rebuild.");
-        m->bios_confirm_open = true;
-        return;
-    }
-
-    /* Non-codegen: Play-ready choices apply immediately. */
+    /* Retail already compiled into this binary → hot-swap (no rebuild). */
     if (bv.ok && !bv.needs_regen) {
         launcher_model_set_bios_path(m, normalized);
         return;
     }
 
-    /* Needs Generate & rebuild (or is otherwise not Play-ready): confirm first. */
+    /* Retail dump is valid but its backend is not linked yet → confirm
+     * Generate & rebuild (codegen hosts kick generate on accept). */
     safe_copy(m->bios_pending_path, sizeof(m->bios_pending_path), normalized);
     if (bv.detail[0])
         safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail), bv.detail);
     else
         safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
-                  "Switching BIOS requires Generate & rebuild.");
+                  "This retail BIOS is not compiled into the current build. "
+                  "Generate & rebuild to add it (or Use OpenBIOS).");
     m->bios_confirm_open = true;
 }
 
@@ -1389,10 +1390,12 @@ bool launcher_model_bios_blocks_play(const LauncherModel* m) {
     if (m->profile && m->profile->verify.mode == 1) {
         if (m->verify.verdict == 0 || m->verify.verdict == 3) return false;
     }
-    /* Linked-backend mismatch (needs_regen) always blocks Play. */
+    /* OpenBIOS (empty path) never blocks Play for a BIOS regen. */
+    if (!m->s.bios_path[0]) return false;
+    /* Retail linked-backend mismatch (needs_regen) blocks Play. */
     if (m->setup_bios_needs_regen) return true;
     /* Retail path that isn't Play-ready in this binary. */
-    if (!m->setup_bios_ok && m->s.bios_path[0]) return true;
+    if (!m->setup_bios_ok) return true;
     return false;
 }
 
@@ -1404,7 +1407,7 @@ void launcher_model_bios_play_prompt(LauncherModel* m) {
 void launcher_model_bios_play_use_openbios(LauncherModel* m) {
     if (!m) return;
     m->bios_play_modal_open = false;
-    /* Route through request so codegen hosts get Generate & rebuild confirm. */
+    /* OpenBIOS always applies immediately — no Generate & rebuild. */
     launcher_model_request_bios_path(m, "");
 }
 
@@ -2275,9 +2278,39 @@ void launcher_model_begin_pad_capture(LauncherModel* m, int b) {
     launcher_model_begin_capture(m, b);
     if (m->capturing) m->capture_pad = true;   // begin_capture validated b
 }
+void launcher_model_begin_map_all(LauncherModel* m) {
+    if (!m) return;
+    const SystemProfile* prof = (const SystemProfile*)m->profile;
+    if (!prof || !prof->id || strcmp(prof->id, "psx") != 0) return;
+    const int p = clampi(m->cfg_player, 0, LNG_MAX_PLAYERS - 1);
+    if (m->s.player_src[p] != 2 || !m->s.player_gamepad_guid[p][0]) return;
+    m->map_all_active = true;
+    m->map_all_wait_release = false;
+    m->map_all_step = 0;
+    launcher_model_begin_pad_capture(m, kPsxGamepadBindOrder[0]);
+}
+void launcher_model_map_all_advance(LauncherModel* m) {
+    if (!m || !m->map_all_active) return;
+    m->map_all_step++;
+    if (m->map_all_step >= LNG_PSX_PAD_BUTTON_COUNT) {
+        m->map_all_active = false;
+        m->map_all_wait_release = false;
+        m->map_all_step = 0;
+        m->capturing = false;
+        m->capture_pad = false;
+        return;
+    }
+    /* Stay in pad-capture for the next button, but ignore input until the
+     * previous press/throw has been released (see try_capture). */
+    m->map_all_wait_release = true;
+    launcher_model_begin_pad_capture(m, kPsxGamepadBindOrder[m->map_all_step]);
+}
 void launcher_model_cancel_capture(LauncherModel* m) {
-    m->capturing   = false;
-    m->capture_pad = false;
+    m->capturing      = false;
+    m->capture_pad    = false;
+    m->map_all_active = false;
+    m->map_all_wait_release = false;
+    m->map_all_step   = 0;
 }
 
 void launcher_model_begin_hk_capture(LauncherModel* m, LngHotkey h) {
@@ -2304,8 +2337,15 @@ const char* launcher_model_freq_label(const LauncherModel* m) {
 const char* launcher_model_player_src_label(const LauncherModel* m, int player) {
     player = clampi(player, 0, LNG_MAX_PLAYERS - 1);
     int src = clampi(m->s.player_src[player], 0, 2);
-    if (src == 2 && m->player_pad_name[player][0])   // show the actual device name
-        return m->player_pad_name[player];
+    if (src == 2) {
+        // Never show the generic "Gamepad" placeholder when we have a concrete
+        // pad name (or at least a GUID-backed label filled by sync/hydrate).
+        if (m->player_pad_name[player][0] &&
+            strcmp(m->player_pad_name[player], "Gamepad") != 0)
+            return m->player_pad_name[player];
+        if (m->s.player_gamepad_guid[player][0])
+            return m->s.player_gamepad_guid[player];
+    }
     // Mouse-capable games split the keyboard source (player 0 only): the label
     // reflects whether mouse-aim is on. Every non-mouse game keeps kSrcNames.
     if (src == 1 && m->has_mouse_controls && player == 0)

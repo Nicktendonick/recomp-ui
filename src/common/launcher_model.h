@@ -411,10 +411,17 @@ typedef struct {
                                  // 1 only for consoles with two bind slots per
                                  // input — N64's input.cfg format)
     // When capturing, whether the GAMEPAD bind (button/axis) is being captured
-    // instead of the keyboard scancode — only reachable on consoles whose
-    // ControllerSpec sets has_pad_binds (Genesis; the engine stores a gamepad
-    // button/axis bind per logical button alongside the keyboard scancode).
+    // instead of the keyboard scancode — Genesis has_pad_binds, and PSX's
+    // Gamepad Bindings panel (per selected GUID).
     bool      capture_pad;
+    // PSX Gamepad Bindings: sequential Map All Bindings walk (column-major
+    // order in kPsxGamepadBindOrder). map_all_step indexes that order array.
+    // map_all_wait_release ignores further presses until the whole pad is at
+    // rest (all buttons up, all axes near center) so a held stick/button
+    // cannot auto-bind the next slot on every AXIS_MOTION.
+    bool      map_all_active;
+    bool      map_all_wait_release;
+    int       map_all_step;
     bool      hk_capturing;      // capturing a system hotkey
     LngHotkey capture_hk;
     // Per-player bind-label display strings, indexed like capture_btn.
@@ -524,8 +531,11 @@ const char* launcher_model_language_label(const LauncherModel* m);
 void launcher_model_cycle_deadzone_pct(LauncherModel* m);      // 0..50 step 5, wraps; mirrors both players
 const char* launcher_model_deadzone_pct_label(const LauncherModel* m);  // "37%"
 void launcher_model_set_bios_path(LauncherModel* m, const char* path);
-/* Request a BIOS change. Codegen hosts always confirm (Generate & rebuild);
- * other hosts persist immediately when the choice is already Play-ready. */
+/* Request a BIOS change.
+ * - OpenBIOS (empty path): always applies immediately when allowed — never
+ *   requires Generate & rebuild.
+ * - Retail already linked in this binary: hot-swap immediately.
+ * - Retail valid but not linked yet: confirm Generate & rebuild. */
 void launcher_model_request_bios_path(LauncherModel* m, const char* path);
 /* Confirm accept: save pending BIOS and kick Generate & rebuild (no wizard). */
 void launcher_model_bios_confirm_accept(LauncherModel* m);
@@ -685,9 +695,13 @@ void launcher_model_begin_capture(LauncherModel* m, int b);
 // stores two slots per input (N64) show slot-1 chips.
 void launcher_model_begin_capture_slot(LauncherModel* m, int b, int slot);
 // Begin capturing the GAMEPAD bind (button or axis) for button `b` instead of
-// a keyboard scancode. Only meaningful on has_pad_binds consoles (Genesis) —
-// the UI never offers it elsewhere; a stray call is harmless (Esc cancels).
+// a keyboard scancode. Used by Genesis has_pad_binds and the PSX Gamepad
+// Bindings panel. Esc cancels.
 void launcher_model_begin_pad_capture(LauncherModel* m, int b);
+// PSX: start Map All Bindings (walk kPsxGamepadBindOrder, one capture each).
+void launcher_model_begin_map_all(LauncherModel* m);
+// After a successful pad capture during Map All: advance or finish.
+void launcher_model_map_all_advance(LauncherModel* m);
 void launcher_model_cancel_capture(LauncherModel* m);
 // ---- hotkey capture ----
 void launcher_model_begin_hk_capture(LauncherModel* m, LngHotkey h);

@@ -36,6 +36,17 @@ static const ButtonDef kPsxPadButtons[] = {
 };
 #define LNG_PSX_PAD_BUTTON_COUNT ((int)(sizeof(kPsxPadButtons) / sizeof(kPsxPadButtons[0])))
 
+// Gamepad Bindings panel / Map All order: column-major (top→bottom, then
+// next column). Indices into kPsxPadButtons.
+//   Col1: D-pad + L-Stick    Col2: Face + R-Stick    Col3: Shoulders / Start
+static const int kPsxGamepadBindOrder[LNG_PSX_PAD_BUTTON_COUNT] = {
+    0, 1, 2, 3, 16, 17, 18, 19,   // Up Down Left Right / LS*
+    6, 5, 7, 4, 20, 21, 22, 23,   // Cross Circle Square Triangle / RS*
+    8, 9, 10, 11, 14, 15, 12, 13, // L1 L2 R1 R2 Start Select L3 R3
+};
+#define LNG_PSX_GAMEPAD_BIND_COLS 3
+#define LNG_PSX_GAMEPAD_BIND_ROWS 8
+
 // ---- panel composition --------------------------------------------------------
 // PSX only: adds the standalone "save" panel (WIDE, memory-card block-grid
 // UI) below the game/controller row. SNES keeps kPanelsDashboardCommon

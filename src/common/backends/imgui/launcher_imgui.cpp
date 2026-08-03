@@ -1444,8 +1444,12 @@ void pad_mode_selector(LauncherModel* m, const LauncherTheme& th, int p, float w
 // (off); otherwise it is the single legacy "Keyboard" entry, byte-for-byte
 // identical to before for every non-mouse game.
 void draw_source_selectables(LauncherModel* m, int p) {
-    if (ImGui::Selectable("None", m->s.player_src[p] == 0))
+    const SystemProfile* src_prof = (const SystemProfile*)m->profile;
+    const bool psx = src_prof && src_prof->id && !strcmp(src_prof->id, "psx");
+    if (ImGui::Selectable("None", m->s.player_src[p] == 0)) {
         launcher_model_set_source(m, p, 0, 0, nullptr, nullptr);
+        if (psx) launcher_binds_refresh(m);
+    }
     if (m->has_mouse_controls && p == 0) {
         const bool kbm = m->s.player_src[p] == 1 && m->s.mouse_enabled;
         const bool kb  = m->s.player_src[p] == 1 && !m->s.mouse_enabled;
@@ -1454,20 +1458,119 @@ void draw_source_selectables(LauncherModel* m, int p) {
         if (ImGui::Selectable("Keyboard", kb))
             launcher_model_set_mouse_source(m, 0);
     } else {
-        if (ImGui::Selectable("Keyboard", m->s.player_src[p] == 1))
+        if (ImGui::Selectable("Keyboard", m->s.player_src[p] == 1)) {
             launcher_model_set_source(m, p, 1, 0, nullptr, nullptr);
+            if (psx) launcher_binds_refresh(m);
+        }
     }
-    for (int i = 0; i < g_pad_count; ++i) {
-        const bool guid_match =
-            m->s.player_gamepad_guid[p][0] && g_pads[i].guid[0] &&
-            std::strcmp(m->s.player_gamepad_guid[p], g_pads[i].guid) == 0;
-        bool sel = m->s.player_src[p] == 2 &&
-                   (m->player_pad_id[p] == g_pads[i].id || guid_match);
-        if (ImGui::Selectable(g_pads[i].name, sel))
-            launcher_model_set_source(m, p, 2, g_pads[i].id, g_pads[i].name,
-                                     g_pads[i].guid);
+
+    // Unified pad list (no duplicates): saved mappings + live devices.
+    // Pads already selected on another player are disabled (keyboard is not).
+    struct PadOpt {
+        char guid[40];
+        char name[64];
+        uint32_t id;
+        bool live;
+    };
+    constexpr int kMaxOpts = LNG_MAX_PADS + 16 + LNG_MAX_PLAYERS;
+    PadOpt opts[kMaxOpts]{};
+    int nopt = 0;
+    auto already = [&](const char* guid) -> bool {
+        if (!guid || !guid[0]) return true;
+        for (int i = 0; i < nopt; ++i)
+            if (std::strcmp(opts[i].guid, guid) == 0) return true;
+        return false;
+    };
+    auto push_opt = [&](const char* guid, const char* name, uint32_t id,
+                        bool live) {
+        if (!guid || !guid[0] || already(guid) || nopt >= kMaxOpts) return;
+        std::snprintf(opts[nopt].guid, sizeof(opts[nopt].guid), "%s", guid);
+        const char* nm = (name && name[0] && std::strcmp(name, "Gamepad") != 0)
+                             ? name : "Controller";
+        std::snprintf(opts[nopt].name, sizeof(opts[nopt].name), "%s", nm);
+        opts[nopt].id = id;
+        opts[nopt].live = live;
+        ++nopt;
+    };
+
+    if (psx) {
+        const int known = launcher_binds_psx_known_count();
+        for (int i = 0; i < known; ++i) {
+            char guid[40] = {}, name[64] = {};
+            if (!launcher_binds_psx_known_at(i, guid, (int)sizeof(guid),
+                                             name, (int)sizeof(name)))
+                continue;
+            uint32_t id = 0;
+            bool live = false;
+            const bool custom = launcher_binds_psx_name_is_custom(guid) != 0;
+            for (int j = 0; j < g_pad_count; ++j) {
+                if (g_pads[j].guid[0] &&
+                    std::strcmp(g_pads[j].guid, guid) == 0) {
+                    live = true;
+                    id = g_pads[j].id;
+                    // Custom rename wins; otherwise prefer the live driver name.
+                    if (!custom && g_pads[j].name[0] &&
+                        std::strcmp(g_pads[j].name, "Gamepad") != 0)
+                        std::snprintf(name, sizeof(name), "%s", g_pads[j].name);
+                    break;
+                }
+            }
+            push_opt(guid, name, id, live);
+        }
+        // Settings-restored GUID that isn't in the registry yet.
+        if (m->s.player_src[p] == 2 && m->s.player_gamepad_guid[p][0]) {
+            bool live = false;
+            uint32_t id = m->player_pad_id[p];
+            for (int j = 0; j < g_pad_count; ++j) {
+                if (g_pads[j].guid[0] &&
+                    std::strcmp(g_pads[j].guid,
+                                m->s.player_gamepad_guid[p]) == 0) {
+                    live = true;
+                    id = g_pads[j].id;
+                    break;
+                }
+            }
+            push_opt(m->s.player_gamepad_guid[p], m->player_pad_name[p], id,
+                     live);
+        }
     }
-    if (g_pad_count == 0) {
+
+    for (int i = 0; i < g_pad_count; ++i)
+        push_opt(g_pads[i].guid, g_pads[i].name, g_pads[i].id, true);
+
+    for (int i = 0; i < nopt; ++i) {
+        bool claimed = false;
+        for (int o = 0; o < m->player_count; ++o) {
+            if (o == p) continue;
+            if (m->s.player_src[o] == 2 && m->s.player_gamepad_guid[o][0] &&
+                std::strcmp(m->s.player_gamepad_guid[o], opts[i].guid) == 0) {
+                claimed = true;
+                break;
+            }
+        }
+        char label[96];
+        if (opts[i].live)
+            std::snprintf(label, sizeof(label), "%s", opts[i].name);
+        else
+            std::snprintf(label, sizeof(label), "%s (disconnected)",
+                          opts[i].name);
+        const bool sel = m->s.player_src[p] == 2 &&
+                         m->s.player_gamepad_guid[p][0] &&
+                         std::strcmp(m->s.player_gamepad_guid[p],
+                                     opts[i].guid) == 0;
+        if (claimed) ImGui::BeginDisabled();
+        if (ImGui::Selectable(label, sel) && !claimed) {
+            launcher_model_set_source(m, p, 2, opts[i].id, opts[i].name,
+                                     opts[i].guid);
+            if (psx) {
+                launcher_binds_apply_psx_pad_profile(m, p);
+                launcher_binds_refresh(m);
+            }
+        }
+        if (claimed) ImGui::EndDisabled();
+    }
+
+    if (nopt == 0) {
         ImGui::BeginDisabled();
         ImGui::Selectable("(no gamepad connected)");
         ImGui::EndDisabled();
@@ -2176,7 +2279,6 @@ void panel_audio_draw(LauncherModel* m, const LauncherTheme* th) {
 int avail_system(const LauncherModel* m) { return m->has_bios; }
 void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
     eyebrow("SYSTEM");
-    row_label("BIOS", th);
     const SystemProfile* prof = (const SystemProfile*)m->profile;
     const bool is_gba = prof && prof->id && std::strcmp(prof->id, "gba") == 0;
     const bool is_psx = prof && prof->id && std::strcmp(prof->id, "psx") == 0;
@@ -2184,14 +2286,14 @@ void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
     // that bundle a redistributable BIOS (PSX/OpenBIOS, GBA) boot straight from
     // it, so the row states that outcome instead of the old "(default)", which
     // read as a missing setting the player still had to deal with.
-    const bool  has_pick = m->s.bios_path[0] != 0;
-    const float bw       = px(78);
-    // PSX: always reserve "Use OpenBIOS" (disabled when already selected).
-    // GBA: Clear only when a retail path is picked.
-    const float cw =
-        is_psx ? px(108) : (has_pick ? px(58) : 0.0f);
-    const float gap = (cw > 0.0f) ? px(th.spacing_sm) : 0.0f;
-    float avail = ImGui::GetContentRegionAvail().x - bw - cw - gap - px(th.spacing_sm);
+    const bool has_pick = m->s.bios_path[0] != 0;
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(14), px(8)));
+    const float btn_h = px(34);
+    const float browse_w = px(96);
+
+    // Line 1: BIOS label + path + Browse
+    row_label("BIOS", th);
+    float avail = ImGui::GetContentRegionAvail().x - browse_w - px(th.spacing_sm);
     if (avail < px(50)) avail = px(50);
     const char* bp = has_pick ? m->s.bios_path
                               : (is_gba ? "Retail GBA BIOS required"
@@ -2199,8 +2301,9 @@ void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
     char elided[192]; elide_left(bp, avail, elided, sizeof(elided));
     ImGui::AlignTextToFramePadding();
     ImGui::TextColored(col(has_pick ? th.text : th.text_muted), "%s", elided);
-    ImGui::SameLine(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - bw - cw - gap);
-    if (ImGui::Button("Browse", ImVec2(bw, px(28)))) {
+    ImGui::SameLine(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x -
+                    browse_w);
+    if (ImGui::Button("Browse", ImVec2(browse_w, btn_h))) {
         char buf[512];
         static const char* kBiosPatterns[] = { "*.bin", "*.rom" };
         if (launcher_pick_file(is_gba ? "Select Game Boy Advance BIOS (gba_bios.bin)"
@@ -2209,29 +2312,34 @@ void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
                                "BIOS image (.bin .rom)", buf, sizeof(buf)))
             launcher_model_request_bios_path(m, buf);
     }
-    if (is_psx) {
-        ImGui::SameLine(0.0f, gap);
-        if (!has_pick) ImGui::BeginDisabled();
-        if (ImGui::Button("Use OpenBIOS", ImVec2(cw, px(28))))
-            launcher_model_request_bios_path(m, "");
-        if (!has_pick) ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip(has_pick
-                                  ? "Switch to OpenBIOS and Generate & rebuild."
-                                  : "OpenBIOS is already selected.");
-    } else if (has_pick) {
-        ImGui::SameLine(0.0f, gap);
-        if (ImGui::Button("Clear", ImVec2(cw, px(28))))
-            launcher_model_request_bios_path(m, "");
-        if (ImGui::IsItemHovered()) {
-            if (is_gba)
-                ImGui::SetTooltip("Remove this selection. A retail GBA BIOS "
-                                  "is required before the game can launch.");
-            else
-                ImGui::SetTooltip("Stop using this BIOS and go back to the one "
-                                  "included with this build.");
+
+    // Line 2: secondary action under the path (PSX OpenBIOS / GBA Clear).
+    if (is_psx || has_pick) {
+        const float indent = ImGui::CalcTextSize("BIOS").x + px(th.spacing_md);
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + indent);
+        if (is_psx) {
+            if (!has_pick) ImGui::BeginDisabled();
+            if (ImGui::Button("Use OpenBIOS", ImVec2(0, btn_h)))
+                launcher_model_request_bios_path(m, "");
+            if (!has_pick) ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip(has_pick
+                                      ? "Switch to bundled OpenBIOS (no rebuild)."
+                                      : "OpenBIOS is already selected.");
+        } else {
+            if (ImGui::Button("Clear", ImVec2(0, btn_h)))
+                launcher_model_request_bios_path(m, "");
+            if (ImGui::IsItemHovered()) {
+                if (is_gba)
+                    ImGui::SetTooltip("Remove this selection. A retail GBA BIOS "
+                                      "is required before the game can launch.");
+                else
+                    ImGui::SetTooltip("Stop using this BIOS and go back to the one "
+                                      "included with this build.");
+            }
         }
     }
+    ImGui::PopStyleVar();
 }
 void panel_system_draw(LauncherModel* m, const LauncherTheme* th) {
     if (begin_panel("system", 0)) draw_system_controls(m, *th);
@@ -2539,6 +2647,12 @@ void draw_settings(LauncherModel* m, const LauncherTheme& th) {
 // Circle/Cross/Square/L1/L2/R1/R2/L3/R3/...) instead of a hardcoded SNES set.
 void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
     const int p = m->cfg_player;
+    const SystemProfile* cfg_prof = (const SystemProfile*)m->profile;
+    const bool cfg_psx = cfg_prof && cfg_prof->id && !strcmp(cfg_prof->id, "psx");
+    if (cfg_psx && m->s.player_src[p] == 2 &&
+        m->s.player_gamepad_guid[p][0] && !m->player_pad_name[p][0])
+        launcher_binds_hydrate_psx_pad_names(m);
+
     if (begin_panel("cfg_src", 0)) {
         ImGui::PushStyleColor(ImGuiCol_Text, col(th.accent2));
         ImGui::Text("CONTROLLER - PLAYER %d", p + 1); ImGui::PopStyleColor(); ImGui::Spacing();
@@ -2547,6 +2661,58 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
         if (ImGui::BeginCombo("##csrc", launcher_model_player_src_label(m, p))) {
             draw_source_selectables(m, p);
             ImGui::EndCombo();
+        }
+        if (cfg_psx) {
+            static bool s_rename_open = false;
+            static char s_rename_buf[64] = {};
+            const bool can_pad = m->s.player_src[p] == 2 &&
+                                 m->s.player_gamepad_guid[p][0];
+            ImGui::SameLine();
+            if (!can_pad) ImGui::BeginDisabled();
+            if (ImGui::Button("Rename Gamepad")) {
+                std::snprintf(s_rename_buf, sizeof(s_rename_buf), "%s",
+                              m->player_pad_name[p]);
+                s_rename_open = true;
+            }
+            if (!can_pad) ImGui::EndDisabled();
+
+            // Delete sits on the right of the Input source row.
+            {
+                const float del_w = px(130.0f);
+                const float right = ImGui::GetWindowContentRegionMax().x;
+                ImGui::SameLine(right - del_w);
+                if (!can_pad) ImGui::BeginDisabled();
+                if (ImGui::Button("Delete Gamepad", ImVec2(del_w, 0)))
+                    launcher_binds_delete_psx_gamepad(m, p + 1);
+                if (!can_pad) ImGui::EndDisabled();
+            }
+
+            if (s_rename_open) ImGui::OpenPopup("Rename Gamepad");
+            ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+            ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+            if (ImGui::BeginPopupModal("Rename Gamepad", &s_rename_open,
+                                       ImGuiWindowFlags_AlwaysAutoResize)) {
+                ImGui::TextUnformatted("Display name for this gamepad:");
+                ImGui::SetNextItemWidth(px(320));
+                bool enter = ImGui::InputText(
+                    "##rename_pad", s_rename_buf, sizeof(s_rename_buf),
+                    ImGuiInputTextFlags_EnterReturnsTrue);
+                ImGui::Spacing();
+                if (ImGui::Button("Cancel", ImVec2(px(120), 0))) {
+                    s_rename_open = false;
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::SameLine();
+                const bool ok = s_rename_buf[0] != '\0';
+                ImGui::BeginDisabled(!ok);
+                if ((ImGui::Button("OK", ImVec2(px(120), 0)) || enter) && ok) {
+                    launcher_binds_rename_psx_gamepad(m, p + 1, s_rename_buf);
+                    s_rename_open = false;
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndDisabled();
+                ImGui::EndPopup();
+            }
         }
         row_label("Deadzone", th);
         int dz = 0; stepper("dz", m->s.deadzone[p], "%", &dz);
@@ -2718,7 +2884,114 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
         // (1..4) instead of one tall column with dead space to the right.
         const SystemProfile* prof = (const SystemProfile*)m->profile;
         const ControllerSpec& spec = prof->controller;
-        // Alternate binds per input (N64's input.cfg keeps two; SNES/PSX/GBA
+        const bool is_psx = prof && prof->id && !strcmp(prof->id, "psx");
+
+        // ---- PSX: Gamepad Bindings (per selected SDL GUID) -----------------
+        // Replaces the keyboard grid on Configure. Column-major layout
+        // (top→bottom then next column) matching kPsxGamepadBindOrder.
+        if (is_psx) {
+            ImGui::PushStyleColor(ImGuiCol_Text, col(th.accent2));
+            ImGui::Text("GAMEPAD BINDINGS - PLAYER %d", p + 1);
+            ImGui::PopStyleColor();
+            ImGui::Spacing();
+
+            const bool has_pad_src = m->s.player_src[p] == 2 &&
+                                     m->s.player_gamepad_guid[p][0];
+            if (!has_pad_src) {
+                ImGui::TextColored(col(th.text_muted),
+                    "Select a gamepad as Input source to configure bindings.");
+            } else {
+                float label_col_w = px(90.0f);
+                for (int i = 0; i < LNG_PSX_PAD_BUTTON_COUNT; ++i) {
+                    float w = ImGui::CalcTextSize(spec.buttons[i].label).x + px(20.0f);
+                    if (w > label_col_w) label_col_w = w;
+                }
+                const float chip_w = px(140.0f);
+                const float cell_w = label_col_w + chip_w + px(16.0f);
+                if (ImGui::BeginTable("psx_pad_binds", LNG_PSX_GAMEPAD_BIND_COLS,
+                                      ImGuiTableFlags_SizingFixedFit)) {
+                    for (int c = 0; c < LNG_PSX_GAMEPAD_BIND_COLS; ++c)
+                        ImGui::TableSetupColumn(nullptr,
+                            ImGuiTableColumnFlags_WidthFixed, cell_w);
+                    for (int row = 0; row < LNG_PSX_GAMEPAD_BIND_ROWS; ++row) {
+                        for (int c = 0; c < LNG_PSX_GAMEPAD_BIND_COLS; ++c) {
+                            const int order_i = c * LNG_PSX_GAMEPAD_BIND_ROWS + row;
+                            const int b = kPsxGamepadBindOrder[order_i];
+                            ImGui::TableNextColumn();
+                            ImGui::PushID(b);
+                            ImGui::AlignTextToFramePadding();
+                            ImGui::TextColored(col(th.text_muted), "%s",
+                                               spec.buttons[b].label);
+                            ImGui::SameLine(label_col_w);
+                            const bool cap = m->capturing && m->capture_pad &&
+                                             m->capture_btn == b;
+                            const bool wait_rel = cap && m->map_all_wait_release;
+                            const char* pl = m->pad_binds[p][b][0]
+                                               ? m->pad_binds[p][b]
+                                               : "(unbound)";
+                            if (cap) ImGui::PushStyleColor(ImGuiCol_Button, col(th.accent));
+                            const char* chip = wait_rel ? "[ release button... ]"
+                                              : cap     ? "[ press a button... ]"
+                                                        : pl;
+                            if (ImGui::Button(chip, ImVec2(chip_w, 0))) {
+                                m->map_all_active = false;
+                                m->map_all_wait_release = false;
+                                launcher_model_begin_pad_capture(m, b);
+                                // If they start a bind while still holding the
+                                // prior input, wait for a full release first.
+                                if (m->capturing && m->player_pad_id[p] &&
+                                    !launcher_input_gamepad_at_rest(
+                                        m->player_pad_id[p]))
+                                    m->map_all_wait_release = true;
+                            }
+                            if (cap) ImGui::PopStyleColor();
+                            ImGui::PopID();
+                        }
+                    }
+                    ImGui::EndTable();
+                }
+                ImGui::Spacing();
+                if (ImGui::Button("Map All Bindings")) {
+                    launcher_model_begin_map_all(m);
+                    if (m->capturing && m->player_pad_id[p] &&
+                        !launcher_input_gamepad_at_rest(m->player_pad_id[p]))
+                        m->map_all_wait_release = true;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Reset to Defaults"))
+                    launcher_binds_reset_player(m, m->cfg_player + 1);
+                // Save Profile — name, choice, mappings, and deadzone for this GUID.
+                static double s_profile_saved_until = 0.0;
+                {
+                    const float save_w = px(120.0f);
+                    const float right = ImGui::GetWindowContentRegionMax().x;
+                    ImGui::SameLine(right - save_w);
+                    if (ImGui::Button("Save Profile", ImVec2(save_w, 0))) {
+                        launcher_binds_save_psx_gamepad(m, p + 1);
+                        s_profile_saved_until = ImGui::GetTime() + 2.5;
+                    }
+                }
+                if (m->capturing && m->capture_pad) {
+                    const char* label =
+                        (m->capture_btn >= 0 &&
+                         m->capture_btn < LNG_PSX_PAD_BUTTON_COUNT)
+                            ? spec.buttons[m->capture_btn].label : "?";
+                    if (m->map_all_wait_release) {
+                        ImGui::TextColored(col(th.warn),
+                            "Release Button (Esc cancels)%s",
+                            m->map_all_active ? " — Map All" : "");
+                    } else {
+                        ImGui::TextColored(col(th.warn),
+                            "Map an input to %s (Esc cancels)%s",
+                            label,
+                            m->map_all_active ? " — Map All" : "");
+                    }
+                }
+                if (ImGui::GetTime() < s_profile_saved_until)
+                    ImGui::TextColored(col(th.accent2), "Input Profile Saved!");
+            }
+        } else {
+        // Alternate binds per input (N64's input.cfg keeps two; SNES/GBA
         // keep one). 0 in the spec reads as 1 (older positional initializers).
         const int bpi = spec.binds_per_input < 1 ? 1 : spec.binds_per_input;
 
@@ -2764,7 +3037,7 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
         // (bpi>=2) OR a pad-bind console pairs a KEY + GAMEPAD chip (has_pad);
         // narrower chips then. Single-chip cells keep the wider chip AND the
         // exact legacy cell width (label + 170) so non-pad/single-bind consoles
-        // (SNES/PSX/GBA) pack columns byte-identically to before this existed.
+        // (SNES/GBA) pack columns byte-identically to before this existed.
         const bool two_chip = (bpi >= 2) || has_pad;
         const float chip_w   = two_chip ? px(118.0f) : px(160.0f);
         const float chip_gap = px(6.0f);
@@ -2831,6 +3104,7 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
         ImGui::Spacing();
         if (ImGui::Button("Reset to Defaults")) launcher_binds_reset_player(m, m->cfg_player + 1);
         if (m->capturing) ImGui::TextColored(col(th.warn), "Listening... (Esc cancels)");
+        } // !is_psx
     } end_panel();
 
     // Zapper (light gun) block — NES Zapper games only (gi.zapper). The mouse
@@ -5726,9 +6000,7 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             if (!has_pick) ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 ImGui::SetTooltip(has_pick
-                                      ? "Clear the retail BIOS path and use "
-                                        "OpenBIOS (generated on first rebuild "
-                                        "if not already linked)."
+                                      ? "Switch to bundled OpenBIOS (no rebuild)."
                                       : "OpenBIOS is already selected.");
         }
         ImGui::PopStyleVar();
@@ -5948,9 +6220,10 @@ void draw_bios_confirm_modal(LauncherModel* m, const LauncherTheme& th) {
         return;
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(420));
     ImGui::TextWrapped(
-        "Switching BIOS regenerates BIOS C and rebuilds the game binary with "
-        "your current disc and toolchain. This is the same as Generate & "
-        "rebuild in first-run setup.");
+        "This retail BIOS is not compiled into the current build yet. "
+        "Generate & rebuild will emit its BIOS C and rebuild the game binary "
+        "with your current disc and toolchain. OpenBIOS switches never need "
+        "this — use Use OpenBIOS instead.");
     if (m->bios_pending_path[0]) {
         ImGui::Dummy(ImVec2(0, px(8)));
         ImGui::TextColored(col(th.text_muted), "Selected:");
@@ -5976,6 +6249,11 @@ void draw_bios_confirm_modal(LauncherModel* m, const LauncherTheme& th) {
             ImGui::SetTooltip("Select a disc image first");
     }
     ImGui::SameLine();
+    if (ImGui::Button("Use OpenBIOS", ImVec2(px(130), px(32)))) {
+        launcher_model_bios_confirm_cancel(m);
+        launcher_model_request_bios_path(m, "");
+    }
+    ImGui::SameLine();
     if (ImGui::Button("Cancel", ImVec2(px(100), px(32))))
         launcher_model_bios_confirm_cancel(m);
     if (!m->bios_confirm_open) ImGui::CloseCurrentPopup();
@@ -5991,9 +6269,9 @@ void draw_bios_play_modal(LauncherModel* m, const LauncherTheme& th) {
         return;
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(440));
     ImGui::TextWrapped(
-        "The selected BIOS is not compiled into this build. Generate & rebuild "
-        "with it (same disc and toolchain), or cancel and keep playing with "
-        "the current binary.");
+        "The selected retail BIOS is not compiled into this build. Generate & "
+        "rebuild with it (same disc and toolchain), switch to OpenBIOS to Play "
+        "without rebuilding, or cancel and keep the current selection.");
     if (m->s.bios_path[0]) {
         ImGui::Dummy(ImVec2(0, px(8)));
         ImGui::TextColored(col(th.text_muted), "Current selection:");
@@ -6018,6 +6296,9 @@ void draw_bios_play_modal(LauncherModel* m, const LauncherTheme& th) {
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
             ImGui::SetTooltip("Select a disc image first");
     }
+    ImGui::SameLine();
+    if (ImGui::Button("Use OpenBIOS", ImVec2(px(130), px(32))))
+        launcher_model_bios_play_use_openbios(m);
     ImGui::SameLine();
     if (ImGui::Button("Cancel", ImVec2(px(100), px(32))))
         launcher_model_bios_play_cancel(m);
@@ -6226,24 +6507,59 @@ bool try_capture(LauncherModel* m, const SDL_Event& ev) {
         return true;
     }
 
-    // ---- GAMEPAD bind capture (capture_pad set; Genesis only) --------------
-    // GAMEPAD binds (has_pad_binds consoles) persist a button/axis through the
-    // console's native bridge. Swallow everything while listening; a controller
-    // button press or a decisive axis push (past a dead threshold) commits.
+    // ---- GAMEPAD bind capture (capture_pad: Genesis + PSX Gamepad Bindings)
+    // Persist a button/axis through the console's native bridge. Swallow
+    // everything while listening; a controller button press or a decisive
+    // axis push (past a dead threshold) commits. PSX only accepts events from
+    // the player's selected Input source device.
     if (m->capturing && m->capture_pad) {
-        if (ev.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        const SystemProfile* cap_prof = (const SystemProfile*)m->profile;
+        const bool psx_cap = cap_prof && cap_prof->id && !strcmp(cap_prof->id, "psx");
+        const uint32_t want_id = m->player_pad_id[m->cfg_player];
+        auto from_selected = [&](uint32_t which) -> bool {
+            if (!psx_cap) return true;                 // Genesis: any pad
+            if (!want_id) return false;
+            return which == want_id;
+        };
+        auto try_clear_release_wait = [&](uint32_t which) {
+            if (!m->map_all_wait_release) return;
+            if (!from_selected(which)) return;
+            // Require the whole pad at rest — clearing on a single idle axis
+            // let a held stick re-commit on every subsequent AXIS_MOTION.
+            if (launcher_input_gamepad_at_rest(which))
+                m->map_all_wait_release = false;
+        };
+        auto commit_pad = [&](int kind, int code, int axis_dir) {
             launcher_binds_set_pad_button(m, m->cfg_player + 1, m->capture_btn,
-                                          LNG_PADBIND_BUTTON, (int)LNG_EVGBTN(ev), 0);
-            launcher_model_cancel_capture(m);
+                                          kind, code, axis_dir);
+            if (m->map_all_active)
+                launcher_model_map_all_advance(m);
+            else
+                launcher_model_cancel_capture(m);
+        };
+        if (ev.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+            if (m->map_all_wait_release) {
+                try_clear_release_wait((uint32_t)LNG_EVGBTNWHICH(ev));
+                return true;  // never bind while waiting for release
+            }
+            if (from_selected((uint32_t)LNG_EVGBTNWHICH(ev)))
+                commit_pad(LNG_PADBIND_BUTTON, (int)LNG_EVGBTN(ev), 0);
+            return true;
+        }
+        if (ev.type == SDL_EVENT_GAMEPAD_BUTTON_UP) {
+            try_clear_release_wait((uint32_t)LNG_EVGBTNWHICH(ev));
             return true;
         }
         if (ev.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
-            int val = (int)LNG_EVGAXISVAL(ev);
-            if (val >= 20000 || val <= -20000) {   // ignore rest/jitter near center
-                launcher_binds_set_pad_button(m, m->cfg_player + 1, m->capture_btn,
-                                              LNG_PADBIND_AXIS, (int)LNG_EVGAXIS(ev),
-                                              val < 0 ? -1 : +1);
-                launcher_model_cancel_capture(m);
+            if (from_selected((uint32_t)LNG_EVGAXISWHICH(ev))) {
+                if (m->map_all_wait_release) {
+                    try_clear_release_wait((uint32_t)LNG_EVGAXISWHICH(ev));
+                    return true;
+                }
+                int val = (int)LNG_EVGAXISVAL(ev);
+                if (val >= 20000 || val <= -20000)   // ignore rest/jitter
+                    commit_pad(LNG_PADBIND_AXIS, (int)LNG_EVGAXIS(ev),
+                               val < 0 ? -1 : +1);
             }
             return true;
         }
@@ -6530,6 +6846,18 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
         g_pad_count = launcher_input_poll(
             g_pads, LNG_MAX_PADS, m->has_gyro_controls ? 1 : 0);
 
+        // PSX: keep Input source labels on concrete pad names (live SDL name
+        // or saved [gamepads] registry), never the generic "Gamepad" placeholder.
+        launcher_binds_sync_psx_pad_sources(m, g_pads, g_pad_count);
+
+        // Pad capture release-gate: clear once the selected pad is fully at
+        // rest (covers the case where SDL stops sending AXIS_MOTION at rest).
+        if (m->capturing && m->capture_pad && m->map_all_wait_release) {
+            const uint32_t id = m->player_pad_id[m->cfg_player];
+            if (id && launcher_input_gamepad_at_rest(id))
+                m->map_all_wait_release = false;
+        }
+
         ImGui_ImplOpenGL3_NewFrame();
         LNG_ImplSDL_NewFrame();
         if (force_dpi) {   // Windows has no native point/pixel split — inject it
@@ -6572,5 +6900,9 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
     ImGui::DestroyContext();
 
     if (p->should_quit && m->action == LNG_ACTION_NONE) m->action = LNG_ACTION_QUIT;
+    // Persist selected gamepads (defaults if never remapped) so PLAY remembers
+    // the pad in input.ini / settings even without an explicit Save click.
+    if (m->action == LNG_ACTION_LAUNCH || m->action == LNG_ACTION_RELAUNCH)
+        launcher_binds_prepare_psx_launch(m, g_pads, g_pad_count);
     return m->action;
 }
