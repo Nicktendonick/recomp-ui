@@ -2598,12 +2598,21 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
             // is still Keyboard, preview the first connected gyro-capable pad
             // so motion can be verified before changing the source dropdown.
             const LauncherPad* motion_pad = nullptr;
-            if (m->s.player_src[p] == 2 && m->player_pad_id[p]) {
-                for (int i = 0; i < g_pad_count; ++i)
-                    if (g_pads[i].id == m->player_pad_id[p]) {
+            if (m->s.player_src[p] == 2) {
+                for (int i = 0; i < g_pad_count; ++i) {
+                    const bool id_match =
+                        m->player_pad_id[p] &&
+                        g_pads[i].id == m->player_pad_id[p];
+                    const bool guid_match =
+                        m->s.player_gamepad_guid[p][0] &&
+                        g_pads[i].guid[0] &&
+                        std::strcmp(m->s.player_gamepad_guid[p],
+                                    g_pads[i].guid) == 0;
+                    if (id_match || guid_match) {
                         motion_pad = &g_pads[i];
                         break;
                     }
+                }
             }
 
             const float rate = motion_pad && motion_pad->has_gyro
