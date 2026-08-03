@@ -340,6 +340,10 @@ typedef struct {
     /* Confirm before persisting a BIOS switch that requires Generate & rebuild. */
     bool      bios_confirm_open;
     char      bios_pending_path[512]; // "" = OpenBIOS; absolute otherwise
+    /* Staged BIOS switch: sidecars updated for the generate CLI, but reverted
+     * if prepare/rebuild fails so a failed job does not stick the new pick. */
+    bool      bios_switch_uncommitted;
+    char      bios_revert_path[512];
     /* Play blocked because saved BIOS is not linked — offer Generate / OpenBIOS. */
     bool      bios_play_modal_open;
     bool      setup_preparing;       // prepare/rebuild/toolchain job in flight

@@ -419,6 +419,8 @@ void launcher_model_init(LauncherModel* m,
     m->setup_bios_needs_regen = false;
     m->bios_confirm_open = false;
     m->bios_pending_path[0] = '\0';
+    m->bios_switch_uncommitted = false;
+    m->bios_revert_path[0] = '\0';
     m->bios_play_modal_open = false;
     m->setup_preparing = false;
     m->setup_prepare_pulse = 0.0f;
@@ -1243,11 +1245,31 @@ static int lm_bios_paths_equal(const char* a, const char* b) {
 
 void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path);
 
+static void lm_bios_revert_uncommitted(LauncherModel* m) {
+    if (!m || !m->bios_switch_uncommitted) return;
+    safe_copy(m->s.bios_path, sizeof(m->s.bios_path), m->bios_revert_path);
+    m->bios_switch_uncommitted = false;
+    m->bios_pending_path[0] = '\0';
+    m->bios_revert_path[0] = '\0';
+    launcher_model_refresh_bios_status(m);
+    lm_persist_setup_sidecars(m);
+}
+
+static void lm_bios_commit_uncommitted(LauncherModel* m) {
+    if (!m || !m->bios_switch_uncommitted) return;
+    m->bios_switch_uncommitted = false;
+    m->bios_pending_path[0] = '\0';
+    m->bios_revert_path[0] = '\0';
+    /* Path already on the model; rewrite sidecars next to the new exe. */
+    lm_persist_setup_sidecars(m);
+}
+
 /* Apply pending/current BIOS and start Generate & rebuild without the full
  * first-run wizard (progress modal only). Falls back to the wizard when the
  * disc or toolchain is missing. */
 static void lm_bios_kick_generate(LauncherModel* m) {
     if (!m) return;
+    if (m->setup_preparing) return; /* ignore double-clicks / overlapping jobs */
     m->setup_wizard_open = false;
     m->bios_confirm_open = false;
     m->bios_play_modal_open = false;
@@ -1256,6 +1278,7 @@ static void lm_bios_kick_generate(LauncherModel* m) {
         if (m->toolchain_is_ready_cb && m->toolchain_is_ready_cb())
             m->setup_tc_ready = true;
         if (!m->setup_tc_ready) {
+            lm_bios_revert_uncommitted(m);
             m->setup_wizard_open = true;
             m->setup_page = 0;
             return;
@@ -1263,10 +1286,13 @@ static void lm_bios_kick_generate(LauncherModel* m) {
     }
     if (m->rom_present && m->rom_full[0] &&
         (m->prepare_with_progress_cb || m->prepare_disc_cb)) {
+        /* Stage disc + BIOS sidecars so the host CLI gets --disc/--bios. */
+        lm_persist_setup_sidecars(m);
         launcher_model_start_prepare_disc(m, m->rom_full);
         return;
     }
     /* Need a disc pick — open the setup page, not a silent no-op. */
+    lm_bios_revert_uncommitted(m);
     m->setup_wizard_open = true;
     m->setup_page = 1;
 }
@@ -1336,10 +1362,14 @@ void launcher_model_request_bios_path(LauncherModel* m, const char* path) {
 
 void launcher_model_bios_confirm_accept(LauncherModel* m) {
     if (!m) return;
+    if (m->setup_preparing) return;
     m->bios_confirm_open = false;
-    launcher_model_set_bios_path(m, m->bios_pending_path);
-    m->bios_pending_path[0] = '\0';
-    /* Same path as the wizard's Generate & rebuild — no full setup UI. */
+    /* Stage the new BIOS for the generate CLI, but remember the prior pick so
+     * a failed prepare/rebuild can restore it (do not stick a failed switch). */
+    safe_copy(m->bios_revert_path, sizeof(m->bios_revert_path), m->s.bios_path);
+    safe_copy(m->s.bios_path, sizeof(m->s.bios_path), m->bios_pending_path);
+    m->bios_switch_uncommitted = true;
+    launcher_model_refresh_bios_status(m);
     lm_bios_kick_generate(m);
 }
 
@@ -1380,7 +1410,9 @@ void launcher_model_bios_play_use_openbios(LauncherModel* m) {
 
 void launcher_model_bios_play_generate(LauncherModel* m) {
     if (!m) return;
+    if (m->setup_preparing) return;
     m->bios_play_modal_open = false;
+    /* Current m->s.bios_path is already the desired pick — stage + generate. */
     lm_bios_kick_generate(m);
 }
 
@@ -1711,6 +1743,8 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
     if (kind == PREP_JOB_REBUILD) {
         if (result && out_path[0]) {
             safe_copy(m->relaunch_exe, sizeof(m->relaunch_exe), out_path);
+            /* BIOS switch sticks only after a successful rebuild. */
+            lm_bios_commit_uncommitted(m);
             /* Sidecars beside build/<exe> before the host execs it. */
             lm_persist_setup_sidecars(m);
             m->setup_prepare_satisfied = true;
@@ -1725,6 +1759,7 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
                 m->action = LNG_ACTION_RELAUNCH;
             }
         } else {
+            lm_bios_revert_uncommitted(m);
             m->setup_status[0] = '\0';
             safe_copy(m->setup_error, sizeof(m->setup_error),
                       err[0] ? err : "Rebuild failed.");
@@ -1740,15 +1775,18 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
                       (m->prepare_success_status && m->prepare_success_status[0])
                           ? m->prepare_success_status
                           : "Sources ready — starting build…");
+            /* Keep bios_switch_uncommitted through rebuild. */
             launcher_model_begin_rebuild_locked(m);
             return;
         }
+        lm_bios_commit_uncommitted(m);
         m->setup_prepare_satisfied = true;
         safe_copy(m->setup_status, sizeof(m->setup_status),
                   (m->prepare_success_status && m->prepare_success_status[0])
                       ? m->prepare_success_status
                       : "Disc ready.");
     } else {
+        lm_bios_revert_uncommitted(m);
         m->setup_status[0] = '\0';
         safe_copy(m->setup_error, sizeof(m->setup_error),
                   err[0] ? err : "Disc prepare failed.");
