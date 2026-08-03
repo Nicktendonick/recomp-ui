@@ -5156,8 +5156,21 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
         if (mod_commit_launch(m))
             m->action = LNG_ACTION_LAUNCH;
     } else if (!can_play && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Select a valid %s first",
-                          m->rom_noun ? m->rom_noun : "ROM");
+        const char* noun = m->rom_noun ? m->rom_noun : "ROM";
+        if (m->has_bios && !m->setup_bios_ok) {
+            ImGui::SetTooltip(
+                "Select a valid BIOS first (or Clear to use the bundled "
+                "OpenBIOS when this build includes one).");
+        } else if (!m->rom_present || strcmp(m->rom_size, "--") == 0) {
+            ImGui::SetTooltip("Select a valid %s first", noun);
+        } else if (m->profile && m->profile->verify.mode == 1 &&
+                   (m->verify.verdict == 0 || m->verify.verdict == 3)) {
+            ImGui::SetTooltip("Select a verified %s first", noun);
+        } else if (m->setup_preparing) {
+            ImGui::SetTooltip("Wait for the current setup job to finish");
+        } else {
+            ImGui::SetTooltip("Select a valid %s first", noun);
+        }
     }
     if (!can_play && ImGui::IsItemClicked())
         m->setup_wizard_open = true;
