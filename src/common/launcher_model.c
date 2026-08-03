@@ -462,18 +462,20 @@ void launcher_model_init(LauncherModel* m,
             m->setup_wizard_open = true;
     }
 
-    /* Toolchain page first for local codegen hosts unless already usable. */
-    if (m->setup_wizard_open && m->setup_needs_toolchain) {
-        if (m->toolchain_is_ready_cb && m->toolchain_is_ready_cb()) {
-            m->setup_tc_ready = true;
+    /* Probe toolchain readiness even when the wizard is closed — BIOS switch
+     * Generate & rebuild needs setup_tc_ready, and codegen hosts always set
+     * setup_needs_toolchain. */
+    if (m->setup_needs_toolchain) {
+        m->setup_tc_ready =
+            (m->toolchain_is_ready_cb && m->toolchain_is_ready_cb()) ? true
+                                                                    : false;
+        if (m->setup_wizard_open)
+            m->setup_page = m->setup_tc_ready ? 1 : 0;
+        else
             m->setup_page = 1;
-        } else {
-            m->setup_tc_ready = false;
-            m->setup_page = 0;
-        }
     } else {
         m->setup_page = 1;
-        m->setup_tc_ready = !m->setup_needs_toolchain;
+        m->setup_tc_ready = true;
     }
 
     // Placeholder display until launcher_binds_load() fills real values from
@@ -1249,10 +1251,15 @@ static void lm_bios_kick_generate(LauncherModel* m) {
     m->setup_wizard_open = false;
     m->bios_confirm_open = false;
     m->bios_play_modal_open = false;
-    if (m->setup_needs_toolchain && !m->setup_tc_ready) {
-        m->setup_wizard_open = true;
-        m->setup_page = 0;
-        return;
+    /* Re-probe: setup_tc_ready may still be false if the wizard never opened. */
+    if (m->setup_needs_toolchain) {
+        if (m->toolchain_is_ready_cb && m->toolchain_is_ready_cb())
+            m->setup_tc_ready = true;
+        if (!m->setup_tc_ready) {
+            m->setup_wizard_open = true;
+            m->setup_page = 0;
+            return;
+        }
     }
     if (m->rom_present && m->rom_full[0] &&
         (m->prepare_with_progress_cb || m->prepare_disc_cb)) {
