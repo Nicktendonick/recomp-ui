@@ -86,6 +86,7 @@ typedef enum {
     LNG_HK_FULLSCREEN = 0, LNG_HK_RESET, LNG_HK_PAUSE, LNG_HK_PAUSE_DIMMED,
     LNG_HK_TURBO, LNG_HK_WINDOW_BIGGER, LNG_HK_WINDOW_SMALLER,
     LNG_HK_VOLUME_UP, LNG_HK_VOLUME_DOWN, LNG_HK_DISPLAY_PERF, LNG_HK_TOGGLE_RENDERER,
+    LNG_HK_SOLAR_BRIGHTER, LNG_HK_SOLAR_DIMMER, LNG_HK_SOLAR_LIVE,
     LNG_HK_COUNT
 } LngHotkey;
 
@@ -124,6 +125,7 @@ typedef struct {
     const char* sram_path;           // borrowed; NULL when the game has no SRAM
 
     // ---- NES-style capabilities (borrowed from RecompLauncherCGameInfo) ----
+    bool        has_solar_sensor;    // Solar sensor panel in Settings
     bool        has_integer_scale;   // Integer-scale checkbox in Display settings
     bool        hdpack_supported;    // HD-texture-pack toggle + folder picker
     // Password/mantra save (e.g. Faxanadu): non-NULL path swaps the SAVES row
@@ -230,6 +232,8 @@ typedef struct {
     // the mouse surface composes and behavior is unchanged for every game.
     bool has_mouse_controls;
     bool has_gyro_controls;
+    bool has_sharp_filter;
+    bool has_affine_filter;
     bool netplay_supported;
     const RecompLauncherCNetplayCallbacks* netplay;
     const RecompLauncherCModProvider* mods;
@@ -245,6 +249,8 @@ typedef struct {
     int  num_aspect_labels;
     bool aspect_experimental;
     bool adaptive_view_supported;
+    const char* const* display_layout_labels;
+    int  num_display_layouts;
     // Number of players the GAME actually supports. Mega Man X is 1-player, so
     // the launcher must not show a dead Player 2 row. Games that support 2
     // report 2 and the second row appears. Driven by data, never hardcoded.
@@ -435,6 +441,9 @@ void launcher_model_open_config(LauncherModel* m, int player);  // -> Controller
 // ---- display settings ----
 void launcher_model_cycle_scale(LauncherModel* m);   // 1..6 wrap
 void launcher_model_toggle_filter(LauncherModel* m);
+void launcher_model_cycle_scaling_filter(LauncherModel* m);
+const char* launcher_model_scaling_filter_label(const LauncherModel* m);
+void launcher_model_toggle_affine_filter(LauncherModel* m);
 void launcher_model_toggle_widescreen(LauncherModel* m);  // gated
 void launcher_model_toggle_adaptive_view(LauncherModel* m);  // gated; fixed aspect is retained
 /* Unified Native / fixed widescreen / Adaptive control. Compatibility fields
@@ -442,6 +451,8 @@ void launcher_model_toggle_adaptive_view(LauncherModel* m);  // gated; fixed asp
  * presents them as one mode instead of unrelated toggles. */
 void launcher_model_cycle_view_mode(LauncherModel* m);
 const char* launcher_model_view_mode_label(const LauncherModel* m);
+void launcher_model_cycle_display_layout(LauncherModel* m);
+const char* launcher_model_display_layout_label(const LauncherModel* m);
 
 // ---- widescreen extra cells (SystemProfile.video.widescreen_cells consoles,
 // e.g. Genesis: N extra 8-px background cells rendered per side while
@@ -540,6 +551,16 @@ void launcher_model_set_msu1_dir(LauncherModel* m, const char* dir);
 
 // ---- NES-style settings (capability-gated like the PSX deep set) ----
 void launcher_model_toggle_integer_scale(LauncherModel* m);   // gated has_integer_scale
+
+// ---- cartridge light sensor (all gated on has_solar_sensor) ----------------
+// The postal code is stored verbatim apart from trimming: validating which
+// codes exist is the host's job (it owns the geocoder), and rejecting them here
+// would just mean two places disagreeing about what is valid.
+void launcher_model_set_solar_zip(LauncherModel* m, const char* zip);
+void launcher_model_set_solar_country(LauncherModel* m, const char* country);
+void launcher_model_set_solar_source(LauncherModel* m, int source);     // 0 live, 1 manual
+void launcher_model_set_solar_manual_step(LauncherModel* m, int step);  // clamped 0..8
+void launcher_model_set_solar_full_sun(LauncherModel* m, int wm2);      // clamped 300..1200
 void launcher_model_toggle_hdpack(LauncherModel* m);          // gated hdpack_supported
 void launcher_model_set_hdpack_dir(LauncherModel* m, const char* dir);
 // Password/mantra save: reload m->password_text from password_save_path, and

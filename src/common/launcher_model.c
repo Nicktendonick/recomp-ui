@@ -45,11 +45,12 @@ static const char* kButtonNames[LNG_BTN_COUNT] = {
 static const char* kP1Defaults[LNG_BTN_COUNT] = {
     "Up", "Down", "Left", "Right", "X", "Z", "S", "A", "D", "C", "Enter", "RShift"
 };
-// Display labels for the 11 engine hotkeys (order == LngHotkey == [KeyMap] keys).
+// Display labels for engine hotkeys (order == LngHotkey == [KeyMap] keys).
 static const char* kHotkeyNames[LNG_HK_COUNT] = {
     "Fullscreen", "Reset", "Pause", "Pause (dimmed)", "Fast-forward",
     "Window bigger", "Window smaller", "Volume up", "Volume down",
-    "FPS readout", "Toggle renderer"
+    "FPS readout", "Toggle renderer",
+    "Solar level up", "Solar level down", "Resume live solar"
 };
 static const char* kViewNames[5] = { "Dashboard", "Settings", "Controller", "Netplay", "Mods" };
 static const char* kSrcNames[3]  = { "None", "Keyboard", "Gamepad" };
@@ -92,6 +93,7 @@ void launcher_model_init(LauncherModel* m,
         m->msu1_patch_path      = game->msu1_patch_path;
         m->saves_supported      = game->sram_path != NULL;
         m->sram_path            = game->sram_path;
+        m->has_solar_sensor     = game->has_solar_sensor != 0;
         m->has_integer_scale    = game->has_integer_scale != 0;
         m->hdpack_supported     = game->hdpack_supported != 0;
         m->password_save_path   = game->password_save_path;
@@ -159,6 +161,8 @@ void launcher_model_init(LauncherModel* m,
         m->num_aspect_labels    = game->num_aspect_labels;
         m->aspect_experimental  = game->aspect_experimental != 0;
         m->adaptive_view_supported = game->adaptive_view_supported != 0;
+        m->display_layout_labels = game->display_layout_labels;
+        m->num_display_layouts = game->num_display_layouts;
         m->tpak_slots           = clampi(game->tpak_slots, 0, RECOMP_LAUNCHER_MAX_TPAKS);
         m->tpak_inspect_cb      = game->tpak_inspect;
         m->audio_device_labels  = game->audio_device_labels;
@@ -168,6 +172,8 @@ void launcher_model_init(LauncherModel* m,
         m->hide_rebind          = game->hide_rebind != 0;
         m->has_mouse_controls   = game->has_mouse_controls != 0;
         m->has_gyro_controls    = game->has_gyro_controls != 0;
+        m->has_sharp_filter     = game->has_sharp_filter != 0;
+        m->has_affine_filter    = game->has_affine_filter != 0;
         m->netplay_supported    = game->netplay_supported != 0 && game->netplay != NULL;
         m->netplay              = game->netplay;
 #if RECOMP_UI_ENABLE_MODS
@@ -186,6 +192,13 @@ void launcher_model_init(LauncherModel* m,
     }
 
     if (io) m->s = *io;
+    if (m->has_sharp_filter) {
+        m->s.linear_filter = m->s.linear_filter ? 1 : 0;
+        m->s.sharp_filter = m->s.sharp_filter ? 1 : 0;
+        // Preserve an existing explicit linear-filter preference when a host
+        // first gains the three-state scaler control.
+        if (m->s.linear_filter) m->s.sharp_filter = 0;
+    }
     memset(&m->s.netplay_launch, 0, sizeof(m->s.netplay_launch));
     if (!m->s.netplay_player_name[0] && m->netplay && m->netplay->player_name) {
         safe_copy(m->s.netplay_player_name, sizeof(m->s.netplay_player_name),
@@ -287,6 +300,12 @@ void launcher_model_init(LauncherModel* m,
         // 4:3 (bit0, index 0) is always offered so this always terminates.
         while (idx > 0 && !(m->aspect_mask & (1 << idx))) --idx;
         m->s.aspect_index = idx;
+    }
+    if (m->display_layout_labels && m->num_display_layouts > 0) {
+        m->s.display_layout =
+            clampi(m->s.display_layout, 0, m->num_display_layouts - 1);
+    } else {
+        m->s.display_layout = 0;
     }
 
     // ---- clamp/seed the deeper PSX-style settings against their own ranges ----
@@ -609,6 +628,33 @@ void launcher_model_cycle_scale(LauncherModel* m) {
 
 void launcher_model_toggle_filter(LauncherModel* m) {
     m->s.linear_filter = !m->s.linear_filter;
+    if (m->s.linear_filter && m->has_sharp_filter)
+        m->s.sharp_filter = 0;
+}
+
+void launcher_model_cycle_scaling_filter(LauncherModel* m) {
+    if (!m || !m->has_sharp_filter) return;
+    if (m->s.sharp_filter) {
+        m->s.sharp_filter = 0;
+        m->s.linear_filter = 0;
+    } else if (m->s.linear_filter) {
+        m->s.linear_filter = 0;
+        m->s.sharp_filter = 1;
+    } else {
+        m->s.linear_filter = 1;
+    }
+}
+
+const char* launcher_model_scaling_filter_label(const LauncherModel* m) {
+    if (!m) return "Nearest";
+    if (m->s.sharp_filter) return "Sharp fractional";
+    if (m->s.linear_filter) return "Linear";
+    return "Nearest";
+}
+
+void launcher_model_toggle_affine_filter(LauncherModel* m) {
+    if (!m || !m->has_affine_filter) return;
+    m->s.affine_filter = !m->s.affine_filter;
 }
 
 void launcher_model_toggle_widescreen(LauncherModel* m) {
@@ -690,6 +736,20 @@ const char* launcher_model_view_mode_label(const LauncherModel* m) {
     if (m->adaptive_view_supported && m->s.adaptive_view) return "Adaptive";
     if (aspect_choice_count(m)) return launcher_model_aspect_label(m);
     return m->s.widescreen ? "16:9 fixed" : "Native";
+}
+
+void launcher_model_cycle_display_layout(LauncherModel* m) {
+    if (!m || !m->display_layout_labels || m->num_display_layouts <= 0) return;
+    m->s.display_layout =
+        (clampi(m->s.display_layout, 0, m->num_display_layouts - 1) + 1) %
+        m->num_display_layouts;
+}
+
+const char* launcher_model_display_layout_label(const LauncherModel* m) {
+    if (!m || !m->display_layout_labels || m->num_display_layouts <= 0)
+        return "Default";
+    return m->display_layout_labels[
+        clampi(m->s.display_layout, 0, m->num_display_layouts - 1)];
 }
 
 void launcher_model_ws_cells_delta(LauncherModel* m, int delta) {
@@ -1064,8 +1124,6 @@ static void lm_persist_setup_sidecars(LauncherModel* m) {
     const char* rom = (m && m->rom_full[0]) ? m->rom_full : NULL;
     const char* bios =
         (m && m->has_bios && m->s.bios_path[0]) ? m->s.bios_path : NULL;
-    const char* rom_name = "rom.cfg";
-    /* PSX hosts read disc.cfg; cart hosts read rom.cfg — write both names. */
     lm_write_sidecar_in_dir(NULL, "rom.cfg", rom);
     lm_write_sidecar_in_dir(NULL, "disc.cfg", rom);
     lm_write_sidecar_in_dir(NULL, "bios.cfg", bios);
@@ -1091,7 +1149,6 @@ static void lm_persist_setup_sidecars(LauncherModel* m) {
             }
         }
     }
-    (void)rom_name;
     if (m && m->persist_setup_cb)
         m->persist_setup_cb(m->persist_setup_ctx, rom ? rom : "",
                             bios ? bios : "");
@@ -1608,6 +1665,50 @@ void launcher_model_toggle_msu1(LauncherModel* m) {
 
 void launcher_model_set_msu1_dir(LauncherModel* m, const char* dir) {
     safe_copy(m->s.msu1_dir, sizeof(m->s.msu1_dir), dir ? dir : "");
+}
+
+// ---- cartridge light sensor --------------------------------------------------
+
+/* Trims surrounding whitespace; a code pasted with a stray space should still
+ * work. Case and existence are the host's business -- it owns the geocoder. */
+static void copy_trimmed(char* dst, size_t cap, const char* src) {
+    if (!dst || cap == 0) return;
+    if (!src) { dst[0] = '\0'; return; }
+    while (*src == ' ' || *src == '\t') ++src;
+    size_t n = strlen(src);
+    while (n > 0 && (src[n - 1] == ' ' || src[n - 1] == '\t')) --n;
+    if (n >= cap) n = cap - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
+void launcher_model_set_solar_zip(LauncherModel* m, const char* zip) {
+    if (!m->has_solar_sensor) return;    /* gated: no-op when unsupported */
+    copy_trimmed(m->s.solar_zip, sizeof(m->s.solar_zip), zip);
+}
+
+void launcher_model_set_solar_country(LauncherModel* m, const char* country) {
+    if (!m->has_solar_sensor) return;
+    copy_trimmed(m->s.solar_country, sizeof(m->s.solar_country), country);
+}
+
+void launcher_model_set_solar_source(LauncherModel* m, int source) {
+    if (!m->has_solar_sensor) return;
+    m->s.solar_source = (source != 0) ? 1 : 0;
+}
+
+void launcher_model_set_solar_manual_step(LauncherModel* m, int step) {
+    if (!m->has_solar_sensor) return;
+    if (step < 0) step = 0;
+    if (step > 8) step = 8;
+    m->s.solar_manual_step = step;
+}
+
+void launcher_model_set_solar_full_sun(LauncherModel* m, int wm2) {
+    if (!m->has_solar_sensor) return;
+    if (wm2 < 300)  wm2 = 300;
+    if (wm2 > 1200) wm2 = 1200;
+    m->s.solar_full_sun = wm2;
 }
 
 // ---- NES-style settings ------------------------------------------------------

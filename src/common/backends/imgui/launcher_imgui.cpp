@@ -1759,6 +1759,8 @@ bool any_deep_display(const LauncherModel* m) {
 bool video_card_grows(const LauncherModel* m) {
     if (any_deep_display(m)) return true;
     if (m->adaptive_view_supported) return true;
+    if (m->has_sharp_filter || m->has_affine_filter) return true;
+    if (m->num_display_layouts > 0) return true;
     // NES legacy-surface additions (Integer scaling row, HD texture pack block)
     // add extra rows the fixed no_scroll band wasn't sized for.
     if (m->has_integer_scale || m->hdpack_supported) return true;
@@ -1782,27 +1784,61 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
 
     if (!any_deep_display(m)) {
         // ---- legacy minimal surface (SNES/NES etc.) — aligned label grid -------
-        float cw = ImGui::CalcTextSize("Linear filtering").x;   // widest legacy label
+        float cw = ImGui::CalcTextSize("Linear filtering").x;
+        if (m->has_sharp_filter) {
+            float t = ImGui::CalcTextSize("Scaling filter").x;
+            if (t > cw) cw = t;
+        }
+        if (m->has_affine_filter) {
+            float t = ImGui::CalcTextSize("Affine background smoothing").x;
+            if (t > cw) cw = t;
+        }
         { float t = ImGui::CalcTextSize("View mode").x; if (t > cw) cw = t; }
         if (m->has_integer_scale) { float t = ImGui::CalcTextSize("Integer scaling").x; if (t > cw) cw = t; }
         cw += px(18.0f);
         row_label("Window scale", th, cw);
+        ImGui::PushID("window_scale");
         if (ImGui::Button(launcher_model_scale_label(m), ImVec2(px(120), px(30))))
             launcher_model_cycle_scale(m);
+        ImGui::PopID();
         // Universal fullscreen row (every console; tri-state cycle restoring
         // the legacy launcher's Off/Borderless/Exclusive vocabulary). Sits
         // right under Window scale, matching the old Display panel order.
         row_label("Fullscreen", th, cw);
+        ImGui::PushID("fullscreen");
         if (ImGui::Button(launcher_model_fullscreen_label(m), ImVec2(px(120), px(30))))
             launcher_model_cycle_fullscreen(m);
+        ImGui::PopID();
+        if (m->num_display_layouts > 0) {
+            row_label("Screen layout", th, cw);
+            ImGui::PushID("screen_layout");
+            if (ImGui::Button(launcher_model_display_layout_label(m),
+                              ImVec2(px(180), px(30))))
+                launcher_model_cycle_display_layout(m);
+            ImGui::PopID();
+        }
         if (m->has_integer_scale) {   // NES module: snap the image to integer multiples
             row_label("Integer scaling", th, cw);
             bool is = m->s.integer_scale != 0;
             if (ImGui::Checkbox("##intscale", &is)) launcher_model_toggle_integer_scale(m);
         }
-        row_label("Linear filtering", th, cw);
-        bool filter = m->s.linear_filter != 0;
-        if (ImGui::Checkbox("##filter", &filter)) launcher_model_toggle_filter(m);
+        if (m->has_sharp_filter) {
+            row_label("Scaling filter", th, cw);
+            if (ImGui::Button(launcher_model_scaling_filter_label(m),
+                              ImVec2(px(180), px(30))))
+                launcher_model_cycle_scaling_filter(m);
+        } else {
+            row_label("Linear filtering", th, cw);
+            bool filter = m->s.linear_filter != 0;
+            if (ImGui::Checkbox("##filter", &filter))
+                launcher_model_toggle_filter(m);
+        }
+        if (m->has_affine_filter) {
+            row_label("Affine background smoothing", th, cw);
+            bool affine = m->s.affine_filter != 0;
+            if (ImGui::Checkbox("##affine_filter", &affine))
+                launcher_model_toggle_affine_filter(m);
+        }
         if (m->aspect_mask || m->num_aspect_labels > 0 ||
             m->widescreen_supported || m->adaptive_view_supported) {
             row_label("View mode", th, cw);
@@ -1856,8 +1892,10 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
             launcher_model_cycle_window_size(m);
     } else {
         row_label("Window scale", th);
+        ImGui::PushID("window_scale");
         if (ImGui::Button(launcher_model_scale_label(m), ImVec2(px(120), px(30))))
             launcher_model_cycle_scale(m);
+        ImGui::PopID();
     }
 
     // NES module rows can appear on this branch too (has_renderer puts NES
@@ -1877,16 +1915,28 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
 
     if (m->has_supersampling) {
         row_label("Supersampling", th);
+        ImGui::PushID("supersampling");
         if (ImGui::Button(launcher_model_supersampling_label(m), ImVec2(px(90), px(30))))
             launcher_model_cycle_supersampling(m);
+        ImGui::PopID();
     }
 
     // Universal fullscreen row (every console — no longer gated on the
     // vestigial has_fullscreen_toggle). Tri-state cycle replaces the old
     // binary checkbox so Exclusive mode is reachable again.
     row_label("Fullscreen", th);
+    ImGui::PushID("fullscreen");
     if (ImGui::Button(launcher_model_fullscreen_label(m), ImVec2(px(120), px(30))))
         launcher_model_cycle_fullscreen(m);
+    ImGui::PopID();
+    if (m->num_display_layouts > 0) {
+        row_label("Screen layout", th);
+        ImGui::PushID("screen_layout");
+        if (ImGui::Button(launcher_model_display_layout_label(m),
+                          ImVec2(px(180), px(30))))
+            launcher_model_cycle_display_layout(m);
+        ImGui::PopID();
+    }
 
     if (m->aspect_mask || m->num_aspect_labels > 0 ||
         m->widescreen_supported || m->adaptive_view_supported) {
@@ -1897,7 +1947,12 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         experimental_tag(th);
     }
 
-    if (m->has_texture_filter) {
+    if (m->has_sharp_filter) {
+        row_label("Scaling filter", th);
+        if (ImGui::Button(launcher_model_scaling_filter_label(m),
+                          ImVec2(px(180), px(30))))
+            launcher_model_cycle_scaling_filter(m);
+    } else if (m->has_texture_filter) {
         row_label("Texture filtering", th);
         if (ImGui::Button(launcher_model_texture_filter_label(m), ImVec2(px(120), px(30))))
             launcher_model_toggle_texture_filter(m);
@@ -1909,8 +1964,17 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
 
     if (m->has_antialiasing) {
         row_label("Antialiasing", th);
+        ImGui::PushID("antialiasing");
         if (ImGui::Button(launcher_model_aa_label(m), ImVec2(px(90), px(30))))
             launcher_model_cycle_aa(m);
+        ImGui::PopID();
+    }
+
+    if (m->has_affine_filter) {
+        row_label("Affine background smoothing", th);
+        bool affine = m->s.affine_filter != 0;
+        if (ImGui::Checkbox("##affine_filter", &affine))
+            launcher_model_toggle_affine_filter(m);
     }
 
     if (m->has_screen_kind) {
@@ -2106,6 +2170,8 @@ int avail_system(const LauncherModel* m) { return m->has_bios; }
 void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
     eyebrow("SYSTEM");
     row_label("BIOS", th);
+    const SystemProfile* prof = (const SystemProfile*)m->profile;
+    const bool is_gba = prof && prof->id && std::strcmp(prof->id, "gba") == 0;
     // Empty means "use the BIOS this build ships with" — not "unset". Runtimes
     // that bundle a redistributable BIOS (PSX/OpenBIOS, GBA) boot straight from
     // it, so the row states that outcome instead of the old "(default)", which
@@ -2119,7 +2185,9 @@ void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
     const float gap      = has_pick ? px(th.spacing_sm) : 0.0f;
     float avail = ImGui::GetContentRegionAvail().x - bw - cw - gap - px(th.spacing_sm);
     if (avail < px(50)) avail = px(50);
-    const char* bp = has_pick ? m->s.bios_path : "Bundled BIOS";
+    const char* bp = has_pick ? m->s.bios_path
+                              : (is_gba ? "Retail GBA BIOS required"
+                                        : "Bundled BIOS");
     char elided[192]; elide_left(bp, avail, elided, sizeof(elided));
     ImGui::AlignTextToFramePadding();
     ImGui::TextColored(col(has_pick ? th.text : th.text_muted), "%s", elided);
@@ -2127,21 +2195,171 @@ void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
     if (ImGui::Button("Browse", ImVec2(bw, px(28)))) {
         char buf[512];
         static const char* kBiosPatterns[] = { "*.bin", "*.rom" };
-        if (launcher_pick_file("Select BIOS file", kBiosPatterns, 2,
+        if (launcher_pick_file(is_gba ? "Select Game Boy Advance BIOS (gba_bios.bin)"
+                                      : "Select BIOS file",
+                               kBiosPatterns, 2,
                                "BIOS image (.bin .rom)", buf, sizeof(buf)))
             launcher_model_set_bios_path(m, buf);
     }
     if (has_pick) {
         ImGui::SameLine(0.0f, gap);
         if (ImGui::Button("Clear", ImVec2(cw, px(28))))
-            launcher_model_set_bios_path(m, "");   // back to the bundled BIOS
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Stop using this BIOS and go back to the one "
-                              "included with this build.");
+            launcher_model_set_bios_path(m, "");
+        if (ImGui::IsItemHovered()) {
+            if (is_gba)
+                ImGui::SetTooltip("Remove this selection. A retail GBA BIOS "
+                                  "is required before the game can launch.");
+            else
+                ImGui::SetTooltip("Stop using this BIOS and go back to the one "
+                                  "included with this build.");
+        }
     }
 }
 void panel_system_draw(LauncherModel* m, const LauncherTheme* th) {
     if (begin_panel("system", 0)) draw_system_controls(m, *th);
+    end_panel();
+}
+
+// SOLAR SENSOR module: a few GBA cartridges carry a photodiode the game reads
+// as gameplay input (Boktai's Gun del Sol charges from real sunlight), so the
+// player has to be able to say WHERE that brightness is measured. Composed only
+// for a system whose profile lists "solar" AND a game that has the hardware.
+//
+// The postal code is edited behind an Edit/Save step, the same shape as the
+// password-save row, so a half-typed code never reaches the host mid-keystroke
+// and the row still shows the working value while editing is abandoned.
+int avail_solar(const LauncherModel* m) { return m->has_solar_sensor; }
+
+void draw_solar_controls(LauncherModel* m, const LauncherTheme& th) {
+    eyebrow("SOLAR SENSOR");
+
+    // Light source first: it decides whether the rest of the card is live.
+    row_label("Light source", th);
+    {
+        const bool manual = m->s.solar_source != 0;
+        const float bw = px(96);
+        ImGui::SameLine(ImGui::GetCursorPosX() +
+                        ImGui::GetContentRegionAvail().x - bw * 2 -
+                        px(th.spacing_sm));
+        if (ImGui::Button(manual ? "Live" : "Live ✓", ImVec2(bw, px(28))))
+            launcher_model_set_solar_source(m, 0);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Read the current sunlight where you are.");
+        ImGui::SameLine(0.0f, px(th.spacing_sm));
+        if (ImGui::Button(manual ? "Fixed ✓" : "Fixed", ImVec2(bw, px(28))))
+            launcher_model_set_solar_source(m, 1);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Hold a chosen level. Makes no network request.");
+    }
+
+    if (m->s.solar_source != 0) {
+        // Fixed level: the location rows below would be inert, so offer the
+        // level instead of greying out three rows the player cannot use.
+        ImGui::Dummy(ImVec2(0, px(4)));
+        row_label("Level", th);
+        int step = m->s.solar_manual_step;
+        const float sw = px(200);
+        ImGui::SameLine(ImGui::GetCursorPosX() +
+                        ImGui::GetContentRegionAvail().x - sw);
+        ImGui::SetNextItemWidth(sw);
+        if (ImGui::SliderInt("##solarlevel", &step, 0, 8, "%d / 8"))
+            launcher_model_set_solar_manual_step(m, step);
+        return;
+    }
+
+    ImGui::Dummy(ImVec2(0, px(4)));
+    row_label("Postal code", th);
+    {
+        static bool s_zip_editing = false;
+        static char s_zip_buf[16];
+        const float bw = px(78);
+        if (!s_zip_editing) {
+            ImGui::AlignTextToFramePadding();
+            const bool set = m->s.solar_zip[0] != 0;
+            ImGui::TextColored(col(set ? th.text : th.text_muted), "%s",
+                               set ? m->s.solar_zip : "(not set — sensor stays dark)");
+            ImGui::SameLine(ImGui::GetCursorPosX() +
+                            ImGui::GetContentRegionAvail().x - bw);
+            if (ImGui::Button("Edit", ImVec2(bw, px(28)))) {
+                snprintf(s_zip_buf, sizeof(s_zip_buf), "%s", m->s.solar_zip);
+                s_zip_editing = true;
+            }
+        } else {
+            float avail = ImGui::GetContentRegionAvail().x - bw * 2 -
+                          px(th.spacing_sm) * 2;
+            if (avail < px(80)) avail = px(80);
+            ImGui::SetNextItemWidth(avail);
+            const bool submitted =
+                ImGui::InputText("##solarzip", s_zip_buf, sizeof(s_zip_buf),
+                                 ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGui::SameLine(0, px(th.spacing_sm));
+            if (submitted || ImGui::Button("Save", ImVec2(bw, px(28)))) {
+                launcher_model_set_solar_zip(m, s_zip_buf);
+                s_zip_editing = false;
+            }
+            ImGui::SameLine(0, px(th.spacing_sm));
+            if (ImGui::Button("Cancel", ImVec2(bw, px(28))))
+                s_zip_editing = false;
+        }
+    }
+
+    ImGui::Dummy(ImVec2(0, px(4)));
+    row_label("Country", th);
+    {
+        static bool s_cc_editing = false;
+        static char s_cc_buf[8];
+        const float bw = px(78);
+        if (!s_cc_editing) {
+            ImGui::AlignTextToFramePadding();
+            const bool set = m->s.solar_country[0] != 0;
+            ImGui::TextColored(col(set ? th.text : th.text_muted), "%s",
+                               set ? m->s.solar_country : "us");
+            ImGui::SameLine(ImGui::GetCursorPosX() +
+                            ImGui::GetContentRegionAvail().x - bw);
+            if (ImGui::Button("Edit##cc", ImVec2(bw, px(28)))) {
+                snprintf(s_cc_buf, sizeof(s_cc_buf), "%s", m->s.solar_country);
+                s_cc_editing = true;
+            }
+        } else {
+            float avail = ImGui::GetContentRegionAvail().x - bw * 2 -
+                          px(th.spacing_sm) * 2;
+            if (avail < px(60)) avail = px(60);
+            ImGui::SetNextItemWidth(avail);
+            const bool submitted =
+                ImGui::InputText("##solarcc", s_cc_buf, sizeof(s_cc_buf),
+                                 ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGui::SameLine(0, px(th.spacing_sm));
+            if (submitted || ImGui::Button("Save##cc", ImVec2(bw, px(28)))) {
+                launcher_model_set_solar_country(m, s_cc_buf);
+                s_cc_editing = false;
+            }
+            ImGui::SameLine(0, px(th.spacing_sm));
+            if (ImGui::Button("Cancel##cc", ImVec2(bw, px(28))))
+                s_cc_editing = false;
+        }
+    }
+
+    ImGui::Dummy(ImVec2(0, px(4)));
+    row_label("Full sun", th);
+    {
+        // Clear-sky midday is ~900 W/m^2 at mid latitudes but far less in
+        // winter or at high latitude, where leaving this at 900 would mean the
+        // gauge could never fill on a genuinely sunny day.
+        int wm2 = m->s.solar_full_sun > 0 ? m->s.solar_full_sun : 900;
+        const float sw = px(200);
+        ImGui::SameLine(ImGui::GetCursorPosX() +
+                        ImGui::GetContentRegionAvail().x - sw);
+        ImGui::SetNextItemWidth(sw);
+        if (ImGui::SliderInt("##solarfullsun", &wm2, 300, 1200, "%d W/m²"))
+            launcher_model_set_solar_full_sun(m, wm2);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Irradiance that reads as a full gauge. Lower it "
+                              "in winter or at high latitude.");
+    }
+}
+
+void panel_solar_draw(LauncherModel* m, const LauncherTheme* th) {
+    if (begin_panel("solar", 0)) draw_solar_controls(m, *th);
     end_panel();
 }
 
@@ -2153,7 +2371,11 @@ void panel_system_draw(LauncherModel* m, const LauncherTheme* th) {
 void draw_hotkeys_controls(LauncherModel* m, const LauncherTheme& th) {
     eyebrow("HOTKEYS");
     const SystemProfile* prof = (const SystemProfile*)m->profile;
-    const uint32_t mask = prof ? prof->hotkeys_mask : LNG_HOTKEYS_ALL;
+    uint32_t mask = prof ? prof->hotkeys_mask : LNG_HOTKEYS_ALL;
+    // Solar controls are a per-cartridge capability, not part of the GBA-wide
+    // catalog. They remain absent for every existing game and have no default
+    // binding when the capability is enabled.
+    if (m->has_solar_sensor) mask |= LNG_HOTKEYS_SOLAR;
     // Same responsive grid treatment as the bindings list.
     const float cell_w = px(280.0f);
     int cols = (int)(ImGui::GetContentRegionAvail().x / cell_w);
@@ -2387,18 +2609,21 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
             // is still Keyboard, preview the first connected gyro-capable pad
             // so motion can be verified before changing the source dropdown.
             const LauncherPad* motion_pad = nullptr;
-            if (m->s.player_src[p] == 2 && m->player_pad_id[p]) {
-                for (int i = 0; i < g_pad_count; ++i)
-                    if (g_pads[i].id == m->player_pad_id[p]) {
+            if (m->s.player_src[p] == 2) {
+                for (int i = 0; i < g_pad_count; ++i) {
+                    const bool id_match =
+                        m->player_pad_id[p] &&
+                        g_pads[i].id == m->player_pad_id[p];
+                    const bool guid_match =
+                        m->s.player_gamepad_guid[p][0] &&
+                        g_pads[i].guid[0] &&
+                        std::strcmp(m->s.player_gamepad_guid[p],
+                                    g_pads[i].guid) == 0;
+                    if (id_match || guid_match) {
                         motion_pad = &g_pads[i];
                         break;
                     }
-            } else {
-                for (int i = 0; i < g_pad_count; ++i)
-                    if (g_pads[i].has_gyro) {
-                        motion_pad = &g_pads[i];
-                        break;
-                    }
+                }
             }
 
             const float rate = motion_pad && motion_pad->has_gyro
@@ -3618,7 +3843,8 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                 ImGui::TextColored(col(th.text_muted), "Waiting");
             ImGui::TableSetColumnIndex(4);
             table_row_vcenter(member_row_h, text_h);
-            if (occupied[slot] && !slots[slot].is_host &&
+            /* RTT to that seat from local peer — never on the local row. */
+            if (occupied[slot] && !slots[slot].is_local &&
                 slots[slot].latency_ms >= 0) {
                 ImGui::Text("%d ms", slots[slot].latency_ms);
             } else {
@@ -3769,7 +3995,7 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                         RecompLauncherCNetplayMember mem{};
                         if (!np->member_get || !np->member_get(np->ctx, mi, &mem))
                             continue;
-                        if (mem.is_host) continue;
+                        if (mem.is_local) continue;
                         if (mem.latency_ms > max_rtt) max_rtt = mem.latency_ms;
                     }
                     const int delay = np_delay_frames_from_rtt_ms(max_rtt);
@@ -4788,6 +5014,7 @@ const LauncherPanel kPanelRegistry[] = {
     { "video",             LNG_VIEW_SETTINGS,   LNG_SLOT_MAIN, nullptr,      panel_video_draw },
     { "audio",             LNG_VIEW_SETTINGS,   LNG_SLOT_SIDE, nullptr,      panel_audio_draw },
     { "system",            LNG_VIEW_SETTINGS,   LNG_SLOT_SIDE, avail_system, panel_system_draw },
+    { "solar",             LNG_VIEW_SETTINGS,   LNG_SLOT_SIDE, avail_solar,  panel_solar_draw },
     { "hotkeys",           LNG_VIEW_SETTINGS,   LNG_SLOT_WIDE, nullptr,      panel_hotkeys_draw },
     { "controller_config", LNG_VIEW_CONTROLLER, LNG_SLOT_WIDE, nullptr,      panel_controller_config_draw },
     { nullptr,              LNG_VIEW_DASHBOARD,  0,             nullptr,      nullptr },   // sentinel
@@ -4952,7 +5179,8 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
     (void)win;
 }
 
-/* Setup-wizard platform copy (PSX / GBA / SNES). Keyed off GameInfo.platform. */
+/* Compact progress-only modal while a setup job runs — closes the full
+ * first-run form so nothing else is interactive. */
 enum SetupPlatKind {
     SETUP_PLAT_GENERIC = 0,
     SETUP_PLAT_PSX,
