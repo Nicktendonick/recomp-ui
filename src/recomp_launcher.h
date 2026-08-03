@@ -61,8 +61,10 @@ typedef struct RecompLauncherCNetplayMember {
     char display_name[64];
     int  ready;
     int  is_host;
-    /* Round-trip ms to the lobby host; -1 when unknown or this row is host. */
+    /* Round-trip ms from the local peer *to* this seat; -1 unknown / self. */
     int  latency_ms;
+    /* 1 when this row is the local client's seat (never show self-RTT). */
+    int  is_local;
 } RecompLauncherCNetplayMember;
 
 typedef struct RecompLauncherCNetplayLaunch {
@@ -478,6 +480,11 @@ typedef struct RecompLauncherCBiosVerify {
     char detail[160];  // short status for the UI
 } RecompLauncherCBiosVerify;
 
+/* Optional progress callback for prepare_with_progress (worker thread).
+ * pct is 0..1 when known; negative means indeterminate. message may be NULL. */
+typedef void (*RecompLauncherCPrepareProgressFn)(void* ctx, float pct,
+                                                 const char* message);
+
 typedef struct RecompLauncherCMemcard {
     int           valid;          // 128 KB + "MC" magic present
     int           used_blocks;    // 0..15
@@ -738,6 +745,8 @@ typedef struct RecompLauncherCGameInfo {
      * discovery, sensor selection, and axis mapping remain host-owned. */
     int has_gyro_controls;
 
+<<<<<<< HEAD
+=======
     /* Add independent checkboxes to Display settings. The host maps their
      * committed Settings values onto renderer configuration. */
     int has_sharp_filter;
@@ -749,17 +758,83 @@ typedef struct RecompLauncherCGameInfo {
      * NULL/0 keeps every existing single-display launcher unchanged. */
     const char* const* display_layout_labels;
     int num_display_layouts;
+
+>>>>>>> 7835628ba4ba92d253e228438527507a409bd365
+    /* ---- prepare job UX (appended; disc convert / local codegen) ---------
+     * prepare_use_selected_rom: 1 = the prepare button uses the already-
+     * picked ROM/disc (no second file picker). Cart codegen hosts use this.
+     * prepare_section_title / prepare_busy_status / prepare_success_status
+     * override the default "Convert raw dump…" copy when non-NULL.
+     *
+     * prepare_with_progress: when non-NULL, preferred over prepare_disc.
+     * Same success contract (return 1 + out_path); may invoke on_progress
+     * from the worker thread. Zero-init leaves legacy prepare_disc behavior. */
+    int prepare_use_selected_rom;
+    const char* prepare_section_title;
+    const char* prepare_busy_status;
+    const char* prepare_success_status;
+    int (*prepare_with_progress)(const char* source_path,
+                                 char* out_path, size_t out_cap,
+                                 char* err_msg, size_t err_cap,
+                                 RecompLauncherCPrepareProgressFn on_progress,
+                                 void* progress_ctx);
+
+    /* ---- rebuild + relaunch after prepare (local codegen hosts) ----------
+     * rebuild_with_progress: compile the project after sources are generated.
+     * Return 1 and write the new/updated executable path into out_exe_path.
+     * rebuild_after_prepare: when 1 and rebuild_with_progress is set, the
+     * setup wizard auto-starts rebuild after a successful prepare.
+     * relaunch_after_rebuild: when 1, a successful rebuild makes
+     * recomp_launcher_run_window return RECOMP_LAUNCHER_RESULT_RELAUNCH (3);
+     * call recomp_launcher_relaunch_exe() for the path to exec. */
+    int (*rebuild_with_progress)(const char* rom_path,
+                                 char* out_exe_path, size_t out_cap,
+                                 char* err_msg, size_t err_cap,
+                                 RecompLauncherCPrepareProgressFn on_progress,
+                                 void* progress_ctx);
+    int rebuild_after_prepare;
+    int relaunch_after_rebuild;
+    const char* rebuild_busy_status;     /* NULL => "Building game…" */
+    const char* rebuild_success_status;  /* NULL => "Build complete." */
+
+    /* When 1, the setup modal hides "Continue to launcher" and requires
+     * prepare (and rebuild when rebuild_after_prepare is set). Local codegen
+     * first-run: Generate & rebuild, then relaunch — Quit is the only other exit. */
+    int prepare_required_before_continue;
+
+    /* ---- portable toolchain step (appended; local codegen hosts) ----------
+     * When setup_needs_toolchain is 1, the first-run wizard shows a page to
+     * download cmake-clang-v1 or pick an offline zip before BIOS/ROM/generate.
+     * toolchain_is_ready: optional quick check (non-NULL + returns 1 => skip
+     * page 0). ensure_toolchain_with_progress: download (download!=0) or install
+     * from zip_path (non-empty); download==0 and empty zip = resolve cache only. */
+    int setup_needs_toolchain;
+    int (*toolchain_is_ready)(void);
+    int (*ensure_toolchain_with_progress)(
+        int download, const char* zip_path, char* err_msg, size_t err_cap,
+        RecompLauncherCPrepareProgressFn on_progress, void* progress_ctx);
 } RecompLauncherCGameInfo;
+
+/* recomp_launcher_run_window return codes */
+#define RECOMP_LAUNCHER_RESULT_LAUNCH       0
+#define RECOMP_LAUNCHER_RESULT_QUIT         1
+#define RECOMP_LAUNCHER_RESULT_UNAVAILABLE  2
+#define RECOMP_LAUNCHER_RESULT_RELAUNCH     3
 
 // Returns: 0 = LAUNCH (boot out_rom_path with the edited *io),
 //          1 = QUIT (caller should exit),
-//          2 = UNAVAILABLE (assets/GL failed — caller boots as if skipped).
+//          2 = UNAVAILABLE (assets/GL failed — caller boots as if skipped),
+//          3 = RELAUNCH (host should exec recomp_launcher_relaunch_exe()).
 int recomp_launcher_run_window(const char* window_title,
                              RecompLauncherCSettings* io,
                              const RecompLauncherCGameInfo* game,
                              const char* assets_dir,
                              const char* initial_rom,
                              char* out_rom_path, size_t out_rom_path_len);
+
+/* Valid after run_window returns RECOMP_LAUNCHER_RESULT_RELAUNCH. Copies the
+ * executable path produced by rebuild_with_progress. Returns 1 on success. */
+int recomp_launcher_relaunch_exe(char* out, size_t out_cap);
 
 /* When preserve != 0, the launcher tears down its window/GL context but does
  * NOT call SDL_Quit(), so an in-process host can keep SDL subsystems across

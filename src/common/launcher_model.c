@@ -20,6 +20,10 @@
 #  include <windows.h>
 #else
 #  include <pthread.h>
+#  include <unistd.h>
+#if defined(__APPLE__)
+#  include <mach-o/dyld.h>
+#endif
 #endif
 
 // 32040 = the SNES S-DSP's native output rate; kept reachable in the cycle so
@@ -131,9 +135,27 @@ void launcher_model_init(LauncherModel* m,
         m->disc_verify_cb       = game->disc_verify;      // real disc verdict (PSX), or NULL
         m->memcard_inspect_cb   = game->memcard_inspect;  // real memcard summary (PSX), or NULL
         m->bios_verify_cb       = game->bios_verify;
+        m->persist_setup_cb     = game->persist_setup;
+        m->persist_setup_ctx    = game->persist_setup_ctx;
         m->prepare_disc_cb      = game->prepare_disc;
+        m->prepare_with_progress_cb = game->prepare_with_progress;
+        m->rebuild_with_progress_cb = game->rebuild_with_progress;
         m->prepare_disc_label   = game->prepare_disc_label;
         m->prepare_disc_note    = game->prepare_disc_note;
+        m->prepare_section_title = game->prepare_section_title;
+        m->prepare_busy_status  = game->prepare_busy_status;
+        m->prepare_success_status = game->prepare_success_status;
+        m->rebuild_busy_status  = game->rebuild_busy_status;
+        m->rebuild_success_status = game->rebuild_success_status;
+        m->prepare_use_selected_rom = game->prepare_use_selected_rom != 0;
+        m->rebuild_after_prepare = game->rebuild_after_prepare != 0;
+        m->relaunch_after_rebuild = game->relaunch_after_rebuild != 0;
+        m->prepare_required_before_continue =
+            game->prepare_required_before_continue != 0;
+        m->setup_needs_toolchain = game->setup_needs_toolchain != 0;
+        m->toolchain_is_ready_cb = game->toolchain_is_ready;
+        m->ensure_toolchain_with_progress_cb =
+            game->ensure_toolchain_with_progress;
         m->boxart_path          = game->boxart_path;      // NULL => default boxart.tga
         m->aspect_labels        = game->aspect_labels;    // NULL => built-in 4:3/16:9/21:9
         m->num_aspect_labels    = game->num_aspect_labels;
@@ -370,10 +392,23 @@ void launcher_model_init(LauncherModel* m,
     m->action    = LNG_ACTION_NONE;
     m->cfg_player = 0;
     m->setup_wizard_open = false;
+    m->setup_page = 1;
+    m->setup_tc_auto = true;
+    m->setup_tc_ready = false;
+    m->setup_tc_zip[0] = '\0';
     m->setup_preparing = false;
     m->setup_prepare_pulse = 0.0f;
+    m->setup_prepare_fraction = -1.0f;
+    m->setup_progress_title[0] = '\0';
     m->setup_status[0] = '\0';
     m->setup_error[0] = '\0';
+    m->setup_prepare_satisfied = false;
+    m->relaunch_exe[0] = '\0';
+    if (!game || !game->setup_needs_toolchain) {
+        m->setup_needs_toolchain = false;
+        m->toolchain_is_ready_cb = NULL;
+        m->ensure_toolchain_with_progress_cb = NULL;
+    }
     launcher_model_refresh_bios_status(m);
 
     /* Soft-return from a match: land on Netplay with the room modal open. */
@@ -398,6 +433,20 @@ void launcher_model_init(LauncherModel* m,
         const int missing_bios = m->has_bios && !m->setup_bios_ok;
         if (force || missing_rom || missing_bios)
             m->setup_wizard_open = true;
+    }
+
+    /* Toolchain page first for local codegen hosts unless already usable. */
+    if (m->setup_wizard_open && m->setup_needs_toolchain) {
+        if (m->toolchain_is_ready_cb && m->toolchain_is_ready_cb()) {
+            m->setup_tc_ready = true;
+            m->setup_page = 1;
+        } else {
+            m->setup_tc_ready = false;
+            m->setup_page = 0;
+        }
+    } else {
+        m->setup_page = 1;
+        m->setup_tc_ready = !m->setup_needs_toolchain;
     }
 
     // Placeholder display until launcher_binds_load() fills real values from
@@ -999,18 +1048,128 @@ void launcher_model_refresh_bios_status(LauncherModel* m) {
     safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail), bv.detail);
 }
 
+/* Write/clear a one-line sidecar in dir (dir may be NULL => cwd "."). */
+static void lm_write_sidecar_in_dir(const char* dir, const char* name,
+                                    const char* value) {
+    char path[1100];
+    if (!name || !name[0]) return;
+    if (dir && dir[0]) {
+        size_t n = strlen(dir);
+        int need = (n > 0 && dir[n - 1] != '/' && dir[n - 1] != '\\');
+        if ((size_t)snprintf(path, sizeof(path), "%s%s%s", dir, need ? "/" : "",
+                             name) >= sizeof(path))
+            return;
+    } else {
+        if ((size_t)snprintf(path, sizeof(path), "%s", name) >= sizeof(path))
+            return;
+    }
+    if (!value || !value[0]) {
+        remove(path);
+        return;
+    }
+    FILE* f = fopen(path, "w");
+    if (!f) return;
+    fprintf(f, "%s\n", value);
+    fclose(f);
+}
+
+static int lm_running_exe_dir(char* out, size_t cap) {
+    if (!out || cap < 2) return 0;
+    out[0] = '\0';
+#if defined(_WIN32)
+    {
+        char mod[MAX_PATH];
+        DWORD n = GetModuleFileNameA(NULL, mod, MAX_PATH);
+        char* slash;
+        if (n == 0 || n >= MAX_PATH) return 0;
+        slash = strrchr(mod, '\\');
+        if (!slash) slash = strrchr(mod, '/');
+        if (!slash) return 0;
+        *slash = '\0';
+        if ((size_t)snprintf(out, cap, "%s", mod) >= cap) return 0;
+        return 1;
+    }
+#elif defined(__APPLE__)
+    {
+        char mod[1024];
+        uint32_t n = (uint32_t)sizeof(mod);
+        char* slash;
+        if (_NSGetExecutablePath(mod, &n) != 0) return 0;
+        slash = strrchr(mod, '/');
+        if (!slash) return 0;
+        *slash = '\0';
+        if ((size_t)snprintf(out, cap, "%s", mod) >= cap) return 0;
+        return 1;
+    }
+#else
+    {
+        char mod[1024];
+        ssize_t n = readlink("/proc/self/exe", mod, sizeof(mod) - 1);
+        char* slash;
+        if (n <= 0) return 0;
+        mod[n] = '\0';
+        slash = strrchr(mod, '/');
+        if (!slash) return 0;
+        *slash = '\0';
+        if ((size_t)snprintf(out, cap, "%s", mod) >= cap) return 0;
+        return 1;
+    }
+#endif
+}
+
+/* Persist ROM/BIOS picks where codegen hosts and the relaunched exe look:
+ * cwd, running-exe dir, and (when known) the rebuild output dir. */
+static void lm_persist_setup_sidecars(LauncherModel* m) {
+    char exe_dir[1024];
+    const char* rom = (m && m->rom_full[0]) ? m->rom_full : NULL;
+    const char* bios =
+        (m && m->has_bios && m->s.bios_path[0]) ? m->s.bios_path : NULL;
+    lm_write_sidecar_in_dir(NULL, "rom.cfg", rom);
+    lm_write_sidecar_in_dir(NULL, "disc.cfg", rom);
+    lm_write_sidecar_in_dir(NULL, "bios.cfg", bios);
+    if (lm_running_exe_dir(exe_dir, sizeof(exe_dir))) {
+        lm_write_sidecar_in_dir(exe_dir, "rom.cfg", rom);
+        lm_write_sidecar_in_dir(exe_dir, "disc.cfg", rom);
+        lm_write_sidecar_in_dir(exe_dir, "bios.cfg", bios);
+    }
+    if (m && m->relaunch_exe[0]) {
+        char rdir[1024];
+        char* slash = strrchr(m->relaunch_exe, '/');
+        char* bslash = strrchr(m->relaunch_exe, '\\');
+        char* cut = slash;
+        if (bslash && (!cut || bslash > cut)) cut = bslash;
+        if (cut && cut > m->relaunch_exe) {
+            size_t n = (size_t)(cut - m->relaunch_exe);
+            if (n < sizeof(rdir)) {
+                memcpy(rdir, m->relaunch_exe, n);
+                rdir[n] = '\0';
+                lm_write_sidecar_in_dir(rdir, "rom.cfg", rom);
+                lm_write_sidecar_in_dir(rdir, "disc.cfg", rom);
+                lm_write_sidecar_in_dir(rdir, "bios.cfg", bios);
+            }
+        }
+    }
+    if (m && m->persist_setup_cb)
+        m->persist_setup_cb(m->persist_setup_ctx, rom ? rom : "",
+                            bios ? bios : "");
+}
+
 void launcher_model_set_bios_path(LauncherModel* m, const char* path) {
     safe_copy(m->s.bios_path, sizeof(m->s.bios_path), path ? path : "");
     launcher_model_refresh_bios_status(m);
+    lm_persist_setup_sidecars(m);
 }
 
 bool launcher_model_can_finish_setup(const LauncherModel* m) {
     if (!m) return false;
     if (m->setup_preparing) return false;
     /* Path selected is enough to leave the wizard (settings stay in the model).
-     * PLAY still requires a readable, fingerprinted image via can_launch. */
+     * PLAY still requires a readable, fingerprinted image via can_launch.
+     * Codegen hosts may also require a successful prepare/rebuild. */
     if (!m->rom_present || !m->rom_full[0]) return false;
     if (m->has_bios && !m->setup_bios_ok) return false;
+    if (m->prepare_required_before_continue && !m->setup_prepare_satisfied)
+        return false;
     return true;
 }
 
@@ -1037,17 +1196,83 @@ void launcher_model_finish_setup(LauncherModel* m) {
     m->setup_error[0] = '\0';
 }
 
-/* ---- prepare_disc background job (file-scope; one at a time) ---- */
+/* ---- prepare / rebuild / toolchain background job (one at a time) ---- */
+enum {
+    PREP_JOB_PREPARE = 0,
+    PREP_JOB_REBUILD = 1,
+    PREP_JOB_TOOLCHAIN = 2
+};
+
 typedef struct {
     LauncherModel* m;
     char source[512];
     char out_path[512];
     char err[256];
-    int  result;     /* 0 fail, 1 ok */
+    char progress_msg[256];
+    char zip_path[512];
+    float progress_pct; /* <0 indeterminate; else 0..1 */
+    int  kind;          /* PREP_JOB_* */
+    int  download;      /* toolchain: non-zero => allow network fetch */
+    int  result;        /* 0 fail, 1 ok */
     volatile int done;
+    volatile int progress_dirty;
 } PrepJob;
 
 static PrepJob g_prep_job;
+
+#if defined(_WIN32)
+static CRITICAL_SECTION g_prep_lock;
+static int g_prep_lock_ready = 0;
+static void prep_lock_init(void) {
+    if (!g_prep_lock_ready) { InitializeCriticalSection(&g_prep_lock); g_prep_lock_ready = 1; }
+}
+static void prep_lock(void) { prep_lock_init(); EnterCriticalSection(&g_prep_lock); }
+static void prep_unlock(void) { LeaveCriticalSection(&g_prep_lock); }
+#else
+static pthread_mutex_t g_prep_lock = PTHREAD_MUTEX_INITIALIZER;
+static void prep_lock(void) { pthread_mutex_lock(&g_prep_lock); }
+static void prep_unlock(void) { pthread_mutex_unlock(&g_prep_lock); }
+#endif
+
+static void prep_progress_cb(void* ctx, float pct, const char* message) {
+    PrepJob* j = (PrepJob*)ctx;
+    if (!j) return;
+    prep_lock();
+    j->progress_pct = pct;
+    if (message && message[0])
+        safe_copy(j->progress_msg, sizeof(j->progress_msg), message);
+    j->progress_dirty = 1;
+    prep_unlock();
+}
+
+#if defined(_WIN32)
+static DWORD WINAPI prep_thread_main(LPVOID arg);
+#else
+static void* prep_thread_main(void* arg);
+#endif
+
+static int prep_spawn_thread(LauncherModel* m) {
+#if defined(_WIN32)
+    HANDLE th = CreateThread(NULL, 0, prep_thread_main, &g_prep_job, 0, NULL);
+    if (!th) {
+        m->setup_preparing = false;
+        safe_copy(m->setup_error, sizeof(m->setup_error), "Failed to start prepare thread.");
+        m->setup_status[0] = '\0';
+        return 0;
+    }
+    CloseHandle(th);
+#else
+    pthread_t th;
+    if (pthread_create(&th, NULL, prep_thread_main, &g_prep_job) != 0) {
+        m->setup_preparing = false;
+        safe_copy(m->setup_error, sizeof(m->setup_error), "Failed to start prepare thread.");
+        m->setup_status[0] = '\0';
+        return 0;
+    }
+    pthread_detach(th);
+#endif
+    return 1;
+}
 
 #if defined(_WIN32)
 static DWORD WINAPI prep_thread_main(LPVOID arg) {
@@ -1058,11 +1283,39 @@ static void* prep_thread_main(void* arg) {
     j->out_path[0] = '\0';
     j->err[0] = '\0';
     j->result = 0;
-    if (j->m && j->m->prepare_disc_cb) {
+    if (j->kind == PREP_JOB_TOOLCHAIN) {
+        if (j->m && j->m->ensure_toolchain_with_progress_cb) {
+            j->result = j->m->ensure_toolchain_with_progress_cb(
+                            j->download,
+                            j->zip_path[0] ? j->zip_path : NULL,
+                            j->err, sizeof(j->err),
+                            prep_progress_cb, j)
+                            ? 1
+                            : 0;
+            if (j->result)
+                safe_copy(j->out_path, sizeof(j->out_path), "ok");
+        } else {
+            safe_copy(j->err, sizeof(j->err), "No toolchain ensure callback.");
+        }
+    } else if (j->kind == PREP_JOB_REBUILD) {
+        if (j->m && j->m->rebuild_with_progress_cb) {
+            j->result = j->m->rebuild_with_progress_cb(
+                            j->source, j->out_path, sizeof(j->out_path),
+                            j->err, sizeof(j->err),
+                            prep_progress_cb, j) ? 1 : 0;
+        } else {
+            safe_copy(j->err, sizeof(j->err), "No rebuild callback.");
+        }
+    } else if (j->m && j->m->prepare_with_progress_cb) {
+        j->result = j->m->prepare_with_progress_cb(
+                        j->source, j->out_path, sizeof(j->out_path),
+                        j->err, sizeof(j->err),
+                        prep_progress_cb, j) ? 1 : 0;
+    } else if (j->m && j->m->prepare_disc_cb) {
         j->result = j->m->prepare_disc_cb(j->source, j->out_path, sizeof(j->out_path),
                                           j->err, sizeof(j->err)) ? 1 : 0;
     } else {
-        safe_copy(j->err, sizeof(j->err), "No prepare_disc callback.");
+        safe_copy(j->err, sizeof(j->err), "No prepare callback.");
     }
     j->done = 1;
 #if defined(_WIN32)
@@ -1072,53 +1325,205 @@ static void* prep_thread_main(void* arg) {
 #endif
 }
 
-void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path) {
-    if (!m || !m->prepare_disc_cb || m->setup_preparing) return;
-    if (!source_path || !source_path[0]) return;
+static void launcher_model_begin_rebuild_locked(LauncherModel* m) {
+    /* Caller has already cleared setup_preparing from a completed prepare. */
     memset(&g_prep_job, 0, sizeof(g_prep_job));
     g_prep_job.m = m;
+    g_prep_job.kind = PREP_JOB_REBUILD;
+    g_prep_job.progress_pct = -1.0f;
+    safe_copy(g_prep_job.source, sizeof(g_prep_job.source), m->rom_full);
+    m->setup_preparing = true;
+    m->setup_prepare_pulse = 0.0f;
+    m->setup_prepare_fraction = -1.0f;
+    m->setup_error[0] = '\0';
+    safe_copy(m->setup_status, sizeof(m->setup_status),
+              (m->rebuild_busy_status && m->rebuild_busy_status[0])
+                  ? m->rebuild_busy_status
+                  : "Building game…");
+    if (!prep_spawn_thread(m))
+        return;
+}
+
+void launcher_model_start_rebuild(LauncherModel* m) {
+    if (!m || m->setup_preparing || !m->rebuild_with_progress_cb) return;
+    if (!m->rom_full[0]) {
+        safe_copy(m->setup_error, sizeof(m->setup_error), "Select a ROM before rebuilding.");
+        return;
+    }
+    m->setup_progress_title[0] = '\0';
+    launcher_model_begin_rebuild_locked(m);
+}
+
+bool launcher_model_can_advance_toolchain(const LauncherModel* m) {
+    if (!m || !m->setup_needs_toolchain) return true;
+    if (m->setup_tc_ready) return true;
+    if (m->setup_preparing) return false;
+    if (m->setup_tc_auto) return true;
+    return m->setup_tc_zip[0] != '\0';
+}
+
+void launcher_model_start_ensure_toolchain(LauncherModel* m) {
+    if (!m || m->setup_preparing) return;
+    if (!m->setup_needs_toolchain) {
+        m->setup_tc_ready = true;
+        m->setup_page = 1;
+        return;
+    }
+    if (m->setup_tc_ready ||
+        (m->toolchain_is_ready_cb && m->toolchain_is_ready_cb())) {
+        m->setup_tc_ready = true;
+        m->setup_page = 1;
+        m->setup_error[0] = '\0';
+        safe_copy(m->setup_status, sizeof(m->setup_status),
+                  "Using existing portable toolchain.");
+        return;
+    }
+    if (!m->ensure_toolchain_with_progress_cb) {
+        safe_copy(m->setup_error, sizeof(m->setup_error),
+                  "Toolchain install is not available in this build.");
+        return;
+    }
+    if (!launcher_model_can_advance_toolchain(m)) {
+        safe_copy(m->setup_error, sizeof(m->setup_error),
+                  "Select a cmake-clang-v1 toolchain zip, or enable automatic download.");
+        return;
+    }
+    memset(&g_prep_job, 0, sizeof(g_prep_job));
+    g_prep_job.m = m;
+    g_prep_job.kind = PREP_JOB_TOOLCHAIN;
+    g_prep_job.progress_pct = -1.0f;
+    g_prep_job.download = m->setup_tc_auto ? 1 : 0;
+    if (!m->setup_tc_auto && m->setup_tc_zip[0])
+        safe_copy(g_prep_job.zip_path, sizeof(g_prep_job.zip_path), m->setup_tc_zip);
+    m->setup_preparing = true;
+    m->setup_prepare_pulse = 0.0f;
+    m->setup_prepare_fraction = -1.0f;
+    m->setup_error[0] = '\0';
+    safe_copy(m->setup_progress_title, sizeof(m->setup_progress_title),
+              "Installing build tools…");
+    safe_copy(m->setup_status, sizeof(m->setup_status),
+              m->setup_tc_auto ? "Downloading portable cmake/clang…"
+                               : "Installing toolchain from zip…");
+    prep_spawn_thread(m);
+}
+
+void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path) {
+    if (!m || m->setup_preparing) return;
+    if (!m->prepare_with_progress_cb && !m->prepare_disc_cb) return;
+    if (!source_path || !source_path[0]) return;
+    /* Persist ROM/BIOS for codegen hosts (project root + exe dirs + cwd). */
+    if (source_path && source_path[0] &&
+        (!m->rom_full[0] || strcmp(m->rom_full, source_path) != 0))
+        launcher_model_set_rom(m, source_path);
+    lm_persist_setup_sidecars(m);
+    memset(&g_prep_job, 0, sizeof(g_prep_job));
+    g_prep_job.m = m;
+    g_prep_job.kind = PREP_JOB_PREPARE;
+    g_prep_job.progress_pct = -1.0f;
     safe_copy(g_prep_job.source, sizeof(g_prep_job.source), source_path);
     m->setup_preparing = true;
     m->setup_prepare_pulse = 0.0f;
+    m->setup_prepare_fraction = -1.0f;
     m->setup_error[0] = '\0';
-    safe_copy(m->setup_status, sizeof(m->setup_status), "Preparing disc image…");
-#if defined(_WIN32)
-    HANDLE th = CreateThread(NULL, 0, prep_thread_main, &g_prep_job, 0, NULL);
-    if (!th) {
-        m->setup_preparing = false;
-        safe_copy(m->setup_error, sizeof(m->setup_error), "Failed to start prepare thread.");
-        m->setup_status[0] = '\0';
-        return;
-    }
-    CloseHandle(th);
-#else
-    pthread_t th;
-    if (pthread_create(&th, NULL, prep_thread_main, &g_prep_job) != 0) {
-        m->setup_preparing = false;
-        safe_copy(m->setup_error, sizeof(m->setup_error), "Failed to start prepare thread.");
-        m->setup_status[0] = '\0';
-        return;
-    }
-    pthread_detach(th);
-#endif
+    m->setup_progress_title[0] = '\0';
+    safe_copy(m->setup_status, sizeof(m->setup_status),
+              (m->prepare_busy_status && m->prepare_busy_status[0])
+                  ? m->prepare_busy_status
+                  : "Preparing disc image…");
+    prep_spawn_thread(m);
 }
 
 void launcher_model_poll_prepare_disc(LauncherModel* m) {
     if (!m || !m->setup_preparing) return;
     m->setup_prepare_pulse += 0.02f;
     if (m->setup_prepare_pulse > 1.0f) m->setup_prepare_pulse = 0.0f;
-    if (!g_prep_job.done || g_prep_job.m != m) return;
+
+    prep_lock();
+    if (g_prep_job.m == m && g_prep_job.progress_dirty) {
+        if (g_prep_job.progress_pct >= 0.0f)
+            m->setup_prepare_fraction = g_prep_job.progress_pct;
+        if (g_prep_job.progress_msg[0])
+            safe_copy(m->setup_status, sizeof(m->setup_status), g_prep_job.progress_msg);
+        g_prep_job.progress_dirty = 0;
+    }
+    const int done = g_prep_job.done && g_prep_job.m == m;
+    const int kind = g_prep_job.kind;
+    char out_path[512];
+    char err[256];
+    int result = 0;
+    if (done) {
+        result = g_prep_job.result;
+        safe_copy(out_path, sizeof(out_path), g_prep_job.out_path);
+        safe_copy(err, sizeof(err), g_prep_job.err);
+        g_prep_job.m = NULL;
+    }
+    prep_unlock();
+
+    if (!done) return;
     m->setup_preparing = false;
-    if (g_prep_job.result && g_prep_job.out_path[0]) {
-        launcher_model_set_rom(m, g_prep_job.out_path);
-        safe_copy(m->setup_status, sizeof(m->setup_status), "Disc ready.");
+    m->setup_prepare_fraction = -1.0f;
+
+    if (kind == PREP_JOB_TOOLCHAIN) {
+        m->setup_progress_title[0] = '\0';
+        if (result) {
+            m->setup_tc_ready = true;
+            m->setup_page = 1;
+            m->setup_error[0] = '\0';
+            safe_copy(m->setup_status, sizeof(m->setup_status),
+                      "Build tools ready — continue with BIOS and disc.");
+        } else {
+            m->setup_status[0] = '\0';
+            safe_copy(m->setup_error, sizeof(m->setup_error),
+                      err[0] ? err : "Toolchain install failed.");
+        }
+        return;
+    }
+
+    if (kind == PREP_JOB_REBUILD) {
+        if (result && out_path[0]) {
+            safe_copy(m->relaunch_exe, sizeof(m->relaunch_exe), out_path);
+            /* Sidecars beside build/<exe> before the host execs it. */
+            lm_persist_setup_sidecars(m);
+            m->setup_prepare_satisfied = true;
+            safe_copy(m->setup_status, sizeof(m->setup_status),
+                      (m->rebuild_success_status && m->rebuild_success_status[0])
+                          ? m->rebuild_success_status
+                          : "Build complete.");
+            m->setup_error[0] = '\0';
+            if (m->relaunch_after_rebuild) {
+                safe_copy(m->setup_status, sizeof(m->setup_status),
+                          "Build complete — restarting…");
+                m->action = LNG_ACTION_RELAUNCH;
+            }
+        } else {
+            m->setup_status[0] = '\0';
+            safe_copy(m->setup_error, sizeof(m->setup_error),
+                      err[0] ? err : "Rebuild failed.");
+        }
+        return;
+    }
+
+    if (result && out_path[0]) {
+        launcher_model_set_rom(m, out_path);
         m->setup_error[0] = '\0';
+        if (m->rebuild_after_prepare && m->rebuild_with_progress_cb) {
+            safe_copy(m->setup_status, sizeof(m->setup_status),
+                      (m->prepare_success_status && m->prepare_success_status[0])
+                          ? m->prepare_success_status
+                          : "Sources ready — starting build…");
+            launcher_model_begin_rebuild_locked(m);
+            return;
+        }
+        m->setup_prepare_satisfied = true;
+        safe_copy(m->setup_status, sizeof(m->setup_status),
+                  (m->prepare_success_status && m->prepare_success_status[0])
+                      ? m->prepare_success_status
+                      : "Disc ready.");
     } else {
         m->setup_status[0] = '\0';
         safe_copy(m->setup_error, sizeof(m->setup_error),
-                  g_prep_job.err[0] ? g_prep_job.err : "Disc prepare failed.");
+                  err[0] ? err : "Disc prepare failed.");
     }
-    g_prep_job.m = NULL;
 }
 
 // Re-inspect one memory-card slot via the host callback (if any), caching the

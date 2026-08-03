@@ -649,20 +649,25 @@ const LauncherTexture& verdict_texture(int verdict) {
 // placeholder verdict otherwise).
 void draw_verdict_block(const LauncherModel* m, const LauncherTheme& th, float availw) {
     const VerifyResult& v = m->verify;
+    // Keep the Serial/Region/ISO checklist mounted even before a disc is
+    // picked (setup wizard) so AutoResize modals don't jump when verify runs.
+    const bool pending = !m->rom_present;
     const char* headline =
-        v.verdict == 1 ? "Disc verified" :
-        v.verdict == 2 ? "Disc verified (warnings)" :
-        v.verdict == 3 ? "Disc verification failed" :
-                          "Disc not recognized";
+        pending          ? "No disc selected" :
+        v.verdict == 1   ? "Disc verified" :
+        v.verdict == 2   ? "Disc verified (warnings)" :
+        v.verdict == 3   ? "Disc verification failed" :
+                           "Disc not recognized";
     // th has no dedicated "bad"/error slot (only good/warn) — reuse warn for
     // the warn AND none cases (both are cautionary, matching the ROM-hash
     // line's existing amber-for-"not recognized" convention) and fall back to
-    // a plain red only for the explicit "bad" verdict.
-    LngColor headline_color = (v.verdict == 1) ? th.good
+    // a plain red only for the explicit "bad" verdict. Pending = muted.
+    LngColor headline_color = pending ? th.text_muted
+                              : (v.verdict == 1) ? th.good
                               : (v.verdict == 3) ? lng_rgba(0.945f, 0.322f, 0.322f, 1.0f)
                               : th.warn;
 
-    const LauncherTexture& icon = verdict_texture(v.verdict);
+    const LauncherTexture& icon = verdict_texture(pending ? 0 : v.verdict);
     float ih = ImGui::GetTextLineHeight() * 1.35f;
     float iw = (icon.id && icon.h > 0) ? ih * ((float)icon.w / (float)icon.h) : ih;
     float w = iw + px(6) + ImGui::CalcTextSize(headline).x;
@@ -671,22 +676,28 @@ void draw_verdict_block(const LauncherModel* m, const LauncherTheme& th, float a
         ImVec2 p = ImGui::GetCursorScreenPos();
         ImGui::GetWindowDrawList()->AddImage(tid(icon), p, ImVec2(p.x + iw, p.y + ih));
         ImGui::Dummy(ImVec2(iw, ih));
-    } else {
+    } else if (!pending) {
         state_mark(v.verdict == 1, th);   // icon failed to load: vector fallback
+    } else {
+        ImGui::Dummy(ImVec2(iw, ih));
     }
     ImGui::SameLine(0, px(6));
     ImGui::TextColored(col(headline_color), "%s", headline);
     ImGui::Dummy(ImVec2(0, px(8)));
 
-    // Checklist: Serial / Region / ISO header, each with its own pass/fail
-    // mark, derived straight from the minimal VerifyResult fields.
+    // Checklist: Serial / Region / ISO header. Before a disc is chosen, show
+    // em-dashes with no pass/fail marks so the layout still reserves the rows.
     if (ImGui::BeginTable("verdict_checklist", 3, ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("k", ImGuiTableColumnFlags_WidthFixed, px(76));
         ImGui::TableSetupColumn("v", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("m", ImGuiTableColumnFlags_WidthFixed, px(28));
-        kv_row("Serial",     v.serial[0] ? v.serial : "\xE2\x80\x94", th, true, v.serial[0] != '\0');
-        kv_row("Region",     v.region[0] ? v.region : "\xE2\x80\x94", th, true, v.region[0] != '\0');
-        kv_row("ISO header", v.iso_ok ? "OK" : "Mismatch",             th, true, v.iso_ok);
+        const char* dash = "\xE2\x80\x94";
+        kv_row("Serial",     pending ? dash : (v.serial[0] ? v.serial : dash),
+               th, !pending, v.serial[0] != '\0');
+        kv_row("Region",     pending ? dash : (v.region[0] ? v.region : dash),
+               th, !pending, v.region[0] != '\0');
+        kv_row("ISO header", pending ? dash : (v.iso_ok ? "OK" : "Mismatch"),
+               th, !pending, v.iso_ok);
         ImGui::EndTable();
     }
 }
@@ -3832,7 +3843,8 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                 ImGui::TextColored(col(th.text_muted), "Waiting");
             ImGui::TableSetColumnIndex(4);
             table_row_vcenter(member_row_h, text_h);
-            if (occupied[slot] && !slots[slot].is_host &&
+            /* RTT to that seat from local peer — never on the local row. */
+            if (occupied[slot] && !slots[slot].is_local &&
                 slots[slot].latency_ms >= 0) {
                 ImGui::Text("%d ms", slots[slot].latency_ms);
             } else {
@@ -3983,7 +3995,7 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                         RecompLauncherCNetplayMember mem{};
                         if (!np->member_get || !np->member_get(np->ctx, mi, &mem))
                             continue;
-                        if (mem.is_host) continue;
+                        if (mem.is_local) continue;
                         if (mem.latency_ms > max_rtt) max_rtt = mem.latency_ms;
                     }
                     const int delay = np_delay_frames_from_rtt_ms(max_rtt);
@@ -5145,8 +5157,21 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
         if (mod_commit_launch(m))
             m->action = LNG_ACTION_LAUNCH;
     } else if (!can_play && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Select a valid %s first",
-                          m->rom_noun ? m->rom_noun : "ROM");
+        const char* noun = m->rom_noun ? m->rom_noun : "ROM";
+        if (m->has_bios && !m->setup_bios_ok) {
+            ImGui::SetTooltip(
+                "Select a valid BIOS first (or Clear to use the bundled "
+                "OpenBIOS when this build includes one).");
+        } else if (!m->rom_present || strcmp(m->rom_size, "--") == 0) {
+            ImGui::SetTooltip("Select a valid %s first", noun);
+        } else if (m->profile && m->profile->verify.mode == 1 &&
+                   (m->verify.verdict == 0 || m->verify.verdict == 3)) {
+            ImGui::SetTooltip("Select a verified %s first", noun);
+        } else if (m->setup_preparing) {
+            ImGui::SetTooltip("Wait for the current setup job to finish");
+        } else {
+            ImGui::SetTooltip("Select a valid %s first", noun);
+        }
     }
     if (!can_play && ImGui::IsItemClicked())
         m->setup_wizard_open = true;
@@ -5154,37 +5179,294 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
     (void)win;
 }
 
-void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
-    if (!m->setup_wizard_open) return;
-    launcher_model_poll_prepare_disc(m);
-    ImGui::OpenPopup("First-run setup");
+/* Compact progress-only modal while a setup job runs — closes the full
+ * first-run form so nothing else is interactive. */
+enum SetupPlatKind {
+    SETUP_PLAT_GENERIC = 0,
+    SETUP_PLAT_PSX,
+    SETUP_PLAT_GBA,
+    SETUP_PLAT_SNES,
+};
+
+static bool setup_plat_contains_ci(const char* hay, const char* needle) {
+    if (!hay || !needle || !needle[0]) return false;
+    for (const char* h = hay; *h; ++h) {
+        const char* a = h;
+        const char* b = needle;
+        while (*a && *b) {
+            char ca = *a, cb = *b;
+            if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
+            if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
+            if (ca != cb) break;
+            ++a;
+            ++b;
+        }
+        if (!*b) return true;
+    }
+    return false;
+}
+
+static SetupPlatKind setup_platform_kind(const char* platform) {
+    if (setup_plat_contains_ci(platform, "PLAYSTATION") ||
+        setup_plat_contains_ci(platform, "PSX") ||
+        setup_plat_contains_ci(platform, "PS1"))
+        return SETUP_PLAT_PSX;
+    if (setup_plat_contains_ci(platform, "GAME BOY ADVANCE") ||
+        setup_plat_contains_ci(platform, "GBA"))
+        return SETUP_PLAT_GBA;
+    if (setup_plat_contains_ci(platform, "SUPER NINTENDO") ||
+        setup_plat_contains_ci(platform, "SNES"))
+        return SETUP_PLAT_SNES;
+    return SETUP_PLAT_GENERIC;
+}
+
+static const char* kRetcommToolchainsUrl =
+    "https://github.com/TechnicallyComputers/retcomm-toolchains";
+static const char* kRetcommToolchainsReleasesUrl =
+    "https://github.com/TechnicallyComputers/retcomm-toolchains/releases";
+
+/* TextLinkOpenURL is 1.91+; HOST_IMGUI may be older — fall back to a button. */
+static void setup_url_link(const char* label, const char* url) {
+#if defined(IMGUI_VERSION_NUM) && IMGUI_VERSION_NUM >= 19100
+    ImGui::TextLinkOpenURL(label, url);
+#else
+    if (ImGui::SmallButton(label))
+        SDL_OpenURL(url);
+#endif
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", url);
+}
+
+/* Compact progress-only modal while a setup job runs — closes the full
+ * first-run form so nothing else is interactive. */
+static void draw_setup_progress_modal(LauncherModel* m, const LauncherTheme& th) {
+    static const char* kProgPopup = "Setup progress";
+    ImGui::OpenPopup(kProgPopup);
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(px(520), 0), ImGuiCond_Appearing);
-    if (!ImGui::BeginPopupModal("First-run setup", nullptr,
-                                ImGuiWindowFlags_AlwaysAutoResize |
-                                ImGuiWindowFlags_NoMove))
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(px(480), 0), ImGuiCond_Always);
+    const ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize;
+    if (!ImGui::BeginPopupModal(kProgPopup, nullptr, flags))
         return;
 
+    const float wrap_x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+    const char* game =
+        (m->game_name && m->game_name[0]) ? m->game_name : "this game";
+    const char* job =
+        (m->setup_progress_title[0])
+            ? m->setup_progress_title
+            : ((m->prepare_disc_label && m->prepare_disc_label[0])
+                   ? m->prepare_disc_label
+                   : "Setup");
+    ImGui::TextColored(col(th.accent), "%s", job);
+    ImGui::PushTextWrapPos(wrap_x);
+    ImGui::TextColored(col(th.text_muted),
+                       "Please wait — %s is working. Do not close this window.",
+                       game);
+    ImGui::PopTextWrapPos();
+    ImGui::Dummy(ImVec2(0, px(14)));
+
+    ImGui::PushTextWrapPos(wrap_x);
+    const char* st = m->setup_status[0] ? m->setup_status : "Working…";
+    const bool warn_st =
+        (strncmp(st, "WARNING", 7) == 0) ||
+        (strstr(st, "Do not close") != nullptr) ||
+        (strstr(st, "DO NOT") != nullptr);
+    if (warn_st) {
+        ImGui::PushStyleColor(ImGuiCol_Text, col(th.warn));
+        ImGui::TextWrapped("%s", st);
+        ImGui::PopStyleColor();
+    } else {
+        ImGui::TextColored(col(th.accent), "%s", st);
+    }
+    ImGui::PopTextWrapPos();
+    ImGui::Dummy(ImVec2(0, px(8)));
+    const float bar = (m->setup_prepare_fraction >= 0.0f)
+                          ? m->setup_prepare_fraction
+                          : m->setup_prepare_pulse;
+    ImGui::ProgressBar(bar, ImVec2(-1.0f, px(14)), "");
+
+    if (m->setup_error[0]) {
+        ImGui::Dummy(ImVec2(0, px(8)));
+        ImGui::PushTextWrapPos(wrap_x);
+        ImGui::TextColored(col(th.warn), "%s", m->setup_error);
+        ImGui::PopTextWrapPos();
+    }
+
+    ImGui::EndPopup();
+    /* Esc / outside click must not dismiss while the job is running. */
+    if (m->setup_preparing && !ImGui::IsPopupOpen(kProgPopup))
+        ImGui::OpenPopup(kProgPopup);
+}
+
+void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
+    if (!m->setup_wizard_open && !m->setup_preparing) return;
+    launcher_model_poll_prepare_disc(m);
+
+    /* While a prepare/rebuild/toolchain job runs, show only the progress window.
+     * Skipping BeginPopupModal on "First-run setup" lets ImGui dismiss it. */
+    if (m->setup_preparing) {
+        draw_setup_progress_modal(m, th);
+        return;
+    }
+
+    ImGui::OpenPopup("First-run setup");
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    /* Prefer content height (AlwaysAutoResize). Clamp to the work area. */
+    const float max_h = vp->WorkSize.y * 0.92f;
+    ImGui::SetNextWindowSize(ImVec2(px(640), 0), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(px(520), 0),
+                                        ImVec2(FLT_MAX, max_h));
+    if (!ImGui::BeginPopupModal("First-run setup", nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+
+    const float wrap_x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
     const char* noun = (m->rom_noun && m->rom_noun[0]) ? m->rom_noun : "ROM";
     const char* game = (m->game_name && m->game_name[0]) ? m->game_name : "this game";
-    const SystemProfile* prof = (const SystemProfile*)m->profile;
-    const bool is_gba = prof && prof->id && std::strcmp(prof->id, "gba") == 0;
-    const bool is_disc = prof && prof->verify.mode == 1;
-    ImGui::TextColored(col(th.accent), "Setup required");
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
-    if (is_gba) {
+
+    /* ---- Page 0: portable toolchain ------------------------------------ */
+    if (m->setup_needs_toolchain && m->setup_page == 0) {
+        ImGui::TextColored(col(th.accent), "Build tools");
+        ImGui::PushTextWrapPos(wrap_x);
         ImGui::TextColored(col(th.text_muted),
-            "%s requires both a playable %s and a retail Game Boy Advance "
-            "BIOS dump. This build does not include or substitute a BIOS. "
-            "Select the files below (you must legally own these dumps).",
-            game, noun);
-    } else if (m->has_bios) {
+            "%s builds game sources on your machine. Install the portable "
+            "cmake/clang pack (cmake-clang-v1), or provide a matching zip for "
+            "offline setup.",
+            game);
+        ImGui::PopTextWrapPos();
+        ImGui::Dummy(ImVec2(0, px(12)));
+
+        ImGui::TextUnformatted("1. Portable toolchain");
+        ImGui::PushTextWrapPos(wrap_x);
+        ImGui::TextColored(col(th.text_muted),
+            "Automatic download fetches the cmake-clang-v1 pack and caches it "
+            "for reuse across titles. Uncheck to browse a local zip instead "
+            "(for offline machines, grab a release asset from the repo below).");
+        ImGui::PopTextWrapPos();
+        ImGui::Dummy(ImVec2(0, px(4)));
+        ImGui::TextColored(col(th.text_muted), "Source / manual download:");
+        ImGui::SameLine();
+        setup_url_link("TechnicallyComputers/retcomm-toolchains",
+                       kRetcommToolchainsUrl);
+        ImGui::Dummy(ImVec2(0, px(6)));
+
+        if (ImGui::Checkbox("Download portable toolchain automatically##tc",
+                            &m->setup_tc_auto)) {
+            if (m->setup_tc_auto)
+                m->setup_error[0] = '\0';
+        }
+
+        if (!m->setup_tc_auto) {
+            ImGui::Dummy(ImVec2(0, px(8)));
+            ImGui::TextUnformatted("Toolchain zip");
+            ImGui::PushTextWrapPos(wrap_x);
+            ImGui::TextColored(col(th.text_muted),
+                "Select a cmake-clang-v1-*.zip from "
+                "TechnicallyComputers/retcomm-toolchains releases.");
+            ImGui::PopTextWrapPos();
+            setup_url_link("Open retcomm-toolchains releases",
+                           kRetcommToolchainsReleasesUrl);
+            ImGui::Dummy(ImVec2(0, px(4)));
+            const char* zp = m->setup_tc_zip[0] ? m->setup_tc_zip
+                                                : "(none selected)";
+            char zelided[220];
+            elide_left(zp, px(320), zelided, sizeof(zelided));
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextColored(col(m->setup_tc_zip[0] ? th.good : th.warn), "%s",
+                               m->setup_tc_zip[0] ? "OK" : "Needed");
+            ImGui::SameLine();
+            ImGui::TextColored(
+                col(m->setup_tc_zip[0] ? th.text : th.text_muted), "%s",
+                zelided);
+            ImGui::SameLine();
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(12), px(6)));
+            if (ImGui::Button("Browse zip…##tc", ImVec2(px(128), px(32)))) {
+                static const char* kZipPatterns[] = {"*.zip"};
+                if (launcher_pick_file(
+                        "Select cmake-clang-v1 toolchain zip", kZipPatterns, 1,
+                        "Toolchain zip archives", g_pick_buf,
+                        sizeof(g_pick_buf))) {
+                    std::snprintf(m->setup_tc_zip, sizeof(m->setup_tc_zip), "%s",
+                                  g_pick_buf);
+                    m->setup_error[0] = '\0';
+                }
+            }
+            ImGui::PopStyleVar();
+        }
+
+        if (m->setup_status[0]) {
+            ImGui::Dummy(ImVec2(0, px(8)));
+            ImGui::PushTextWrapPos(wrap_x);
+            ImGui::TextColored(col(th.good), "%s", m->setup_status);
+            ImGui::PopTextWrapPos();
+        }
+        if (m->setup_error[0]) {
+            ImGui::Dummy(ImVec2(0, px(6)));
+            ImGui::PushTextWrapPos(wrap_x);
+            ImGui::TextColored(col(th.warn), "%s", m->setup_error);
+            ImGui::PopTextWrapPos();
+        }
+
+        ImGui::Dummy(ImVec2(0, px(14)));
+        const bool can_next = launcher_model_can_advance_toolchain(m);
+        if (!can_next) ImGui::BeginDisabled();
+        if (ImGui::Button("Next", ImVec2(px(140), px(34)))) {
+            launcher_model_start_ensure_toolchain(m);
+            if (m->setup_preparing) {
+                ImGui::CloseCurrentPopup();
+                ImGui::EndPopup();
+                draw_setup_progress_modal(m, th);
+                return;
+            }
+        }
+        if (!can_next) {
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip(
+                    "Enable automatic download or select a toolchain zip");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Quit", ImVec2(px(100), px(34))))
+            m->action = LNG_ACTION_QUIT;
+
+        if (m->setup_wizard_open && !ImGui::IsPopupOpen("First-run setup"))
+            ImGui::OpenPopup("First-run setup");
+        ImGui::EndPopup();
+        return;
+    }
+
+    /* ---- Page 1: BIOS / disc / generate -------------------------------- */
+    const SetupPlatKind plat = setup_platform_kind(m->platform);
+
+    ImGui::TextColored(col(th.accent), "Setup required");
+    ImGui::PushTextWrapPos(wrap_x);
+    if (plat == SETUP_PLAT_PSX && m->has_bios) {
         ImGui::TextColored(col(th.text_muted),
             "%s needs a playable %s before you can launch. This build includes "
             "a bundled BIOS (OpenBIOS) by default — a retail SCPH1001.BIN dump "
-            "is optional. Pick your %s below (you must legally own these dumps).",
+            "is optional. Prefer a Redump-style .cue (not a lone .bin) so "
+            "multitrack discs stay intact. Pick your %s below (you must "
+            "legally own these dumps).",
             game, noun, noun);
+    } else if (plat == SETUP_PLAT_GBA && m->has_bios) {
+        ImGui::TextColored(col(th.text_muted),
+            "%s needs a Game Boy Advance BIOS dump and a playable %s before "
+            "you can launch. Pick both below (you must legally own these dumps).",
+            game, noun);
+    } else if (plat == SETUP_PLAT_SNES) {
+        ImGui::TextColored(col(th.text_muted),
+            "%s needs a playable Super Nintendo %s before you can launch. "
+            "Pick your file below (you must legally own this dump).",
+            game, noun);
+    } else if (m->has_bios) {
+        ImGui::TextColored(col(th.text_muted),
+            "%s needs a BIOS image and a playable %s before you can launch. "
+            "Pick both below (you must legally own these dumps).",
+            game, noun);
     } else {
         ImGui::TextColored(col(th.text_muted),
             "%s needs a playable %s before you can launch. Pick your file below "
@@ -5194,27 +5476,34 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     ImGui::PopTextWrapPos();
     ImGui::Dummy(ImVec2(0, px(10)));
 
-    const bool busy = m->setup_preparing;
-    if (busy) ImGui::BeginDisabled();
-
-    /* ---- BIOS (PSX / GBA): empty = bundled; Browse for optional retail ---- */
     if (m->has_bios) {
         const bool has_pick = m->s.bios_path[0] != 0;
-        ImGui::TextUnformatted(is_gba ? "1. Game Boy Advance BIOS (required)"
-                                      : "1. PlayStation BIOS (optional)");
-        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
-        if (is_gba)
-            ImGui::TextColored(col(th.text_muted),
-                "Select gba_bios.bin (exactly 16 KB, dumped from your console). "
-                "The canonical retail BIOS is SHA-1 verified before launch.");
-        else
-            ImGui::TextColored(col(th.text_muted),
-                "Default: bundled OpenBIOS. Optionally browse for your own "
-                "SCPH1001.BIN (exactly 512 KB, dumped from your console).");
+        const bool offers_bundled = (plat == SETUP_PLAT_PSX);
+        const char* bios_section =
+            (plat == SETUP_PLAT_GBA) ? "1. GBA BIOS (required)"
+            : (plat == SETUP_PLAT_PSX) ? "1. PlayStation BIOS (optional)"
+                                      : "1. BIOS";
+        const char* bios_help =
+            (plat == SETUP_PLAT_GBA)
+                ? "Browse for your gba_bios.bin dump (16 KB, SHA-1 "
+                  "300c20df… — dumped from a Game Boy Advance). Setup packages "
+                  "do not ship a redistributable GBA BIOS."
+            : (plat == SETUP_PLAT_PSX)
+                ? "Default: bundled OpenBIOS. Optionally browse for your own "
+                  "SCPH1001.BIN (exactly 512 KB, dumped from your console)."
+                : "Browse for a BIOS image required by this console.";
+        const char* empty_bios_label =
+            offers_bundled ? "Bundled BIOS (OpenBIOS)" : "(none selected)";
+        const char* bios_picker =
+            (plat == SETUP_PLAT_GBA) ? "Select GBA BIOS (gba_bios.bin)"
+            : (plat == SETUP_PLAT_PSX) ? "Select PlayStation BIOS (SCPH1001.BIN)"
+                                      : "Select BIOS file";
+
+        ImGui::TextUnformatted(bios_section);
+        ImGui::PushTextWrapPos(wrap_x);
+        ImGui::TextColored(col(th.text_muted), "%s", bios_help);
         ImGui::PopTextWrapPos();
-        const char* bp = has_pick ? m->s.bios_path
-                                  : (is_gba ? "(none selected)"
-                                            : "Bundled BIOS (OpenBIOS)");
+        const char* bp = has_pick ? m->s.bios_path : empty_bios_label;
         char belided[220];
         elide_left(bp, px(300), belided, sizeof(belided));
         ImGui::AlignTextToFramePadding();
@@ -5227,15 +5516,11 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         if (ImGui::Button("Browse BIOS##setup", ImVec2(px(120), px(32)))) {
             char buf[512];
             static const char* kBiosPatterns[] = { "*.bin", "*.rom" };
-            if (launcher_pick_file(
-                                   is_gba
-                                       ? "Select Game Boy Advance BIOS (gba_bios.bin)"
-                                       : "Select PlayStation BIOS (SCPH1001.BIN)",
-                                   kBiosPatterns, 2, "BIOS image (.bin .rom)",
-                                   buf, sizeof(buf)))
+            if (launcher_pick_file(bios_picker, kBiosPatterns, 2,
+                                   "BIOS image (.bin .rom)", buf, sizeof(buf)))
                 launcher_model_set_bios_path(m, buf);
         }
-        if (has_pick && !is_gba) {
+        if (has_pick && offers_bundled) {
             ImGui::SameLine();
             if (ImGui::Button("Use bundled##setup", ImVec2(px(120), px(32))))
                 launcher_model_set_bios_path(m, "");
@@ -5245,7 +5530,7 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         }
         ImGui::PopStyleVar();
         if (m->setup_bios_detail[0]) {
-            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
+            ImGui::PushTextWrapPos(wrap_x);
             ImGui::TextColored(col(m->setup_bios_warn ? th.warn : th.text_muted),
                                "%s", m->setup_bios_detail);
             ImGui::PopTextWrapPos();
@@ -5253,13 +5538,23 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::Dummy(ImVec2(0, px(12)));
     }
 
-    /* ---- Disc / ROM ---- */
     ImGui::Text("%s. %s image", m->has_bios ? "2" : "1", noun);
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
-    ImGui::TextColored(col(th.text_muted),
-        is_disc
-            ? "Prefer a .cue with its .bin beside it (MODE2/2352). Raw dumps may need conversion."
-            : "Select your game ROM file.");
+    ImGui::PushTextWrapPos(wrap_x);
+    {
+        const char* media_help =
+            (plat == SETUP_PLAT_PSX)
+                ? "Select the .cue sheet (MODE2/2352), not the .bin track file. "
+                  "The .cue keeps multitrack / audio-track layout correct for "
+                  "generate and boot. Cooked .iso dumps are OK — Generate "
+                  "converts them to a working .bin/.cue, then verifies the "
+                  "result against the game’s known digests."
+            : (plat == SETUP_PLAT_GBA)
+                ? "Select your verified Game Boy Advance ROM (.gba)."
+            : (plat == SETUP_PLAT_SNES)
+                ? "Select your Super Nintendo ROM (.sfc / .smc)."
+                : "Select your game ROM file.";
+        ImGui::TextColored(col(th.text_muted), "%s", media_help);
+    }
     ImGui::PopTextWrapPos();
     {
         const char* rp = m->rom_present ? m->rom_full : "(none selected)";
@@ -5276,12 +5571,15 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::SameLine();
         char browse_lbl[48];
         std::snprintf(browse_lbl, sizeof(browse_lbl), "Browse %s##setup", noun);
-        /* Taller + FramePadding so label isn't glued to the bottom edge. */
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(12), px(6)));
         if (ImGui::Button(browse_lbl, ImVec2(px(128), px(32)))) {
             const SystemProfile* prof = (const SystemProfile*)m->profile;
             char title[96];
-            std::snprintf(title, sizeof(title), "Select %s", noun);
+            if (plat == SETUP_PLAT_PSX)
+                std::snprintf(title, sizeof(title),
+                              "Select %s (.cue preferred)", noun);
+            else
+                std::snprintf(title, sizeof(title), "Select %s", noun);
             bool picked = false;
             if (prof && prof->rom_filter.pattern_count > 0)
                 picked = launcher_pick_file(title, prof->rom_filter.patterns,
@@ -5293,70 +5591,146 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             if (picked) launcher_model_set_rom(m, g_pick_buf);
         }
         ImGui::PopStyleVar();
-        if (m->profile && m->profile->verify.mode == 1 && m->rom_present)
-            draw_verdict_block(m, th, px(480));
-    }
-
-    /* ---- Optional prepare_disc ---- */
-    if (m->prepare_disc_cb) {
-        ImGui::Dummy(ImVec2(0, px(12)));
-        ImGui::TextUnformatted(m->has_bios ? "3. Convert raw dump (optional)"
-                                           : "2. Convert raw dump (optional)");
-        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
-        ImGui::TextColored(col(th.text_muted), "%s",
-            (m->prepare_disc_note && m->prepare_disc_note[0])
-                ? m->prepare_disc_note
-                : "If your disc image is a raw dump that this game cannot boot "
-                  "directly, convert it here. Output is written next to the game.");
-        ImGui::PopTextWrapPos();
-        const char* prep_lbl = (m->prepare_disc_label && m->prepare_disc_label[0])
-                                   ? m->prepare_disc_label
-                                   : "Convert raw dump…";
-        if (ImGui::Button(prep_lbl, ImVec2(px(220), px(32)))) {
-            char buf[512];
-            static const char* kDumpPatterns[] = { "*.iso", "*.bin", "*.img", "*.*" };
-            if (launcher_pick_file("Select raw disc dump to convert",
-                                   kDumpPatterns, 4, "Disc dump",
-                                   buf, sizeof(buf)))
-                launcher_model_start_prepare_disc(m, buf);
+        if (m->profile && m->profile->verify.mode == 1)
+            draw_verdict_block(m, th, ImGui::GetContentRegionAvail().x);
+        if (plat == SETUP_PLAT_PSX && m->rom_present && m->rom_full[0]) {
+            const char* ext = strrchr(m->rom_full, '.');
+            if (ext && (lps_streq_ci(ext, ".bin") || lps_streq_ci(ext, ".img"))) {
+                ImGui::PushTextWrapPos(wrap_x);
+                ImGui::TextColored(col(th.warn),
+                    "You picked a track image (%s). Prefer the matching .cue "
+                    "in the same folder so multitrack discs are handled "
+                    "correctly.",
+                    ext);
+                ImGui::PopTextWrapPos();
+            }
         }
     }
 
-    if (busy) ImGui::EndDisabled();
+    if (m->prepare_disc_cb || m->prepare_with_progress_cb) {
+        ImGui::Dummy(ImVec2(0, px(12)));
+        char section_buf[128];
+        const char* section;
+        if (m->prepare_section_title && m->prepare_section_title[0]) {
+            std::snprintf(section_buf, sizeof(section_buf), "%s. %s",
+                          m->has_bios ? "3" : "2", m->prepare_section_title);
+            section = section_buf;
+        } else if (plat == SETUP_PLAT_PSX) {
+            section = m->has_bios ? "3. Generate from disc"
+                                  : "2. Generate from disc";
+        } else {
+            section = m->has_bios ? "3. Convert raw dump (optional)"
+                                  : "2. Convert raw dump (optional)";
+        }
+        ImGui::TextUnformatted(section);
+        ImGui::PushTextWrapPos(wrap_x);
+        const char* prep_note =
+            (m->prepare_disc_note && m->prepare_disc_note[0])
+                ? m->prepare_disc_note
+                : (plat == SETUP_PLAT_PSX
+                       ? "Uses the selected .cue (or converts a cooked .iso "
+                         "to MODE2/2352 .bin/.cue) with the local SDK, then "
+                         "verifies digests against the game identity. Always "
+                         "point Generate at the .cue when both files exist."
+                       : "If your disc image is a raw dump that this game "
+                         "cannot boot directly, convert it here. Output is "
+                         "written next to the game.");
+        ImGui::TextColored(col(th.text_muted), "%s", prep_note);
+        ImGui::PopTextWrapPos();
+        const char* prep_lbl = (m->prepare_disc_label && m->prepare_disc_label[0])
+                                   ? m->prepare_disc_label
+                                   : ((m->rebuild_after_prepare &&
+                                       m->rebuild_with_progress_cb)
+                                          ? "Generate & rebuild…"
+                                          : (plat == SETUP_PLAT_PSX
+                                                 ? "Prepare disc…"
+                                                 : "Convert raw dump…"));
+        const bool use_selected = m->prepare_use_selected_rom;
+        const bool can_prep_selected = use_selected && m->rom_present &&
+                                       m->rom_full[0] &&
+                                       strcmp(m->rom_size, "--") != 0;
+        if (use_selected && !can_prep_selected) ImGui::BeginDisabled();
+        if (ImGui::Button(prep_lbl, ImVec2(px(240), px(32)))) {
+            if (use_selected) {
+                if (can_prep_selected)
+                    launcher_model_start_prepare_disc(m, m->rom_full);
+            } else {
+                char buf[512];
+                static const char* kDumpPatterns[] = {
+                    "*.cue", "*.iso", "*.bin", "*.img", "*.*" };
+                if (launcher_pick_file(
+                        plat == SETUP_PLAT_PSX
+                            ? "Select disc (.cue preferred; .iso OK)"
+                            : "Select raw disc dump to convert",
+                        kDumpPatterns, 5,
+                        plat == SETUP_PLAT_PSX
+                            ? "PlayStation disc (.cue .iso .bin)"
+                            : "Disc dump",
+                        buf, sizeof(buf)))
+                    launcher_model_start_prepare_disc(m, buf);
+            }
+        }
+        if (use_selected && !can_prep_selected) {
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("Select a verified %s first", noun);
+        }
+        if (m->setup_preparing) {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+            draw_setup_progress_modal(m, th);
+            return;
+        }
+    }
 
-    /* ---- Progress / status ---- */
-    if (m->setup_preparing) {
-        ImGui::Dummy(ImVec2(0, px(10)));
-        ImGui::TextColored(col(th.accent), "%s",
-                           m->setup_status[0] ? m->setup_status : "Working…");
-        ImGui::ProgressBar(m->setup_prepare_pulse, ImVec2(-1, px(8)), "");
-    } else if (m->setup_status[0]) {
+    if (m->setup_status[0]) {
         ImGui::Dummy(ImVec2(0, px(8)));
+        ImGui::PushTextWrapPos(wrap_x);
         ImGui::TextColored(col(th.good), "%s", m->setup_status);
+        ImGui::PopTextWrapPos();
     }
     if (m->setup_error[0]) {
         ImGui::Dummy(ImVec2(0, px(6)));
-        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(480));
+        ImGui::PushTextWrapPos(wrap_x);
         ImGui::TextColored(col(th.warn), "%s", m->setup_error);
         ImGui::PopTextWrapPos();
     }
 
     ImGui::Dummy(ImVec2(0, px(14)));
-    /* Continue once required files are present. Fingerprint mismatch still
-     * blocks PLAY on the dashboard, but must not trap the user in this modal. */
-    const bool ready = launcher_model_can_finish_setup(m);
-    if (!ready) ImGui::BeginDisabled();
-    if (ImGui::Button("Continue to launcher", ImVec2(px(220), px(34)))) {
+    if (m->setup_needs_toolchain) {
+        if (ImGui::Button("Back", ImVec2(px(100), px(34)))) {
+            m->setup_page = 0;
+            m->setup_error[0] = '\0';
+        }
+        ImGui::SameLine();
+    }
+    if (!m->prepare_required_before_continue) {
+        const bool ready = launcher_model_can_finish_setup(m);
+        if (!ready) ImGui::BeginDisabled();
+        if (ImGui::Button("Continue to launcher", ImVec2(px(220), px(34)))) {
+            launcher_model_finish_setup(m);
+            ImGui::CloseCurrentPopup();
+        }
+        if (!ready) {
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                if (!m->rom_present || !m->rom_full[0])
+                    ImGui::SetTooltip("Select a %s first", noun);
+                else if (m->setup_preparing)
+                    ImGui::SetTooltip("Wait for the current job to finish");
+                else if (m->has_bios && !m->setup_bios_ok)
+                    ImGui::SetTooltip("BIOS check required");
+            }
+        }
+        ImGui::SameLine();
+    } else if (launcher_model_can_finish_setup(m) &&
+               m->action != LNG_ACTION_RELAUNCH) {
         launcher_model_finish_setup(m);
         ImGui::CloseCurrentPopup();
     }
-    if (!ready) ImGui::EndDisabled();
-    ImGui::SameLine();
     if (ImGui::Button("Quit", ImVec2(px(100), px(34))))
         m->action = LNG_ACTION_QUIT;
 
-    /* Esc must not dismiss while setup is still required. Do NOT force
-     * setup_wizard_open back on after finish_setup — that made Continue a no-op. */
     if (m->setup_wizard_open && !ImGui::IsPopupOpen("First-run setup"))
         ImGui::OpenPopup("First-run setup");
     ImGui::EndPopup();
