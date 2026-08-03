@@ -26,7 +26,7 @@ static const SDL_Scancode kNesDefaultsP1[LNG_NES_PAD_BUTTON_COUNT] = {
     /* Up */ SDL_SCANCODE_UP, /* Down */ SDL_SCANCODE_DOWN,
     /* Left */ SDL_SCANCODE_LEFT, /* Right */ SDL_SCANCODE_RIGHT,
     /* A */ SDL_SCANCODE_Z, /* B */ SDL_SCANCODE_X,
-    /* Start */ SDL_SCANCODE_RETURN, /* Select */ SDL_SCANCODE_TAB,
+    /* Start */ SDL_SCANCODE_RETURN, /* Select */ SDL_SCANCODE_BACKSLASH,
 };
 static const SDL_Scancode kNesDefaultsP2[LNG_NES_PAD_BUTTON_COUNT] = {
     /* Up */ SDL_SCANCODE_W, /* Down */ SDL_SCANCODE_S,
