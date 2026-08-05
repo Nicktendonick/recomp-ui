@@ -170,7 +170,7 @@ typedef struct RecompLauncherCNetplayCallbacks {
     /* Optional host waiting-room settings. input_delay is frames, clamped 2..20. */
     int  (*input_delay_get)(void* ctx);
     int  (*input_delay_set)(void* ctx, int delay_frames);
-    /* Optional: lobby UDP SFU preference (0/1). Online start always SFUs;
+    /* Optional: lobby UDP SFU preference (0/1). Online start always SFU;
      * LAN/direct may clear this for host-as-relay. */
     int  (*force_input_relay_get)(void* ctx);
     int  (*force_input_relay_set)(void* ctx, int force);
