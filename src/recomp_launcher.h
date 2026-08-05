@@ -845,11 +845,13 @@ typedef struct RecompLauncherCGameInfo {
         int download, const char* zip_path, char* err_msg, size_t err_cap,
         RecompLauncherCPrepareProgressFn on_progress, void* progress_ctx);
     /* PSX geometry-precision controls (Settings.geometry_correction /
-     * perspective_texturing). 0 => both rows hidden entirely, so every console
-     * that leaves this unset keeps exactly today's settings surface. One flag
-     * gates the pair because they are two halves of the same enhancement, but
-     * the settings themselves stay independent — a title may want stable
-     * geometry without altering texture mapping. Appended for ABI stability. */
+     * perspective_texturing). 0 => no row drawn, so every console that leaves
+     * this unset keeps exactly today's settings surface. One flag still gates
+     * both settings because they are two halves of the same enhancement, but
+     * only perspective_texturing currently draws a control: geometry_correction
+     * is known to crack meshes at the coverage the runtime can achieve and is
+     * withdrawn from the UI while staying readable from game.toml/settings.toml
+     * (psxrecomp ENHANCEMENTS.md G1.8/G1.9). Appended for ABI stability. */
     int  has_geometry_precision;
 } RecompLauncherCGameInfo;
 

@@ -1982,25 +1982,18 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
     }
 
     if (m->has_geometry_precision) {
-        // Sub-pixel vertex precision. Sits directly under the image-quality
-        // rows because it only does anything alongside supersampling — and say
-        // so inline rather than letting a ticked box look broken at 1x.
-        row_label("Geometry correction", th);
-        bool geom = m->s.geometry_correction != 0;
-        if (ImGui::Checkbox("##geomcorrect", &geom))
-            launcher_model_toggle_geometry_correction(m);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Keeps the sub-pixel precision the PS1 throws away "
-                              "when it snaps polygon corners to whole pixels, "
-                              "which reduces the shimmer on moving 3D models.\n\n"
-                              "Needs Supersampling 2x or higher to have any "
-                              "effect. Does not change what the game itself "
-                              "sees, so it cannot affect gameplay.");
-        if (launcher_model_geometry_correction_inert(m)) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("(needs Supersampling 2x+)");
-        }
-
+        // Geometry correction deliberately draws NO row. It moves vertices, and
+        // the runtime can only recover the sub-pixel original for ~5% of them
+        // (93% of lookups are ambiguous), so a corrected triangle meets an
+        // uncorrected neighbour and their shared edge splits open. Measured on
+        // Ape Escape; see psxrecomp ENHANCEMENTS.md G1.8/G1.9. The setting stays
+        // in the ABI and remains readable from game.toml/settings.toml so the
+        // work is still testable, exactly as has_turbo_loads/Settings.turbo_loads
+        // stayed after their row was dropped — it simply has no control.
+        //
+        // Perspective textures are unaffected by that problem: they only change
+        // UV interpolation inside a polygon whose provenance is already proven,
+        // so no vertex moves and adjacent polygons cannot disagree about an edge.
         row_label("Perspective textures", th);
         bool persp = m->s.perspective_texturing != 0;
         if (ImGui::Checkbox("##persptex", &persp))
