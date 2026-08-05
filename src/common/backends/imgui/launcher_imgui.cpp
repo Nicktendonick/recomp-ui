@@ -1750,8 +1750,8 @@ static const char* elide_left(const char* s, float max_w, char* out, size_t cap)
 bool any_deep_display(const LauncherModel* m) {
     return m->has_window_size || m->has_renderer || m->has_supersampling ||
            m->has_antialiasing || m->has_texture_filter || m->has_screen_kind ||
-           m->has_frame_interp || m->has_skip_fmv || m->has_turbo_loads ||
-           m->has_geometry_precision;
+           m->has_frame_interp || m->has_skip_fmv ||
+           m->has_geometry_precision;   /* has_turbo_loads draws no row — see below */
 }
 
 // Whether the DISPLAY card should grow to fit its content (AutoResizeY) rather
@@ -2041,11 +2041,14 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         if (ImGui::Checkbox("##skipfmv", &sk)) launcher_model_toggle_skip_fmv(m);
     }
 
-    if (m->has_turbo_loads) {
-        row_label("Turbo loads", th);
-        bool tl = m->s.turbo_loads != 0;
-        if (ImGui::Checkbox("##turbo", &tl)) launcher_model_toggle_turbo_loads(m);
-    }
+    /* Turbo loads is deliberately NOT a Display row on any console. Load
+     * acceleration is owned by the framework's Mods catalog (Fast Loading /
+     * CD Speed), which exposes the multiplier, the instant scheduler and the
+     * distinction between host pacing and drive speed. A single opaque
+     * checkbox here duplicated that at lower fidelity and let the two
+     * surfaces disagree. The has_turbo_loads capability and
+     * Settings.turbo_loads remain in the ABI for hosts that still persist the
+     * value; they simply no longer draw a control. */
 
     // HD texture packs (NES module) — same enable + folder row as the legacy
     // branch renders; kept last, below the console-shape rows.
