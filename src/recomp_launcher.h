@@ -484,6 +484,17 @@ struct RecompLauncherCSettings {
     // independent of aspect/widescreen: it describes physical host windows,
     // not how a game's camera is rendered inside one of them.
     int display_layout;
+    // ---- PSX geometry-precision settings (capability-gated by
+    // GameInfo.has_geometry_precision) — appended additively, same ABI
+    // convention as every block above. ----
+    // The PS1's GTE projects in 16.16 and then discards the fraction when it
+    // saturates screen coordinates to whole pixels, so a moving mesh shimmers;
+    // and the GPU interpolates UVs affinely, so large floor/wall textures swim.
+    // These are the two opt-in corrections. Both are visual only — the
+    // guest-visible GTE screen coordinates stay integer and fully faithful.
+    // 0 = off (the faithful default on a fresh config).
+    int  geometry_correction;    // bool: sub-pixel vertex precision
+    int  perspective_texturing;  // bool: perspective-correct UVs
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
@@ -833,6 +844,13 @@ typedef struct RecompLauncherCGameInfo {
     int (*ensure_toolchain_with_progress)(
         int download, const char* zip_path, char* err_msg, size_t err_cap,
         RecompLauncherCPrepareProgressFn on_progress, void* progress_ctx);
+    /* PSX geometry-precision controls (Settings.geometry_correction /
+     * perspective_texturing). 0 => both rows hidden entirely, so every console
+     * that leaves this unset keeps exactly today's settings surface. One flag
+     * gates the pair because they are two halves of the same enhancement, but
+     * the settings themselves stay independent — a title may want stable
+     * geometry without altering texture mapping. Appended for ABI stability. */
+    int  has_geometry_precision;
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */

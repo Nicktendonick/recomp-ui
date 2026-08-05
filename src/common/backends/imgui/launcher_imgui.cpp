@@ -1750,7 +1750,8 @@ static const char* elide_left(const char* s, float max_w, char* out, size_t cap)
 bool any_deep_display(const LauncherModel* m) {
     return m->has_window_size || m->has_renderer || m->has_supersampling ||
            m->has_antialiasing || m->has_texture_filter || m->has_screen_kind ||
-           m->has_frame_interp || m->has_skip_fmv || m->has_turbo_loads;
+           m->has_frame_interp || m->has_skip_fmv || m->has_turbo_loads ||
+           m->has_geometry_precision;
 }
 
 // Whether the DISPLAY card should grow to fit its content (AutoResizeY) rather
@@ -1978,6 +1979,38 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         bool affine = m->s.affine_filter != 0;
         if (ImGui::Checkbox("##affine_filter", &affine))
             launcher_model_toggle_affine_filter(m);
+    }
+
+    if (m->has_geometry_precision) {
+        // Sub-pixel vertex precision. Sits directly under the image-quality
+        // rows because it only does anything alongside supersampling — and say
+        // so inline rather than letting a ticked box look broken at 1x.
+        row_label("Geometry correction", th);
+        bool geom = m->s.geometry_correction != 0;
+        if (ImGui::Checkbox("##geomcorrect", &geom))
+            launcher_model_toggle_geometry_correction(m);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Keeps the sub-pixel precision the PS1 throws away "
+                              "when it snaps polygon corners to whole pixels, "
+                              "which reduces the shimmer on moving 3D models.\n\n"
+                              "Needs Supersampling 2x or higher to have any "
+                              "effect. Does not change what the game itself "
+                              "sees, so it cannot affect gameplay.");
+        if (launcher_model_geometry_correction_inert(m)) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(needs Supersampling 2x+)");
+        }
+
+        row_label("Perspective textures", th);
+        bool persp = m->s.perspective_texturing != 0;
+        if (ImGui::Checkbox("##persptex", &persp))
+            launcher_model_toggle_perspective_texturing(m);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Interpolates textures with perspective, which "
+                              "stops large floors and walls from warping as the "
+                              "camera moves.\n\nApplied only to polygons the "
+                              "runtime can prove came from the 3D pipeline, so "
+                              "2D art and menus are left alone.");
     }
 
     if (m->has_screen_kind) {

@@ -125,6 +125,7 @@ void launcher_model_init(LauncherModel* m,
         m->has_spu_hq           = game->has_spu_hq != 0;
         m->has_skip_fmv         = game->has_skip_fmv != 0;
         m->has_turbo_loads      = game->has_turbo_loads != 0;
+        m->has_geometry_precision = game->has_geometry_precision != 0;
         // game->has_fullscreen_toggle is deliberately NOT read: the Fullscreen
         // row is universal (drawn for every console) — see recomp_launcher.h.
         m->has_bios             = game->has_bios != 0;
@@ -902,6 +903,21 @@ void launcher_model_toggle_texture_filter(LauncherModel* m) {
 
 const char* launcher_model_texture_filter_label(const LauncherModel* m) {
     return m->s.texture_filter ? "Bilinear" : "Nearest";
+}
+
+void launcher_model_toggle_geometry_correction(LauncherModel* m) {
+    m->s.geometry_correction = !m->s.geometry_correction;
+}
+
+void launcher_model_toggle_perspective_texturing(LauncherModel* m) {
+    m->s.perspective_texturing = !m->s.perspective_texturing;
+}
+
+/* Sub-pixel vertices are only observable in the supersampled mirror: at 1x the
+ * corrected position rounds back to the pixel it came from. Say so in the UI
+ * rather than letting the row look broken when someone ticks it at native res. */
+bool launcher_model_geometry_correction_inert(const LauncherModel* m) {
+    return m->s.geometry_correction && m->s.supersampling < 2;
 }
 
 // Screen-model vocabulary: the active SystemProfile's own set when it has one
