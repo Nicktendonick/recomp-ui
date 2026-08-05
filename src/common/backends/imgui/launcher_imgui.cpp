@@ -4703,6 +4703,13 @@ static void draw_mod_feature_option(LauncherModel* m,
     char next[RECOMP_LAUNCHER_MOD_VALUE_MAX];
     std::snprintf(next, sizeof(next), "%s", option.value);
 
+    /* Another option currently overrides this one (e.g. "Instant" ticked makes
+     * a speed box meaningless). Show it, greyed, so the player can see the
+     * value they will get back when they untick -- hiding it would make the
+     * row jump around and lose the setting from view. */
+    const bool inert = option.disabled != 0;
+    if (inert) ImGui::BeginDisabled();
+
     if (option.type == RECOMP_MOD_OPTION_BOOLEAN) {
         bool value = std::strcmp(option.value, "true") == 0;
         if (ImGui::Checkbox(option.label, &value)) {
@@ -4752,9 +4759,14 @@ static void draw_mod_feature_option(LauncherModel* m,
         changed = draw_mod_integer_option(option, next, sizeof(next));
     }
 
-    if (ImGui::IsItemHovered() && option.description[0])
+    const bool hovered = ImGui::IsItemHovered();
+    if (inert) ImGui::EndDisabled();
+
+    if (hovered && option.description[0])
         ImGui::SetTooltip("%s", option.description);
-    if (changed &&
+    /* A disabled control cannot report a change, but guard anyway so a future
+     * widget that stays interactive can never write through an inert option. */
+    if (changed && !inert &&
         !mods->feature_set_option(mods->ctx, feature.package_id, feature.id,
                                   option.id, next)) {
         mod_note_error(m);

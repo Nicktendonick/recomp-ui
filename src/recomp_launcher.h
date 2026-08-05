@@ -240,6 +240,11 @@ typedef struct RecompLauncherCModOption {
     int64_t max_value;
     int64_t step;
     int  choice_count;
+    /* Non-zero when another option in the same feature currently overrides
+     * this one (manifest key: disabled_by). The provider resolves it, so the
+     * UI only has to grey the control out -- it never cross-references
+     * options itself. Example: ticking "Instant" makes the speed box inert. */
+    int  disabled;
 } RecompLauncherCModOption;
 
 typedef struct RecompLauncherCModChoice {
