@@ -1530,7 +1530,15 @@ void draw_player_panel(LauncherModel* m, const LauncherTheme& th, int p, float w
     {
         const SystemProfile* aprof = (const SystemProfile*)m->profile;
         const bool has_swap_art = aprof && aprof->controller.image_analog != nullptr;
-        const bool digital = has_swap_art && m->s.pad_mode[p] == 2;
+        // Show the digital pad ONLY for a game LOCKED to D-Pad mode. pad_mode
+        // selects which controller PROTOCOL the game is given, not which
+        // hardware the player is holding: on a title that offers analog at all,
+        // the player has an analog-capable pad in hand, and picking D-Pad mode
+        // does not turn their DualShock into a 1994 digital controller. Keying
+        // the art off the mode made Ape Escape — a dual-analog game — show the
+        // original PSX pad whenever the saved mode happened to be digital.
+        const bool digital_only = !m->pad_mode_selectable && m->locked_pad_mode == 2;
+        const bool digital = has_swap_art && digital_only;
         const LauncherTexture& art = has_swap_art
             ? (digital ? g_pad_digital : g_pad_analog) : g_pad;
         // Center on the FITTED width so a near-square pad (N64) or a portrait
