@@ -718,7 +718,7 @@ typedef struct RecompLauncherCGameInfo {
      *
      * prepare_disc (optional): convert a raw dump into a playable image.
      * Blocking host callback; the UI shows a busy state while it runs.
-     * Return 1 and write the playable .cue/.bin/.iso path into out_disc_path.
+     * Return 1 and write the playable .cue/.bin/.img/.iso/.car path into out_disc_path.
      * prepare_disc_label / prepare_disc_note are button + help text (NULL =>
      * "Convert raw dump…" / default note).
      *

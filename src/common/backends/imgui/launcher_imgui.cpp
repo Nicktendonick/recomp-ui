@@ -5649,7 +5649,8 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     {
         const char* media_help =
             (plat == SETUP_PLAT_PSX)
-                ? "Select the .cue sheet (MODE2/2352), not the .bin track file. "
+                ? "Select the .cue sheet (MODE2/2352) when present. Steam .car "
+                  "disc images can be selected directly. "
                   "The .cue keeps multitrack / audio-track layout correct for "
                   "generate and boot. Cooked .iso dumps are OK — Generate "
                   "converts them to a working .bin/.cue, then verifies the "
@@ -5701,7 +5702,8 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             draw_verdict_block(m, th, ImGui::GetContentRegionAvail().x);
         if (plat == SETUP_PLAT_PSX && m->rom_present && m->rom_full[0]) {
             const char* ext = strrchr(m->rom_full, '.');
-            if (ext && (lps_streq_ci(ext, ".bin") || lps_streq_ci(ext, ".img"))) {
+            if (ext && (lps_streq_ci(ext, ".bin") || lps_streq_ci(ext, ".img") ||
+                        lps_streq_ci(ext, ".car"))) {
                 ImGui::PushTextWrapPos(wrap_x);
                 ImGui::TextColored(col(th.warn),
                     "You picked a track image (%s). Prefer the matching .cue "
@@ -5763,14 +5765,14 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             } else {
                 char buf[512];
                 static const char* kDumpPatterns[] = {
-                    "*.cue", "*.iso", "*.bin", "*.img", "*.*" };
+                    "*.cue", "*.iso", "*.bin", "*.img", "*.car", "*.*" };
                 if (launcher_pick_file(
                         plat == SETUP_PLAT_PSX
                             ? "Select disc (.cue preferred; .iso OK)"
                             : "Select raw disc dump to convert",
-                        kDumpPatterns, 5,
+                        kDumpPatterns, 6,
                         plat == SETUP_PLAT_PSX
-                            ? "PlayStation disc (.cue .iso .bin)"
+                            ? "PlayStation disc (.cue .iso .bin .img .car)"
                             : "Disc dump",
                         buf, sizeof(buf)))
                     launcher_model_start_prepare_disc(m, buf);
