@@ -389,7 +389,7 @@ typedef struct {
     /* STUN / host external_ip cache for LAN lobby Public IP field. */
     char      netplay_public_ip[64];
     bool      netplay_public_ip_resolved;
-    /* Kept for host ABI / match_caps defaults (no longer exposed in Lobby Settings). */
+    /* Lobby UDP SFU (online default). Not exposed in Lobby Settings; LAN clears. */
     bool      netplay_force_input_relay;
     bool      netplay_force_turn;
     /* True = rollback invent path (lobby default). UI exposes “Disable Rollback”. */

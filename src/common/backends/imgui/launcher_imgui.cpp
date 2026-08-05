@@ -3934,9 +3934,12 @@ static void np_ingest_last_error(LauncherModel* m, const RecompLauncherCNetplayC
                       "retry Play.");
     else if (std::strcmp(err, "relay_unavailable") == 0)
         std::snprintf(m->netplay_status, sizeof(m->netplay_status),
-                      "Server input relay is unavailable. Disable \"Server "
-                      "input relay\" in Lobby Settings, or fix "
-                      "INPUT_RELAY_* on the lobby server.");
+                      "Lobby UDP SFU is unavailable. Fix INPUT_RELAY_* on "
+                      "the lobby server (online matches require it).");
+    else if (std::strcmp(err, "host_slot_fixed") == 0)
+        std::snprintf(m->netplay_status, sizeof(m->netplay_status),
+                      "Host stays in seat 1. Rearrange guests among the "
+                      "other seats.");
     else if (std::strcmp(err, "not_host") == 0)
         std::snprintf(m->netplay_status, sizeof(m->netplay_status),
                       "Only the host can start the match.");
@@ -4140,11 +4143,13 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                               ImGuiSelectableFlags_SpanAllColumns |
                               ImGuiSelectableFlags_AllowOverlap,
                               ImVec2(0, member_row_h));
-            if (is_host && np->move_member && ImGui::BeginDragDropTarget()) {
+            /* Slot 0 = session host / sim authority — guests rearrange only. */
+            if (is_host && np->move_member && slot != 0 &&
+                ImGui::BeginDragDropTarget()) {
                 if (const ImGuiPayload* payload =
                         ImGui::AcceptDragDropPayload("NETPLAY_MEMBER_SLOT")) {
                     const int from_slot = *(const int*)payload->Data;
-                    if (from_slot != slot)
+                    if (from_slot != slot && from_slot != 0)
                         (void)np->move_member(np->ctx, from_slot, slot);
                 }
                 ImGui::EndDragDropTarget();
@@ -4155,14 +4160,16 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
             ImVec2 grip_max = ImGui::GetItemRectMax();
             const float grip_cx = (grip_min.x + grip_max.x) * 0.5f;
             const float grip_cy = (grip_min.y + grip_max.y) * 0.5f;
-            ImU32 grip_col = imcol(is_host && occupied[slot] ? th.text_muted : th.border);
+            const int can_drag =
+                is_host && occupied[slot] && slot != 0 && np->move_member;
+            ImU32 grip_col = imcol(can_drag ? th.text_muted : th.border);
             ImDrawList* grip_dl = ImGui::GetWindowDrawList();
             for (int line = -1; line <= 1; ++line) {
                 const float y = grip_cy + px(4) * line;
                 grip_dl->AddLine(ImVec2(grip_cx - px(7), y),
                                  ImVec2(grip_cx + px(7), y), grip_col, px(1.5f));
             }
-            if (is_host && np->move_member && occupied[slot]) {
+            if (can_drag) {
                 if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
                 if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
                     ImGui::SetDragDropPayload("NETPLAY_MEMBER_SLOT", &slot, sizeof(slot));
@@ -5814,8 +5821,9 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::TextUnformatted("1. Portable toolchain");
         ImGui::PushTextWrapPos(wrap_x);
         ImGui::TextColored(col(th.text_muted),
-            "Automatic download fetches the cmake-clang-v1 pack and caches it "
-            "for reuse across titles. Uncheck to browse a local zip instead "
+            "Automatic download pulls the latest cmake-clang-v1 release and "
+            "caches it for reuse across titles (no per-game version pin). "
+            "Uncheck to browse a local zip instead "
             "(for offline machines, grab a release asset from the repo below).");
         ImGui::PopTextWrapPos();
         ImGui::Dummy(ImVec2(0, px(4)));
@@ -5825,7 +5833,7 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
                        kRetcommToolchainsUrl);
         ImGui::Dummy(ImVec2(0, px(6)));
 
-        if (ImGui::Checkbox("Download portable toolchain automatically##tc",
+        if (ImGui::Checkbox("Download latest portable toolchain##tc",
                             &m->setup_tc_auto)) {
             if (m->setup_tc_auto)
                 m->setup_error[0] = '\0';

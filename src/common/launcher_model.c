@@ -229,7 +229,8 @@ void launcher_model_init(LauncherModel* m,
     m->netplay_manual_input_delay = false; /* auto from max peer RTT at launch */
     m->netplay_lobby_input_prediction = 6; /* P = 4 + D at default D=2 */
     m->netplay_manual_input_prediction = false; /* auto P from RTT when rollback */
-    m->netplay_force_input_relay = false;
+    /* Online lobbies use lobby UDP SFU; LAN/direct clears this on host. */
+    m->netplay_force_input_relay = true;
     /* Default on for online lobbies (CGNAT); not exposed in Lobby Settings. */
     m->netplay_force_turn = true;
     /* Rollback on by default; Lobby Settings “Disable Rollback” opts out. */
