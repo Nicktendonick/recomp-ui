@@ -71,6 +71,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -121,6 +122,251 @@ LauncherPad g_pads[LNG_MAX_PADS];   // live gamepad list (repolled every frame)
 int         g_pad_count = 0;
 
 char        g_pick_buf[512] = {};    // ROM picker result
+
+struct BuiltinRomPicker {
+    bool active = false;
+    bool from_setup = false;
+    bool focus_path = false;
+    char title[96] = "Select game file";
+    char directory[1024] = {};
+    char selected[1024] = {};
+    char error[256] = {};
+    std::vector<std::string> patterns;
+    std::string description;
+};
+BuiltinRomPicker g_rom_picker;
+
+static std::string lower_ascii(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    return s;
+}
+
+static bool builtin_picker_matches(const std::filesystem::path& path) {
+    if (g_rom_picker.patterns.empty()) return true;
+    const std::string filename = lower_ascii(path.filename().string());
+    for (const std::string& raw : g_rom_picker.patterns) {
+        const std::string pattern = lower_ascii(raw);
+        if (pattern.empty() || pattern == "*" || pattern == "*.*") return true;
+        if (pattern.size() > 1 && pattern[0] == '*' &&
+            filename.size() >= pattern.size() - 1 &&
+            filename.compare(filename.size() - (pattern.size() - 1),
+                             pattern.size() - 1, pattern.substr(1)) == 0)
+            return true;
+        if (filename == pattern) return true;
+    }
+    return false;
+}
+
+static std::filesystem::path builtin_picker_initial_path(LauncherModel* m) {
+    std::error_code ec;
+    if (m && m->rom_full[0]) {
+        std::filesystem::path current(m->rom_full);
+        if (std::filesystem::is_regular_file(current, ec)) return current;
+    }
+    if (const char* hint = std::getenv("RECOMP_DISC_HINT")) {
+        std::filesystem::path hinted(hint);
+        ec.clear();
+        if (std::filesystem::is_regular_file(hinted, ec)) return hinted;
+    }
+    if (const char* image = std::getenv("RECOMP_APPIMAGE_PATH")) {
+        std::filesystem::path appimage(image);
+        ec.clear();
+        if (std::filesystem::exists(appimage.parent_path(), ec))
+            return appimage.parent_path();
+    }
+    if (const char* home = std::getenv("HOME")) return std::filesystem::path(home);
+    return std::filesystem::current_path(ec);
+}
+
+static void open_builtin_rom_picker(LauncherModel* m, const char* title,
+                                    const char* const* patterns, int pattern_count,
+                                    const char* description, bool from_setup) {
+    g_rom_picker = BuiltinRomPicker{};
+    g_rom_picker.active = true;
+    g_rom_picker.from_setup = from_setup;
+    std::snprintf(g_rom_picker.title, sizeof(g_rom_picker.title), "%s",
+                  title && title[0] ? title : "Select game file");
+    for (int i = 0; patterns && i < pattern_count; ++i)
+        if (patterns[i]) g_rom_picker.patterns.emplace_back(patterns[i]);
+    if (description) g_rom_picker.description = description;
+
+    std::filesystem::path initial = builtin_picker_initial_path(m);
+    std::error_code ec;
+    if (std::filesystem::is_regular_file(initial, ec)) {
+        std::snprintf(g_rom_picker.selected, sizeof(g_rom_picker.selected), "%s",
+                      initial.string().c_str());
+        initial = initial.parent_path();
+    }
+    if (initial.empty() || !std::filesystem::is_directory(initial, ec))
+        initial = std::filesystem::current_path(ec);
+    std::snprintf(g_rom_picker.directory, sizeof(g_rom_picker.directory), "%s",
+                  initial.string().c_str());
+    g_rom_picker.focus_path = true;
+}
+
+static void request_rom_picker(LauncherModel* m, const char* title,
+                               const char* const* patterns, int pattern_count,
+                               const char* description, bool from_setup) {
+    if (launcher_native_file_picker_available()) {
+        if (launcher_pick_file(title, patterns, pattern_count, description,
+                               g_pick_buf, sizeof(g_pick_buf)))
+            launcher_model_set_rom(m, g_pick_buf);
+        return;
+    }
+    open_builtin_rom_picker(m, title, patterns, pattern_count, description,
+                            from_setup);
+}
+
+static void draw_builtin_rom_picker_contents(LauncherModel* m,
+                                             const LauncherTheme& th,
+                                             bool standalone_popup) {
+    namespace fs = std::filesystem;
+    ImGui::TextColored(col(th.accent), "%s", g_rom_picker.title);
+    ImGui::TextColored(col(th.text_muted),
+                       "Built-in browser (no desktop file-picker service required)");
+    if (!g_rom_picker.description.empty())
+        ImGui::TextColored(col(th.text_muted), "Showing: %s",
+                           g_rom_picker.description.c_str());
+    ImGui::Dummy(ImVec2(0, px(6)));
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Folder");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(px(500));
+    bool enter_dir = ImGui::InputText("##builtin_picker_directory",
+                                      g_rom_picker.directory,
+                                      sizeof(g_rom_picker.directory),
+                                      ImGuiInputTextFlags_EnterReturnsTrue);
+    if (enter_dir) {
+        std::error_code ec;
+        if (!fs::is_directory(fs::path(g_rom_picker.directory), ec))
+            std::snprintf(g_rom_picker.error, sizeof(g_rom_picker.error),
+                          "That folder does not exist or cannot be opened.");
+        else
+            g_rom_picker.error[0] = '\0';
+    }
+
+    if (ImGui::Button("Up", ImVec2(px(82), px(30)))) {
+        fs::path parent = fs::path(g_rom_picker.directory).parent_path();
+        if (!parent.empty()) {
+            std::snprintf(g_rom_picker.directory, sizeof(g_rom_picker.directory),
+                          "%s", parent.string().c_str());
+            g_rom_picker.selected[0] = '\0';
+            g_rom_picker.error[0] = '\0';
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Home", ImVec2(px(82), px(30)))) {
+        if (const char* home = std::getenv("HOME")) {
+            std::snprintf(g_rom_picker.directory, sizeof(g_rom_picker.directory),
+                          "%s", home);
+            g_rom_picker.selected[0] = '\0';
+            g_rom_picker.error[0] = '\0';
+        }
+    }
+
+    struct PickerEntry {
+        fs::path path;
+        bool directory;
+    };
+    std::vector<PickerEntry> entries;
+    std::error_code ec;
+    const fs::path directory(g_rom_picker.directory);
+    fs::directory_iterator it(directory, fs::directory_options::skip_permission_denied, ec);
+    if (!ec) {
+        for (const fs::directory_entry& entry : it) {
+            std::error_code type_ec;
+            const bool is_dir = entry.is_directory(type_ec);
+            if (type_ec) continue;
+            if (is_dir || builtin_picker_matches(entry.path()))
+                entries.push_back({entry.path(), is_dir});
+        }
+        std::sort(entries.begin(), entries.end(),
+                  [](const PickerEntry& a, const PickerEntry& b) {
+                      if (a.directory != b.directory) return a.directory > b.directory;
+                      return lower_ascii(a.path.filename().string()) <
+                             lower_ascii(b.path.filename().string());
+                  });
+    } else if (!g_rom_picker.error[0]) {
+        std::snprintf(g_rom_picker.error, sizeof(g_rom_picker.error),
+                      "Unable to open this folder.");
+    }
+
+    ImGui::BeginChild("##builtin_picker_entries", ImVec2(0, px(300)),
+                      ImGuiChildFlags_Borders);
+    for (const PickerEntry& entry : entries) {
+        const std::string name = entry.path.filename().string();
+        std::string label = entry.directory ? "[Folder] " + name : name;
+        label += "##" + entry.path.string();
+        const bool selected =
+            !entry.directory && entry.path.string() == g_rom_picker.selected;
+        if (ImGui::Selectable(label.c_str(), selected,
+                              ImGuiSelectableFlags_AllowDoubleClick)) {
+            if (entry.directory) {
+                std::snprintf(g_rom_picker.directory,
+                              sizeof(g_rom_picker.directory), "%s",
+                              entry.path.string().c_str());
+                g_rom_picker.selected[0] = '\0';
+                g_rom_picker.error[0] = '\0';
+            } else {
+                std::snprintf(g_rom_picker.selected,
+                              sizeof(g_rom_picker.selected), "%s",
+                              entry.path.string().c_str());
+                g_rom_picker.error[0] = '\0';
+            }
+        }
+    }
+    ImGui::EndChild();
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("File");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1);
+    if (g_rom_picker.focus_path) {
+        ImGui::SetKeyboardFocusHere();
+        g_rom_picker.focus_path = false;
+    }
+    ImGui::InputText("##builtin_picker_selected", g_rom_picker.selected,
+                     sizeof(g_rom_picker.selected));
+    if (g_rom_picker.error[0])
+        ImGui::TextColored(col(th.warn), "%s", g_rom_picker.error);
+
+    ImGui::Dummy(ImVec2(0, px(6)));
+    if (ImGui::Button("Use selected file", ImVec2(px(180), px(34)))) {
+        std::error_code file_ec;
+        fs::path selected(g_rom_picker.selected);
+        if (fs::is_regular_file(selected, file_ec) &&
+            builtin_picker_matches(selected)) {
+            launcher_model_set_rom(m, selected.string().c_str());
+            g_rom_picker.active = false;
+            if (standalone_popup) ImGui::CloseCurrentPopup();
+        } else {
+            std::snprintf(g_rom_picker.error, sizeof(g_rom_picker.error),
+                          "Select an existing file matching this game's file types.");
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(px(110), px(34)))) {
+        g_rom_picker.active = false;
+        if (standalone_popup) ImGui::CloseCurrentPopup();
+    }
+}
+
+static void draw_standalone_builtin_rom_picker(LauncherModel* m,
+                                                const LauncherTheme& th) {
+    if (!g_rom_picker.active || g_rom_picker.from_setup) return;
+    ImGui::OpenPopup("Select game file##builtin");
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(px(720), 0), ImGuiCond_Always);
+    if (ImGui::BeginPopupModal("Select game file##builtin", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize |
+                               ImGuiWindowFlags_NoMove)) {
+        draw_builtin_rom_picker_contents(m, th, true);
+        ImGui::EndPopup();
+    }
+}
 
 // Context flag the dashboard composer sets just before invoking the "game"
 // panel's registered draw() — the LauncherPanelDrawFn signature (Model*,
@@ -780,16 +1026,12 @@ void draw_game_panel(LauncherModel* m, const LauncherTheme& th, bool fill_h = fa
         const SystemProfile* prof = (const SystemProfile*)m->profile;
         char title[48];
         snprintf(title, sizeof(title), "Select %s", noun);
-        bool picked;
         if (prof && prof->rom_filter.patterns && prof->rom_filter.pattern_count > 0)
-            picked = launcher_pick_file(title, prof->rom_filter.patterns,
-                                        prof->rom_filter.pattern_count,
-                                        prof->rom_filter.desc,
-                                        g_pick_buf, sizeof(g_pick_buf));
+            request_rom_picker(m, title, prof->rom_filter.patterns,
+                               prof->rom_filter.pattern_count,
+                               prof->rom_filter.desc, false);
         else
-            picked = launcher_pick_file(title, NULL, 0, NULL,
-                                        g_pick_buf, sizeof(g_pick_buf));
-        if (picked) launcher_model_set_rom(m, g_pick_buf);
+            request_rom_picker(m, title, NULL, 0, NULL, false);
     }
 
     // MSU-1 patch-available sub-block: this game ships an IPS patch that
@@ -5527,19 +5769,29 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
 
     ImGui::OpenPopup("First-run setup");
     const ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    // Auto-sized setup content changes height as validation details appear.
+    // Recenter against its current size every frame so it cannot drift or clip.
+    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     /* Prefer content height (AlwaysAutoResize). Clamp to the work area. */
     const float max_h = vp->WorkSize.y * 0.92f;
-    ImGui::SetNextWindowSize(ImVec2(px(640), 0), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(
+        ImVec2(px(g_rom_picker.active && g_rom_picker.from_setup ? 720 : 640), 0),
+        ImGuiCond_Always);
     ImGui::SetNextWindowSizeConstraints(ImVec2(px(520), 0),
                                         ImVec2(FLT_MAX, max_h));
     if (!ImGui::BeginPopupModal("First-run setup", nullptr,
-                                ImGuiWindowFlags_AlwaysAutoResize))
+                                ImGuiWindowFlags_AlwaysAutoResize |
+                                ImGuiWindowFlags_NoMove))
         return;
 
     const float wrap_x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
     const char* noun = (m->rom_noun && m->rom_noun[0]) ? m->rom_noun : "ROM";
     const char* game = (m->game_name && m->game_name[0]) ? m->game_name : "this game";
+    if (g_rom_picker.active && g_rom_picker.from_setup) {
+        draw_builtin_rom_picker_contents(m, th, false);
+        ImGui::EndPopup();
+        return;
+    }
 
     /* ---- Page 0: portable toolchain ------------------------------------ */
     if (m->setup_needs_toolchain && m->setup_page == 0) {
@@ -5794,15 +6046,12 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
                               "Select %s (.cue preferred)", noun);
             else
                 std::snprintf(title, sizeof(title), "Select %s", noun);
-            bool picked = false;
             if (prof && prof->rom_filter.pattern_count > 0)
-                picked = launcher_pick_file(title, prof->rom_filter.patterns,
-                                            prof->rom_filter.pattern_count,
-                                            prof->rom_filter.desc,
-                                            g_pick_buf, sizeof(g_pick_buf));
+                request_rom_picker(m, title, prof->rom_filter.patterns,
+                                   prof->rom_filter.pattern_count,
+                                   prof->rom_filter.desc, true);
             else
-                picked = launcher_pick_rom(g_pick_buf, sizeof(g_pick_buf));
-            if (picked) launcher_model_set_rom(m, g_pick_buf);
+                request_rom_picker(m, title, NULL, 0, NULL, true);
         }
         ImGui::PopStyleVar();
         if (m->profile && m->profile->verify.mode == 1)
@@ -6096,6 +6345,7 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
 
     draw_footer(m, th, footer_h);
     draw_setup_wizard_modal(m, th);
+    draw_standalone_builtin_rom_picker(m, th);
     draw_skip_modal(m);
     draw_netplay_player_modal(m);
     draw_netplay_network_modal(m, th);

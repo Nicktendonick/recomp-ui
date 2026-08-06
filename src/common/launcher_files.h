@@ -4,7 +4,9 @@
 //   Windows / macOS — tinyfiledialogs (GetOpenFileName / osascript)
 //   Linux — posix_spawn of zenity or kdialog (avoids tinyfd's popen/vfork,
 //           which SIGSEGVs from the multithreaded SDL UI thread)
-// Falls back to tinyfd on Linux only if neither zenity nor kdialog is installed.
+// The ImGui backend supplies an in-launcher browser when Linux has neither
+// zenity nor kdialog. Never fall through to tinyfd there: its "missing
+// software" console/xmessage fallback is not a usable file picker.
 //
 // Deliberately SDL-version agnostic: it does not depend on SDL3's
 // SDL_ShowOpenFileDialog, so it works identically on SDL2 and SDL3.
@@ -30,6 +32,11 @@ extern "C" {
 // call site in launcher_imgui.cpp. Per-console extensions belong in that
 // console's profile (SystemProfile.rom_filter), never here.
 bool launcher_pick_rom(char* out_path, size_t out_cap);
+
+// Whether a blocking native picker is available. This is always true on
+// Windows/macOS. On Linux it reports zenity/kdialog availability so a GUI
+// backend can use its own in-app browser when neither is installed.
+bool launcher_native_file_picker_available(void);
 
 // Open the OS "choose a folder" dialog (for the MSU-1 music folder). Returns
 // true and fills `out_path` on success.
