@@ -197,6 +197,12 @@ typedef struct RecompLauncherCNetplayCallbacks {
  * rebuild their catalogs after any mutation without dangling UI pointers. */
 #define RECOMP_LAUNCHER_MOD_ID_MAX 96
 #define RECOMP_LAUNCHER_MOD_VALUE_MAX 128
+#define RECOMP_LAUNCHER_MOD_AUTHOR_LINK_MAX 8
+
+typedef struct RecompLauncherCModAuthorLink {
+    char name[64];
+    char url[256];
+} RecompLauncherCModAuthorLink;
 
 typedef enum RecompLauncherCModOptionType {
     RECOMP_MOD_OPTION_BOOLEAN = 0,
@@ -209,8 +215,12 @@ typedef struct RecompLauncherCModPackage {
     char version[32];
     char name[128];
     char author[96];
+    RecompLauncherCModAuthorLink author_links[RECOMP_LAUNCHER_MOD_AUTHOR_LINK_MAX];
+    int  author_link_count;
     char description[512];
     char license[64];
+    char source_name[128];
+    char source_url[256];
     char status[256];
     int  enabled;
     int  option_count;
@@ -228,7 +238,11 @@ typedef struct RecompLauncherCModFeature {
     char package_name[128];
     char name[128];
     char author[96];
+    RecompLauncherCModAuthorLink author_links[RECOMP_LAUNCHER_MOD_AUTHOR_LINK_MAX];
+    int  author_link_count;
     char description[512];
+    char source_name[128];
+    char source_url[256];
     char group[96];
     char status[256];
     int  enabled;
@@ -248,6 +262,11 @@ typedef struct RecompLauncherCModOption {
     int64_t max_value;
     int64_t step;
     int  choice_count;
+    /* Non-zero when another option in the same feature currently overrides
+     * this one (manifest key: disabled_by). The provider resolves it, so the
+     * UI only has to grey the control out -- it never cross-references
+     * options itself. Example: ticking "Instant" makes the speed box inert. */
+    int  disabled;
 } RecompLauncherCModOption;
 
 typedef struct RecompLauncherCModChoice {
@@ -473,6 +492,17 @@ struct RecompLauncherCSettings {
     // independent of aspect/widescreen: it describes physical host windows,
     // not how a game's camera is rendered inside one of them.
     int display_layout;
+    // ---- PSX geometry-precision settings (capability-gated by
+    // GameInfo.has_geometry_precision) — appended additively, same ABI
+    // convention as every block above. ----
+    // The PS1's GTE projects in 16.16 and then discards the fraction when it
+    // saturates screen coordinates to whole pixels, so a moving mesh shimmers;
+    // and the GPU interpolates UVs affinely, so large floor/wall textures swim.
+    // These are the two opt-in corrections. Both are visual only — the
+    // guest-visible GTE screen coordinates stay integer and fully faithful.
+    // 0 = off (the faithful default on a fresh config).
+    int  geometry_correction;    // bool: sub-pixel vertex precision
+    int  perspective_texturing;  // bool: perspective-correct UVs
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
@@ -847,6 +877,15 @@ typedef struct RecompLauncherCGameInfo {
     int (*ensure_toolchain_with_progress)(
         int download, const char* zip_path, char* err_msg, size_t err_cap,
         RecompLauncherCPrepareProgressFn on_progress, void* progress_ctx);
+    /* PSX geometry-precision controls (Settings.geometry_correction /
+     * perspective_texturing). 0 => no row drawn, so every console that leaves
+     * this unset keeps exactly today's settings surface. One flag still gates
+     * both settings because they are two halves of the same enhancement, but
+     * only perspective_texturing currently draws a control: geometry_correction
+     * is known to crack meshes at the coverage the runtime can achieve and is
+     * withdrawn from the UI while staying readable from game.toml/settings.toml
+     * (psxrecomp ENHANCEMENTS.md G1.8/G1.9). Appended for ABI stability. */
+    int  has_geometry_precision;
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */

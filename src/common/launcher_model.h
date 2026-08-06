@@ -302,6 +302,10 @@ typedef struct {
     bool     has_spu_hq;
     bool     has_skip_fmv;
     bool     has_turbo_loads;
+    // PSX geometry precision: sub-pixel vertices + perspective-correct UVs.
+    // One flag gates both rows (two halves of one enhancement); the settings
+    // stay independent. false => both rows hidden.
+    bool     has_geometry_precision;
     // (no has_fullscreen_toggle: the Fullscreen row is universal — every
     // console draws it; the ABI flag of that name is deprecated/ignored.)
     bool     has_bios;
@@ -531,6 +535,12 @@ void launcher_model_cycle_aa(LauncherModel* m);            // Off/2x/4x/8x (MSAA
 const char* launcher_model_aa_label(const LauncherModel* m);
 void launcher_model_toggle_texture_filter(LauncherModel* m);   // Nearest/Bilinear
 const char* launcher_model_texture_filter_label(const LauncherModel* m);
+// PSX geometry precision (gated on has_geometry_precision).
+void launcher_model_toggle_geometry_correction(LauncherModel* m);
+void launcher_model_toggle_perspective_texturing(LauncherModel* m);
+// True when geometry correction is on but supersampling is 1x, where the
+// correction rounds back to the native pixel and has no visible effect.
+bool launcher_model_geometry_correction_inert(const LauncherModel* m);
 void launcher_model_cycle_screen_kind(LauncherModel* m);       // Raw/CRT/Composite/Trinitron
 const char* launcher_model_screen_kind_label(const LauncherModel* m);
 void launcher_model_toggle_frame_interp(LauncherModel* m);

@@ -256,6 +256,9 @@ void apply_scale(const LauncherTheme& th, float scale, const char* font_path,
     style.Colors[ImGuiCol_CheckMark]       = col(th.accent);
     style.Colors[ImGuiCol_Text]            = col(th.text);
     style.Colors[ImGuiCol_TextDisabled]    = col(th.text_muted);
+#if defined(IMGUI_VERSION_NUM) && IMGUI_VERSION_NUM >= 19100
+    style.Colors[ImGuiCol_TextLink]        = col(th.accent2);
+#endif
     style.Colors[ImGuiCol_Separator]       = col(th.border);
     style.Colors[ImGuiCol_ScrollbarBg]     = col(th.panel);
     style.Colors[ImGuiCol_ScrollbarGrab]   = col(th.border);
@@ -1850,7 +1853,8 @@ static const char* elide_left(const char* s, float max_w, char* out, size_t cap)
 bool any_deep_display(const LauncherModel* m) {
     return m->has_window_size || m->has_renderer || m->has_supersampling ||
            m->has_antialiasing || m->has_texture_filter || m->has_screen_kind ||
-           m->has_frame_interp || m->has_skip_fmv || m->has_turbo_loads;
+           m->has_frame_interp || m->has_skip_fmv || m->has_turbo_loads ||
+           m->has_geometry_precision;
 }
 
 // Whether the DISPLAY card should grow to fit its content (AutoResizeY) rather
@@ -2085,6 +2089,22 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         bool affine = m->s.affine_filter != 0;
         if (ImGui::Checkbox("##affine_filter", &affine))
             launcher_model_toggle_affine_filter(m);
+    }
+
+    if (m->has_geometry_precision) {
+        // Geometry correction deliberately draws NO row (cracks meshes at the
+        // coverage the runtime can achieve; see psxrecomp ENHANCEMENTS.md
+        // G1.8/G1.9). ABI + game.toml/settings.toml remain readable.
+        row_label("Perspective textures", th);
+        bool persp = m->s.perspective_texturing != 0;
+        if (ImGui::Checkbox("##persptex", &persp))
+            launcher_model_toggle_perspective_texturing(m);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Interpolates textures with perspective, which "
+                              "stops large floors and walls from warping as the "
+                              "camera moves.\n\nApplied only to polygons the "
+                              "runtime can prove came from the 3D pipeline, so "
+                              "2D art and menus are left alone.");
     }
 
     if (m->has_screen_kind) {
@@ -4822,6 +4842,43 @@ struct ModIntegerEditState {
     std::string provider_value;
 };
 
+static void draw_linkified_mod_author(
+    const char* author_text,
+    const RecompLauncherCModAuthorLink* author_links,
+    int author_link_count,
+    const LauncherTheme& th) {
+    if (!author_text || !author_text[0]) return;
+    const std::string author(author_text);
+    size_t cursor = 0;
+    ImGui::TextColored(col(th.text_muted), "by: ");
+    ImGui::SameLine(0, 0);
+    while (cursor < author.size()) {
+        size_t next = std::string::npos;
+        const RecompLauncherCModAuthorLink* link = nullptr;
+        for (int i = 0; i < author_link_count; ++i) {
+            const auto& candidate = author_links[i];
+            if (!candidate.name[0] || !candidate.url[0]) continue;
+            const size_t found = author.find(candidate.name, cursor);
+            if (found < next) {
+                next = found;
+                link = &candidate;
+            }
+        }
+        if (!link) {
+            ImGui::TextColored(col(th.text_muted), "%s", author.c_str() + cursor);
+            break;
+        }
+        if (next > cursor) {
+            const std::string prefix = author.substr(cursor, next - cursor);
+            ImGui::TextColored(col(th.text_muted), "%s", prefix.c_str());
+            ImGui::SameLine(0, 0);
+        }
+        ImGui::TextLinkOpenURL(link->name, link->url);
+        cursor = next + std::strlen(link->name);
+        if (cursor < author.size()) ImGui::SameLine(0, 0);
+    }
+}
+
 static bool draw_mod_integer_option(const RecompLauncherCModOption& option,
                                     char* next, size_t next_size) {
     ImGui::TextUnformatted(option.label);
@@ -4949,8 +5006,17 @@ static void draw_mod_packages(LauncherModel* m, const LauncherTheme& th) {
             ImGui::SameLine();
             ImGui::TextColored(col(th.text_muted), "%s", package.version);
             if (package.author[0])
-                ImGui::TextColored(col(th.text_muted), "by %s", package.author);
+                draw_linkified_mod_author(
+                    package.author, package.author_links,
+                    package.author_link_count, th);
             if (package.description[0]) ImGui::TextWrapped("%s", package.description);
+            if (package.source_url[0]) {
+                ImGui::TextColored(col(th.text_muted), "Source: ");
+                ImGui::SameLine(0, 0);
+                ImGui::TextLinkOpenURL(
+                    package.source_name[0] ? package.source_name : "Project page",
+                    package.source_url);
+            }
             if (package.license[0])
                 ImGui::TextColored(col(th.text_muted), "License: %s", package.license);
             ImGui::Spacing();
@@ -5117,6 +5183,13 @@ static void draw_mod_feature_option(LauncherModel* m,
     char next[RECOMP_LAUNCHER_MOD_VALUE_MAX];
     std::snprintf(next, sizeof(next), "%s", option.value);
 
+    /* Another option currently overrides this one (e.g. "Instant" ticked makes
+     * a speed box meaningless). Show it, greyed, so the player can see the
+     * value they will get back when they untick -- hiding it would make the
+     * row jump around and lose the setting from view. */
+    const bool inert = option.disabled != 0;
+    if (inert) ImGui::BeginDisabled();
+
     if (option.type == RECOMP_MOD_OPTION_BOOLEAN) {
         bool value = std::strcmp(option.value, "true") == 0;
         if (ImGui::Checkbox(option.label, &value)) {
@@ -5166,9 +5239,14 @@ static void draw_mod_feature_option(LauncherModel* m,
         changed = draw_mod_integer_option(option, next, sizeof(next));
     }
 
-    if (ImGui::IsItemHovered() && option.description[0])
+    const bool hovered = ImGui::IsItemHovered();
+    if (inert) ImGui::EndDisabled();
+
+    if (hovered && option.description[0])
         ImGui::SetTooltip("%s", option.description);
-    if (changed &&
+    /* A disabled control cannot report a change, but guard anyway so a future
+     * widget that stays interactive can never write through an inert option. */
+    if (changed && !inert &&
         !mods->feature_set_option(mods->ctx, feature.package_id, feature.id,
                                   option.id, next)) {
         mod_note_error(m);
@@ -5440,7 +5518,16 @@ static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
                 feature.package_version[0] ? " " : "",
                 feature.package_version);
             if (feature.author[0])
-                ImGui::TextColored(col(th.text_muted), "by %s", feature.author);
+                draw_linkified_mod_author(
+                    feature.author, feature.author_links,
+                    feature.author_link_count, th);
+            if (feature.source_url[0]) {
+                ImGui::TextColored(col(th.text_muted), "Source: ");
+                ImGui::SameLine(0, 0);
+                ImGui::TextLinkOpenURL(
+                    feature.source_name[0] ? feature.source_name : "Project page",
+                    feature.source_url);
+            }
             if (feature.description[0])
                 ImGui::TextWrapped("%s", feature.description);
             ImGui::Spacing();
