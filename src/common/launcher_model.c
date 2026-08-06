@@ -451,6 +451,17 @@ void launcher_model_init(LauncherModel* m,
             m->netplay_local_room = false;
             m->netplay_host_endpoint[0] = '\0';
         }
+        /* Mirror engine match caps — UI default rollback=true must not flip a
+         * delay-sync Cable Club rematch on ▶ Play without opening Settings. */
+        if (m->netplay->rollback_get)
+            m->netplay_rollback =
+                m->netplay->rollback_get(m->netplay->ctx) != 0;
+        if (m->netplay->input_delay_get) {
+            m->netplay_lobby_input_delay =
+                m->netplay->input_delay_get(m->netplay->ctx);
+            if (m->netplay_lobby_input_delay < 2)
+                m->netplay_lobby_input_delay = 2;
+        }
     }
 
     /* First-run setup: host can force it, or we open when ROM/BIOS is missing.
