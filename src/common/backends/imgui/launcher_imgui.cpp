@@ -2339,6 +2339,36 @@ void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
             }
         }
     }
+
+    /* MotK codegen host: local PGO train under SYSTEM (no separate VIDEO card). */
+    if (is_psx && m->pgo_optimize_with_progress_cb) {
+        ImGui::Dummy(ImVec2(0, px(14)));
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() +
+                               ImGui::GetContentRegionAvail().x);
+        ImGui::TextColored(col(th.text_muted),
+                           "Train this PC on the intro FMV, then rebuild with "
+                           "profile-guided optimization. Safe for rollback "
+                           "netplay — each peer may optimize independently.");
+        ImGui::PopTextWrapPos();
+        ImGui::Dummy(ImVec2(0, px(8)));
+        const bool can_pgo = m->rom_present && m->rom_full[0] &&
+                             strcmp(m->rom_size, "--") != 0 &&
+                             !m->setup_preparing;
+        if (!can_pgo) ImGui::BeginDisabled();
+        if (ImGui::Button("Optimize FMV Playback", ImVec2(0, btn_h)))
+            launcher_model_request_pgo_optimize(m);
+        if (!can_pgo) {
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip(m->setup_preparing
+                                      ? "A build job is already running."
+                                      : "Select a disc image first.");
+        } else if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Instrument → play intro (~3 min) → rebuild with PGO. "
+                "Uses existing generated C (no setup wizard).");
+        }
+    }
     ImGui::PopStyleVar();
 }
 void panel_system_draw(LauncherModel* m, const LauncherTheme* th) {
@@ -6314,6 +6344,70 @@ void draw_bios_play_modal(LauncherModel* m, const LauncherTheme& th) {
     ImGui::EndPopup();
 }
 
+void draw_pgo_confirm_modal(LauncherModel* m, const LauncherTheme& th) {
+    if (m->pgo_confirm_open) ImGui::OpenPopup("Optimize FMV Playback?");
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal("Optimize FMV Playback?", nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(460));
+    ImGui::TextWrapped(
+        "This will rebuild an instrumented binary, run the intro FMV in PGO "
+        "training mode (video window open — do not close or interact with it), "
+        "then rebuild the game with those profiles. Existing generated C is "
+        "reused; the setup wizard is not run.");
+    ImGui::Dummy(ImVec2(0, px(8)));
+    ImGui::TextColored(col(th.warn),
+                       "Expect several minutes. Keep this launcher open until "
+                       "training finishes, then the optimized binary relaunches.");
+    ImGui::Dummy(ImVec2(0, px(6)));
+    ImGui::TextColored(col(th.text_muted),
+                       "Each peer may run this independently for rollback "
+                       "netplay. Digests must still match.");
+    ImGui::PopTextWrapPos();
+    ImGui::Dummy(ImVec2(0, px(12)));
+    if (ImGui::Button("Start training", ImVec2(px(160), px(32))))
+        launcher_model_pgo_confirm_accept(m);
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(px(100), px(32))))
+        launcher_model_pgo_confirm_cancel(m);
+    if (!m->pgo_confirm_open) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
+void draw_fmv_timing_confirm_modal(LauncherModel* m, const LauncherTheme& th) {
+    if (m->fmv_timing_confirm_open)
+        ImGui::OpenPopup("Apply FMV Timing Opt?");
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal("Apply FMV Timing Opt?", nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(460));
+    ImGui::TextWrapped(
+        "This regenerates game C from game.toml (including "
+        "load_charge_batch for VLC leaves), then rebuilds. It does not "
+        "disable load-delay and does not run PGO training.");
+    ImGui::Dummy(ImVec2(0, px(8)));
+    ImGui::TextColored(col(th.warn),
+                       "Expect a few minutes for generate + rebuild. The "
+                       "launcher will relaunch the new binary when done.");
+    ImGui::Dummy(ImVec2(0, px(6)));
+    ImGui::TextColored(col(th.text_muted),
+                       "Both peers need the same load_charge_batch setting "
+                       "for matching rollback digests.");
+    ImGui::PopTextWrapPos();
+    ImGui::Dummy(ImVec2(0, px(12)));
+    if (ImGui::Button("Generate & rebuild", ImVec2(px(180), px(32))))
+        launcher_model_fmv_timing_confirm_accept(m);
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(px(100), px(32))))
+        launcher_model_fmv_timing_confirm_cancel(m);
+    if (!m->fmv_timing_confirm_open) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
 void draw_skip_modal(LauncherModel* m) {
     if (m->skip_modal_open) ImGui::OpenPopup("Skip the launcher on boot?");
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
@@ -6461,6 +6555,8 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
     draw_setup_wizard_modal(m, th);
     draw_bios_confirm_modal(m, th);
     draw_bios_play_modal(m, th);
+    draw_pgo_confirm_modal(m, th);
+    draw_fmv_timing_confirm_modal(m, th);
     draw_skip_modal(m);
     draw_netplay_player_modal(m);
     draw_netplay_network_modal(m, th);

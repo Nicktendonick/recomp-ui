@@ -178,6 +178,16 @@ typedef struct {
                                     char* err_msg, size_t err_cap,
                                     RecompLauncherCPrepareProgressFn on_progress,
                                     void* progress_ctx);
+    int (*pgo_optimize_with_progress_cb)(const char* rom_path,
+                                         char* out_exe_path, size_t out_cap,
+                                         char* err_msg, size_t err_cap,
+                                         RecompLauncherCPrepareProgressFn on_progress,
+                                         void* progress_ctx);
+    int (*fmv_timing_optimize_with_progress_cb)(const char* rom_path,
+                                                char* out_exe_path, size_t out_cap,
+                                                char* err_msg, size_t err_cap,
+                                                RecompLauncherCPrepareProgressFn on_progress,
+                                                void* progress_ctx);
     const char* prepare_disc_label;   // borrowed; NULL => default button text
     const char* prepare_disc_note;    // borrowed; NULL => default help
     const char* prepare_section_title;   // borrowed; NULL => "Convert raw dump…"
@@ -185,6 +195,10 @@ typedef struct {
     const char* prepare_success_status;  // borrowed; NULL => "Disc ready."
     const char* rebuild_busy_status;     // borrowed; NULL => "Building game…"
     const char* rebuild_success_status;  // borrowed; NULL => "Build complete."
+    const char* pgo_busy_status;         // borrowed; NULL => "Optimizing FMV…"
+    const char* pgo_success_status;      // borrowed; NULL => "FMV optimize complete."
+    const char* fmv_timing_busy_status;  // borrowed; NULL => "Applying FMV timing…"
+    const char* fmv_timing_success_status; // borrowed; NULL => "FMV timing applied."
     bool        prepare_use_selected_rom; // button uses current ROM (no 2nd picker)
     bool        rebuild_after_prepare;
     bool        relaunch_after_rebuild;
@@ -328,6 +342,8 @@ typedef struct {
     LngAction action;
     int       cfg_player;            // 0..LNG_MAX_PLAYERS-1 — which player the Controller view edits
     bool      skip_modal_open;       // "Skip the launcher on boot?" confirm
+    bool      pgo_confirm_open;      // SYSTEM → VIDEO → Optimize FMV confirm
+    bool      fmv_timing_confirm_open; // SYSTEM → VIDEO → Apply FMV Timing confirm
     bool      setup_wizard_open;     // first-run BIOS/ROM setup (blocking)
     int       setup_page;            // 0 = toolchain, 1 = BIOS/ROM/generate
     bool      setup_tc_auto;         // download portable toolchain (default true)
@@ -670,6 +686,13 @@ void launcher_model_refresh_bios_status(LauncherModel* m);
 void launcher_model_start_prepare_disc(LauncherModel* m, const char* source_path);
 // Kick rebuild_with_progress alone (same busy UI as prepare).
 void launcher_model_start_rebuild(LauncherModel* m);
+// Confirm + kick pgo_optimize_with_progress (instrument → train → use rebuild).
+void launcher_model_request_pgo_optimize(LauncherModel* m);
+void launcher_model_pgo_confirm_accept(LauncherModel* m);
+void launcher_model_pgo_confirm_cancel(LauncherModel* m);
+void launcher_model_request_fmv_timing_optimize(LauncherModel* m);
+void launcher_model_fmv_timing_confirm_accept(LauncherModel* m);
+void launcher_model_fmv_timing_confirm_cancel(LauncherModel* m);
 // Kick ensure_toolchain_with_progress (download and/or offline zip). On success
 // advances setup_page to the BIOS/ROM/generate step.
 void launcher_model_start_ensure_toolchain(LauncherModel* m);

@@ -184,7 +184,8 @@ static const char* kHotkeyKey[LNG_HK_COUNT] = {
 // Built-in defaults (shown when config.ini has no line; "" = unbound).
 static const char* kHotkeyDef[LNG_HK_COUNT] = {
     "Alt+Return", "Ctrl+R", "Shift+P", "P", "Tab",
-    "", "", "", "", "F", "R",
+    /* WindowBigger/Smaller unbound; VolumeUp/Down = numpad +/- (MotK runtime). */
+    "", "", "Keypad +", "Keypad -", "F", "R",
     "", "", ""
 };
 

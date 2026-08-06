@@ -810,6 +810,27 @@ typedef struct RecompLauncherCGameInfo {
     const char* rebuild_busy_status;     /* NULL => "Building game…" */
     const char* rebuild_success_status;  /* NULL => "Build complete." */
 
+    /* ---- optional PGO optimize (MotK FMV; skip generate / setup wizard) ---
+     * pgo_optimize_with_progress: instrument → train (video) → PGO use rebuild
+     * on existing generated C. Same success/relaunch contract as rebuild. */
+    int (*pgo_optimize_with_progress)(const char* rom_path,
+                                      char* out_exe_path, size_t out_cap,
+                                      char* err_msg, size_t err_cap,
+                                      RecompLauncherCPrepareProgressFn on_progress,
+                                      void* progress_ctx);
+    const char* pgo_busy_status;         /* NULL => "Optimizing FMV…" */
+    const char* pgo_success_status;      /* NULL => "FMV optimize complete." */
+
+    /* ---- optional FMV timing opt (MotK VLC load-charge batch; regen+rebuild)
+     * Unlike PGO, this regenerates C from game.toml then rebuilds (no train). */
+    int (*fmv_timing_optimize_with_progress)(const char* rom_path,
+                                             char* out_exe_path, size_t out_cap,
+                                             char* err_msg, size_t err_cap,
+                                             RecompLauncherCPrepareProgressFn on_progress,
+                                             void* progress_ctx);
+    const char* fmv_timing_busy_status;     /* NULL => "Applying FMV timing…" */
+    const char* fmv_timing_success_status;  /* NULL => "FMV timing applied." */
+
     /* When 1, the setup modal hides "Continue to launcher" and requires
      * prepare (and rebuild when rebuild_after_prepare is set). Local codegen
      * first-run: Generate & rebuild, then relaunch — Quit is the only other exit. */

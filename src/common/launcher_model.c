@@ -140,6 +140,9 @@ void launcher_model_init(LauncherModel* m,
         m->prepare_disc_cb      = game->prepare_disc;
         m->prepare_with_progress_cb = game->prepare_with_progress;
         m->rebuild_with_progress_cb = game->rebuild_with_progress;
+        m->pgo_optimize_with_progress_cb = game->pgo_optimize_with_progress;
+        m->fmv_timing_optimize_with_progress_cb =
+            game->fmv_timing_optimize_with_progress;
         m->prepare_disc_label   = game->prepare_disc_label;
         m->prepare_disc_note    = game->prepare_disc_note;
         m->prepare_section_title = game->prepare_section_title;
@@ -147,6 +150,10 @@ void launcher_model_init(LauncherModel* m,
         m->prepare_success_status = game->prepare_success_status;
         m->rebuild_busy_status  = game->rebuild_busy_status;
         m->rebuild_success_status = game->rebuild_success_status;
+        m->pgo_busy_status      = game->pgo_busy_status;
+        m->pgo_success_status   = game->pgo_success_status;
+        m->fmv_timing_busy_status = game->fmv_timing_busy_status;
+        m->fmv_timing_success_status = game->fmv_timing_success_status;
         m->prepare_use_selected_rom = game->prepare_use_selected_rom != 0;
         m->rebuild_after_prepare = game->rebuild_after_prepare != 0;
         m->relaunch_after_rebuild = game->relaunch_after_rebuild != 0;
@@ -1465,7 +1472,9 @@ void launcher_model_finish_setup(LauncherModel* m) {
 enum {
     PREP_JOB_PREPARE = 0,
     PREP_JOB_REBUILD = 1,
-    PREP_JOB_TOOLCHAIN = 2
+    PREP_JOB_TOOLCHAIN = 2,
+    PREP_JOB_PGO = 3,
+    PREP_JOB_FMV_TIMING = 4
 };
 
 typedef struct {
@@ -1571,6 +1580,24 @@ static void* prep_thread_main(void* arg) {
         } else {
             safe_copy(j->err, sizeof(j->err), "No rebuild callback.");
         }
+    } else if (j->kind == PREP_JOB_PGO) {
+        if (j->m && j->m->pgo_optimize_with_progress_cb) {
+            j->result = j->m->pgo_optimize_with_progress_cb(
+                            j->source, j->out_path, sizeof(j->out_path),
+                            j->err, sizeof(j->err),
+                            prep_progress_cb, j) ? 1 : 0;
+        } else {
+            safe_copy(j->err, sizeof(j->err), "No PGO optimize callback.");
+        }
+    } else if (j->kind == PREP_JOB_FMV_TIMING) {
+        if (j->m && j->m->fmv_timing_optimize_with_progress_cb) {
+            j->result = j->m->fmv_timing_optimize_with_progress_cb(
+                            j->source, j->out_path, sizeof(j->out_path),
+                            j->err, sizeof(j->err),
+                            prep_progress_cb, j) ? 1 : 0;
+        } else {
+            safe_copy(j->err, sizeof(j->err), "No FMV timing optimize callback.");
+        }
     } else if (j->m && j->m->prepare_with_progress_cb) {
         j->result = j->m->prepare_with_progress_cb(
                         j->source, j->out_path, sizeof(j->out_path),
@@ -1617,6 +1644,90 @@ void launcher_model_start_rebuild(LauncherModel* m) {
     }
     m->setup_progress_title[0] = '\0';
     launcher_model_begin_rebuild_locked(m);
+}
+
+void launcher_model_request_pgo_optimize(LauncherModel* m) {
+    if (!m || m->setup_preparing || !m->pgo_optimize_with_progress_cb) return;
+    m->pgo_confirm_open = true;
+}
+
+void launcher_model_pgo_confirm_cancel(LauncherModel* m) {
+    if (!m) return;
+    m->pgo_confirm_open = false;
+}
+
+static void launcher_model_begin_pgo_locked(LauncherModel* m) {
+    memset(&g_prep_job, 0, sizeof(g_prep_job));
+    g_prep_job.m = m;
+    g_prep_job.kind = PREP_JOB_PGO;
+    g_prep_job.progress_pct = -1.0f;
+    safe_copy(g_prep_job.source, sizeof(g_prep_job.source), m->rom_full);
+    m->setup_preparing = true;
+    m->setup_prepare_pulse = 0.0f;
+    m->setup_prepare_fraction = -1.0f;
+    m->setup_error[0] = '\0';
+    safe_copy(m->setup_progress_title, sizeof(m->setup_progress_title),
+              "Optimize FMV Playback");
+    safe_copy(m->setup_status, sizeof(m->setup_status),
+              (m->pgo_busy_status && m->pgo_busy_status[0])
+                  ? m->pgo_busy_status
+                  : "Optimizing FMV (instrument → train → rebuild)…");
+    if (!prep_spawn_thread(m))
+        return;
+}
+
+void launcher_model_pgo_confirm_accept(LauncherModel* m) {
+    if (!m || m->setup_preparing || !m->pgo_optimize_with_progress_cb) return;
+    m->pgo_confirm_open = false;
+    if (!m->rom_full[0]) {
+        safe_copy(m->setup_error, sizeof(m->setup_error),
+                  "Select a disc image before optimizing FMV.");
+        return;
+    }
+    launcher_model_begin_pgo_locked(m);
+}
+
+void launcher_model_request_fmv_timing_optimize(LauncherModel* m) {
+    if (!m || m->setup_preparing || !m->fmv_timing_optimize_with_progress_cb)
+        return;
+    m->fmv_timing_confirm_open = true;
+}
+
+void launcher_model_fmv_timing_confirm_cancel(LauncherModel* m) {
+    if (!m) return;
+    m->fmv_timing_confirm_open = false;
+}
+
+static void launcher_model_begin_fmv_timing_locked(LauncherModel* m) {
+    memset(&g_prep_job, 0, sizeof(g_prep_job));
+    g_prep_job.m = m;
+    g_prep_job.kind = PREP_JOB_FMV_TIMING;
+    g_prep_job.progress_pct = -1.0f;
+    safe_copy(g_prep_job.source, sizeof(g_prep_job.source), m->rom_full);
+    m->setup_preparing = true;
+    m->setup_prepare_pulse = 0.0f;
+    m->setup_prepare_fraction = -1.0f;
+    m->setup_error[0] = '\0';
+    safe_copy(m->setup_progress_title, sizeof(m->setup_progress_title),
+              "Apply FMV Timing Opt");
+    safe_copy(m->setup_status, sizeof(m->setup_status),
+              (m->fmv_timing_busy_status && m->fmv_timing_busy_status[0])
+                  ? m->fmv_timing_busy_status
+                  : "Regenerating sources and rebuilding…");
+    if (!prep_spawn_thread(m))
+        return;
+}
+
+void launcher_model_fmv_timing_confirm_accept(LauncherModel* m) {
+    if (!m || m->setup_preparing || !m->fmv_timing_optimize_with_progress_cb)
+        return;
+    m->fmv_timing_confirm_open = false;
+    if (!m->rom_full[0]) {
+        safe_copy(m->setup_error, sizeof(m->setup_error),
+                  "Select a disc image before applying FMV timing.");
+        return;
+    }
+    launcher_model_begin_fmv_timing_locked(m);
 }
 
 bool launcher_model_can_advance_toolchain(const LauncherModel* m) {
@@ -1744,7 +1855,8 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
         return;
     }
 
-    if (kind == PREP_JOB_REBUILD) {
+    if (kind == PREP_JOB_REBUILD || kind == PREP_JOB_PGO ||
+        kind == PREP_JOB_FMV_TIMING) {
         if (result && out_path[0]) {
             safe_copy(m->relaunch_exe, sizeof(m->relaunch_exe), out_path);
             /* BIOS switch sticks only after a successful rebuild. */
@@ -1752,21 +1864,43 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
             /* Sidecars beside build/<exe> before the host execs it. */
             lm_persist_setup_sidecars(m);
             m->setup_prepare_satisfied = true;
-            safe_copy(m->setup_status, sizeof(m->setup_status),
-                      (m->rebuild_success_status && m->rebuild_success_status[0])
-                          ? m->rebuild_success_status
-                          : "Build complete.");
+            if (kind == PREP_JOB_PGO) {
+                safe_copy(m->setup_status, sizeof(m->setup_status),
+                          (m->pgo_success_status && m->pgo_success_status[0])
+                              ? m->pgo_success_status
+                              : "FMV optimize complete.");
+            } else if (kind == PREP_JOB_FMV_TIMING) {
+                safe_copy(m->setup_status, sizeof(m->setup_status),
+                          (m->fmv_timing_success_status &&
+                           m->fmv_timing_success_status[0])
+                              ? m->fmv_timing_success_status
+                              : "FMV timing applied.");
+            } else {
+                safe_copy(m->setup_status, sizeof(m->setup_status),
+                          (m->rebuild_success_status && m->rebuild_success_status[0])
+                              ? m->rebuild_success_status
+                              : "Build complete.");
+            }
             m->setup_error[0] = '\0';
             if (m->relaunch_after_rebuild) {
                 safe_copy(m->setup_status, sizeof(m->setup_status),
-                          "Build complete — restarting…");
+                          kind == PREP_JOB_PGO
+                              ? "FMV optimize complete — restarting…"
+                              : (kind == PREP_JOB_FMV_TIMING
+                                     ? "FMV timing applied — restarting…"
+                                     : "Build complete — restarting…"));
                 m->action = LNG_ACTION_RELAUNCH;
             }
         } else {
             lm_bios_revert_uncommitted(m);
             m->setup_status[0] = '\0';
             safe_copy(m->setup_error, sizeof(m->setup_error),
-                      err[0] ? err : "Rebuild failed.");
+                      err[0] ? err
+                             : (kind == PREP_JOB_PGO
+                                    ? "FMV optimize failed."
+                                    : (kind == PREP_JOB_FMV_TIMING
+                                           ? "FMV timing apply failed."
+                                           : "Rebuild failed.")));
         }
         return;
     }
