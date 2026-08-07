@@ -935,6 +935,11 @@ typedef struct RecompLauncherCGameInfo {
      * Appended for ABI stability. */
     int (*toolchain_update_available)(char* local_ver, size_t local_cap,
                                       char* remote_ver, size_t remote_cap);
+
+    /* Optional: after toolchain_is_ready returns 0, a short note when the host
+     * removed a broken cache (failed clang/lld smoke test). NULL/empty => none.
+     * Appended for ABI stability. */
+    const char* (*toolchain_repair_note)(void);
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */

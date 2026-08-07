@@ -6752,12 +6752,10 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     {
         const char* media_help =
             (plat == SETUP_PLAT_PSX)
-                ? "Select the .cue sheet (MODE2/2352) when present. Steam .car "
-                  "disc images can be selected directly. "
-                  "The .cue keeps multitrack / audio-track layout correct for "
-                  "generate and boot. Cooked .iso dumps are OK — Generate "
-                  "converts them to a working .bin/.cue, then verifies the "
-                  "result against the game’s known digests."
+                ? "Select the Redump-style .cue sheet only (sibling .bin track "
+                  "files stay in the same folder). The .cue keeps multitrack / "
+                  "audio-track layout correct for generate and boot. Bare "
+                  ".iso / .bin / .img dumps are not accepted here."
             : (plat == SETUP_PLAT_GBA)
                 ? "Select your verified Game Boy Advance ROM (.gba)."
             : (plat == SETUP_PLAT_SNES)
@@ -6864,16 +6862,19 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
                     launcher_model_start_prepare_disc(m, m->rom_full);
             } else {
                 char buf[512];
+                static const char* kPsxCueOnly[] = { "*.cue" };
                 static const char* kDumpPatterns[] = {
                     "*.cue", "*.iso", "*.bin", "*.img", "*.car", "*.chd", "*.*" };
+                const char* const* pats =
+                    (plat == SETUP_PLAT_PSX) ? kPsxCueOnly : kDumpPatterns;
+                const int npat = (plat == SETUP_PLAT_PSX) ? 1 : 7;
                 if (launcher_pick_file(
                         plat == SETUP_PLAT_PSX
                             ? "Select disc (.cue)"
                             : "Select raw disc dump to convert",
-                        kDumpPatterns, 7,
-                        plat == SETUP_PLAT_PSX
-                            ? "PlayStation disc (.cue .iso .bin .img .car .chd)"
-                            : "Disc dump",
+                        pats, npat,
+                        plat == SETUP_PLAT_PSX ? "PlayStation disc (.cue)"
+                                               : "Disc dump",
                         buf, sizeof(buf)))
                     launcher_model_start_prepare_disc(m, buf);
             }
