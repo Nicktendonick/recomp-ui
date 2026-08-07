@@ -123,10 +123,13 @@ int         g_pad_count = 0;
 
 char        g_pick_buf[512] = {};    // ROM picker result
 
+enum class BuiltinPickerKind { Rom, Bios, SetupToolchainZip };
+
 struct BuiltinRomPicker {
     bool active = false;
     bool from_setup = false;
     bool focus_path = false;
+    BuiltinPickerKind kind = BuiltinPickerKind::Rom;
     char title[96] = "Select game file";
     char directory[1024] = {};
     char selected[1024] = {};
@@ -158,16 +161,27 @@ static bool builtin_picker_matches(const std::filesystem::path& path) {
     return false;
 }
 
-static std::filesystem::path builtin_picker_initial_path(LauncherModel* m) {
+static std::filesystem::path builtin_picker_initial_path(LauncherModel* m,
+                                                         BuiltinPickerKind kind) {
     std::error_code ec;
-    if (m && m->rom_full[0]) {
+    if (kind == BuiltinPickerKind::Bios && m && m->s.bios_path[0]) {
+        std::filesystem::path current(m->s.bios_path);
+        if (std::filesystem::is_regular_file(current, ec)) return current;
+    }
+    if (kind == BuiltinPickerKind::SetupToolchainZip && m && m->setup_tc_zip[0]) {
+        std::filesystem::path current(m->setup_tc_zip);
+        if (std::filesystem::is_regular_file(current, ec)) return current;
+    }
+    if (kind == BuiltinPickerKind::Rom && m && m->rom_full[0]) {
         std::filesystem::path current(m->rom_full);
         if (std::filesystem::is_regular_file(current, ec)) return current;
     }
-    if (const char* hint = std::getenv("RECOMP_DISC_HINT")) {
-        std::filesystem::path hinted(hint);
-        ec.clear();
-        if (std::filesystem::is_regular_file(hinted, ec)) return hinted;
+    if (kind == BuiltinPickerKind::Rom) {
+        if (const char* hint = std::getenv("RECOMP_DISC_HINT")) {
+            std::filesystem::path hinted(hint);
+            ec.clear();
+            if (std::filesystem::is_regular_file(hinted, ec)) return hinted;
+        }
     }
     if (const char* image = std::getenv("RECOMP_APPIMAGE_PATH")) {
         std::filesystem::path appimage(image);
@@ -179,19 +193,25 @@ static std::filesystem::path builtin_picker_initial_path(LauncherModel* m) {
     return std::filesystem::current_path(ec);
 }
 
-static void open_builtin_rom_picker(LauncherModel* m, const char* title,
-                                    const char* const* patterns, int pattern_count,
-                                    const char* description, bool from_setup) {
+static void open_builtin_file_picker(LauncherModel* m, BuiltinPickerKind kind,
+                                     const char* title,
+                                     const char* const* patterns, int pattern_count,
+                                     const char* description, bool from_setup) {
     g_rom_picker = BuiltinRomPicker{};
     g_rom_picker.active = true;
     g_rom_picker.from_setup = from_setup;
+    g_rom_picker.kind = kind;
+    const char* fallback_title =
+        kind == BuiltinPickerKind::Bios             ? "Select BIOS file"
+        : kind == BuiltinPickerKind::SetupToolchainZip ? "Select toolchain zip"
+                                                    : "Select game file";
     std::snprintf(g_rom_picker.title, sizeof(g_rom_picker.title), "%s",
-                  title && title[0] ? title : "Select game file");
+                  title && title[0] ? title : fallback_title);
     for (int i = 0; patterns && i < pattern_count; ++i)
         if (patterns[i]) g_rom_picker.patterns.emplace_back(patterns[i]);
     if (description) g_rom_picker.description = description;
 
-    std::filesystem::path initial = builtin_picker_initial_path(m);
+    std::filesystem::path initial = builtin_picker_initial_path(m, kind);
     std::error_code ec;
     if (std::filesystem::is_regular_file(initial, ec)) {
         std::snprintf(g_rom_picker.selected, sizeof(g_rom_picker.selected), "%s",
@@ -205,17 +225,62 @@ static void open_builtin_rom_picker(LauncherModel* m, const char* title,
     g_rom_picker.focus_path = true;
 }
 
+/* On Linux, prefer the in-app browser: zenity/kdialog frequently open behind
+ * the SDL/ImGui window (or fail without a visible UI), which looks like Browse
+ * did nothing. On other platforms try native first and fall back on -1. */
+static bool prefer_builtin_file_picker(void) {
+#if defined(__linux__)
+    return true;
+#else
+    return false;
+#endif
+}
+
+static void apply_builtin_picker_selection(LauncherModel* m, const char* path) {
+    if (!m || !path) return;
+    if (g_rom_picker.kind == BuiltinPickerKind::Bios) {
+        launcher_model_request_bios_path(m, path);
+    } else if (g_rom_picker.kind == BuiltinPickerKind::SetupToolchainZip) {
+        std::snprintf(m->setup_tc_zip, sizeof(m->setup_tc_zip), "%s", path);
+        m->setup_error[0] = '\0';
+    } else {
+        launcher_model_set_rom(m, path);
+    }
+}
+
+static void request_file_picker(LauncherModel* m, BuiltinPickerKind kind,
+                                const char* title, const char* const* patterns,
+                                int pattern_count, const char* description,
+                                bool from_setup) {
+    if (!prefer_builtin_file_picker() &&
+        launcher_native_file_picker_available()) {
+        const int r = launcher_try_pick_file(title, patterns, pattern_count,
+                                             description, g_pick_buf,
+                                             sizeof(g_pick_buf));
+        if (r == 1) {
+            g_rom_picker.kind = kind; /* apply_ uses kind */
+            apply_builtin_picker_selection(m, g_pick_buf);
+            return;
+        }
+        if (r == 0) return; /* user cancelled */
+        /* r == -1: fall through to built-in browser */
+    }
+    open_builtin_file_picker(m, kind, title, patterns, pattern_count,
+                             description, from_setup);
+}
+
 static void request_rom_picker(LauncherModel* m, const char* title,
                                const char* const* patterns, int pattern_count,
                                const char* description, bool from_setup) {
-    if (launcher_native_file_picker_available()) {
-        if (launcher_pick_file(title, patterns, pattern_count, description,
-                               g_pick_buf, sizeof(g_pick_buf)))
-            launcher_model_set_rom(m, g_pick_buf);
-        return;
-    }
-    open_builtin_rom_picker(m, title, patterns, pattern_count, description,
-                            from_setup);
+    request_file_picker(m, BuiltinPickerKind::Rom, title, patterns,
+                        pattern_count, description, from_setup);
+}
+
+static void request_bios_picker(LauncherModel* m, const char* title,
+                                bool from_setup) {
+    static const char* kBiosPatterns[] = {"*.bin", "*.rom"};
+    request_file_picker(m, BuiltinPickerKind::Bios, title, kBiosPatterns, 2,
+                        "BIOS image (.bin .rom)", from_setup);
 }
 
 static void draw_builtin_rom_picker_contents(LauncherModel* m,
@@ -338,12 +403,18 @@ static void draw_builtin_rom_picker_contents(LauncherModel* m,
         fs::path selected(g_rom_picker.selected);
         if (fs::is_regular_file(selected, file_ec) &&
             builtin_picker_matches(selected)) {
-            launcher_model_set_rom(m, selected.string().c_str());
+            apply_builtin_picker_selection(m, selected.string().c_str());
             g_rom_picker.active = false;
             if (standalone_popup) ImGui::CloseCurrentPopup();
         } else {
-            std::snprintf(g_rom_picker.error, sizeof(g_rom_picker.error),
-                          "Select an existing file matching this game's file types.");
+            const char* err =
+                g_rom_picker.kind == BuiltinPickerKind::Bios
+                    ? "Select an existing BIOS image (.bin / .rom)."
+                : g_rom_picker.kind == BuiltinPickerKind::SetupToolchainZip
+                    ? "Select an existing toolchain .zip archive."
+                    : "Select an existing file matching this game's file types.";
+            std::snprintf(g_rom_picker.error, sizeof(g_rom_picker.error), "%s",
+                          err);
         }
     }
     ImGui::SameLine();
@@ -356,11 +427,17 @@ static void draw_builtin_rom_picker_contents(LauncherModel* m,
 static void draw_standalone_builtin_rom_picker(LauncherModel* m,
                                                 const LauncherTheme& th) {
     if (!g_rom_picker.active || g_rom_picker.from_setup) return;
-    ImGui::OpenPopup("Select game file##builtin");
+    const char* popup =
+        g_rom_picker.kind == BuiltinPickerKind::Bios
+            ? "Select BIOS file##builtin"
+        : g_rom_picker.kind == BuiltinPickerKind::SetupToolchainZip
+            ? "Select toolchain zip##builtin"
+            : "Select game file##builtin";
+    ImGui::OpenPopup(popup);
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
                             ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(px(720), 0), ImGuiCond_Always);
-    if (ImGui::BeginPopupModal("Select game file##builtin", nullptr,
+    if (ImGui::BeginPopupModal(popup, nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize |
                                ImGuiWindowFlags_NoMove)) {
         draw_builtin_rom_picker_contents(m, th, true);
@@ -2650,13 +2727,10 @@ void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
     ImGui::SameLine(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x -
                     browse_w);
     if (ImGui::Button("Browse", ImVec2(browse_w, btn_h))) {
-        char buf[512];
-        static const char* kBiosPatterns[] = { "*.bin", "*.rom" };
-        if (launcher_pick_file(is_gba ? "Select Game Boy Advance BIOS (gba_bios.bin)"
-                                      : "Select BIOS file",
-                               kBiosPatterns, 2,
-                               "BIOS image (.bin .rom)", buf, sizeof(buf)))
-            launcher_model_request_bios_path(m, buf);
+        request_bios_picker(m,
+                            is_gba ? "Select Game Boy Advance BIOS (gba_bios.bin)"
+                                   : "Select BIOS file",
+                            false);
     }
 
     // Line 2: secondary action under the path (PSX OpenBIOS / GBA Clear).
@@ -6496,14 +6570,10 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(12), px(6)));
             if (ImGui::Button("Browse zip…##tc", ImVec2(px(128), px(32)))) {
                 static const char* kZipPatterns[] = {"*.zip"};
-                if (launcher_pick_file(
-                        "Select cmake-clang-v1 toolchain zip", kZipPatterns, 1,
-                        "Toolchain zip archives", g_pick_buf,
-                        sizeof(g_pick_buf))) {
-                    std::snprintf(m->setup_tc_zip, sizeof(m->setup_tc_zip), "%s",
-                                  g_pick_buf);
-                    m->setup_error[0] = '\0';
-                }
+                request_file_picker(
+                    m, BuiltinPickerKind::SetupToolchainZip,
+                    "Select cmake-clang-v1 toolchain zip", kZipPatterns, 1,
+                    "Toolchain zip archives", true);
             }
             ImGui::PopStyleVar();
         }
@@ -6624,11 +6694,7 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::SameLine();
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(12), px(6)));
         if (ImGui::Button("Browse BIOS##setup", ImVec2(px(120), px(32)))) {
-            char buf[512];
-            static const char* kBiosPatterns[] = { "*.bin", "*.rom" };
-            if (launcher_pick_file(bios_picker, kBiosPatterns, 2,
-                                   "BIOS image (.bin .rom)", buf, sizeof(buf)))
-                launcher_model_request_bios_path(m, buf);
+            request_bios_picker(m, bios_picker, true);
         }
         if (offers_bundled) {
             ImGui::SameLine();
