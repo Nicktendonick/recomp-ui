@@ -528,6 +528,12 @@ void launcher_model_init(LauncherModel* m,
         m->setup_tc_update_available = false;
         m->setup_tc_local_ver[0] = '\0';
         m->setup_tc_remote_ver[0] = '\0';
+        /* Host may have just deleted a broken latest/ — surface that on page 0. */
+        if (!m->setup_tc_ready && game && game->toolchain_repair_note) {
+            const char* note = game->toolchain_repair_note();
+            if (note && note[0])
+                safe_copy(m->setup_status, sizeof(m->setup_status), note);
+        }
         if (m->setup_tc_ready && m->toolchain_update_available_cb) {
             char local_ver[64] = {0};
             char remote_ver[64] = {0};
