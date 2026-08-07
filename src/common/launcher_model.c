@@ -237,10 +237,10 @@ void launcher_model_init(LauncherModel* m,
     m->netplay_manual_input_delay = false; /* auto from max peer RTT at launch */
     m->netplay_lobby_input_prediction = 6; /* P = 4 + D at default D=2 */
     m->netplay_manual_input_prediction = false; /* auto P from RTT when rollback */
-    /* Online lobbies use lobby UDP SFU; LAN/direct clears this on host. */
-    m->netplay_force_input_relay = true;
-    /* Default on for online lobbies (CGNAT); not exposed in Lobby Settings. */
-    m->netplay_force_turn = true;
+    /* Default off so waiting-room ICE can prove a direct path; host Force
+     * Relay / Force TURN still force SFU at start. */
+    m->netplay_force_input_relay = false;
+    m->netplay_force_turn = false;
     /* Rollback on by default; Lobby Settings “Disable Rollback” opts out. */
     m->netplay_rollback = true;
     {
@@ -620,6 +620,11 @@ static void run_verify(LauncherModel* m) {
             safe_copy(m->verify.region, sizeof(m->verify.region), dv.region);
             m->verify.iso_ok  = dv.iso_ok != 0;
             m->verify.verdict = dv.verdict;
+            m->verify.track_count = dv.track_count;
+            m->verify.netplay_ok = dv.netplay_ok;
+            safe_copy(m->verify.disc_fp, sizeof(m->verify.disc_fp), dv.disc_fp);
+            safe_copy(m->verify.netplay_detail, sizeof(m->verify.netplay_detail),
+                      dv.netplay_detail);
             return;
         }
     }
@@ -1469,6 +1474,12 @@ bool launcher_model_can_finish_setup(const LauncherModel* m) {
     if (m->has_bios && !m->setup_bios_ok) return false;
     if (m->prepare_required_before_continue && !m->setup_prepare_satisfied)
         return false;
+    /* Disc titles: TOC / require_cue policy (netplay_ok) must pass before
+     * leaving first-run setup — Track-01-only dumps fail generate + netplay. */
+    if (m->profile && m->profile->verify.mode == 1) {
+        if (m->verify.verdict == 0 || m->verify.verdict == 3) return false;
+        if (!m->verify.netplay_ok) return false;
+    }
     return true;
 }
 
@@ -1485,6 +1496,18 @@ bool launcher_model_can_launch(const LauncherModel* m) {
     }
     if (m->has_bios && !m->setup_bios_ok) return false;
     if (m->setup_preparing) return false;
+    return true;
+}
+
+bool launcher_model_netplay_disc_ok(const LauncherModel* m) {
+    if (!m || !m->netplay_supported) return false;
+    if (!m->profile || m->profile->verify.mode != 1)
+        return true; /* non-disc titles: no TOC gate */
+    if (!m->rom_present) return false;
+    /* Online requires a clean verified mount (not CRC-warn-only) + TOC policy. */
+    if (m->verify.verdict != 1) return false;
+    if (!m->verify.netplay_ok) return false;
+    if (!m->verify.disc_fp[0]) return false;
     return true;
 }
 

@@ -513,6 +513,11 @@ typedef struct RecompLauncherCDiscVerify {
     char region[8];    // e.g. "NTSC-U"; "" = unknown
     int  iso_ok;       // ISO9660 / system header present
     int  verdict;      // 0 none, 1 ok, 2 warn, 3 bad
+    /* Appended for ABI: TOC / netplay mount gate (memset 0 = legacy host). */
+    int  track_count;      // mounted iso_track_count; 0 if TOC not opened
+    int  netplay_ok;       // 1 = mount satisfies game.toml [netplay] policy
+    char disc_fp[65];      // lowercase hex SHA-256 TOC fingerprint; "" if none
+    char netplay_detail[160];
 } RecompLauncherCDiscVerify;
 
 /* Host BIOS check for the first-run setup wizard (has_bios games). */

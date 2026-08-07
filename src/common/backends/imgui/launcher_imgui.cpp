@@ -701,7 +701,21 @@ void draw_verdict_block(const LauncherModel* m, const LauncherTheme& th, float a
                th, !pending, v.region[0] != '\0');
         kv_row("ISO header", pending ? dash : (v.iso_ok ? "OK" : "Mismatch"),
                th, !pending, v.iso_ok);
+        if (!pending && (v.track_count > 0 || v.netplay_detail[0])) {
+            char tracks_buf[32];
+            if (v.track_count > 0)
+                std::snprintf(tracks_buf, sizeof(tracks_buf), "%d", v.track_count);
+            else
+                std::snprintf(tracks_buf, sizeof(tracks_buf), "%s", dash);
+            kv_row("Tracks", tracks_buf, th, true, v.netplay_ok != 0);
+        }
         ImGui::EndTable();
+    }
+    if (!pending && v.netplay_detail[0] && !v.netplay_ok) {
+        ImGui::Dummy(ImVec2(0, px(4)));
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + availw);
+        ImGui::TextColored(col(th.warn), "%s", v.netplay_detail);
+        ImGui::PopTextWrapPos();
     }
 }
 
@@ -722,7 +736,7 @@ void draw_game_panel(LauncherModel* m, const LauncherTheme& th, bool fill_h = fa
         // Reserve space for everything under the art: verified line + 2 meta rows
         // + Change ROM, plus the SAVES block when this game has battery SRAM.
         float reserve = px(198.0f);
-        if (disc_verdict) reserve += px(96.0f);           // taller: icon+headline + 3-row checklist
+        if (disc_verdict) reserve += px(120.0f);          // taller: icon+headline + tracks row
         if (m->saves_supported) reserve += px(96.0f);    // compact SAVES row below Change ROM
         if (m->password_save_path) reserve += px(96.0f); // password-save row (same footprint)
         if (m->msu1_patch_available) reserve += px(198.0f);  // MSU-1 patch-available sub-block
@@ -3801,9 +3815,16 @@ void draw_netplay_host_modal(LauncherModel* m, const LauncherTheme& th) {
             np_valid_port(m->netplay_host_port) &&
             m->netplay_host_ip[0] &&
             std::strcmp(m->netplay_host_ip, "Unavailable") != 0 &&
-            std::strcmp(m->netplay_host_ip, "Detecting...") != 0;
+            std::strcmp(m->netplay_host_ip, "Detecting...") != 0 &&
+            launcher_model_netplay_disc_ok(m);
         ImGui::BeginDisabled(!can_create);
         if (ImGui::Button("Create Lobby", ImVec2(px(150), 0))) {
+            if (!launcher_model_netplay_disc_ok(m)) {
+                std::snprintf(host_create_status, sizeof(host_create_status), "%s",
+                              m->verify.netplay_detail[0]
+                                  ? m->verify.netplay_detail
+                                  : "Disc TOC not valid for netplay.");
+            } else {
             const auto* np = np_cb(m);
             if (np && np->create) {
                 /* Online create needs the lobby WebSocket. LAN/Direct IP only
@@ -3896,8 +3917,14 @@ void draw_netplay_host_modal(LauncherModel* m, const LauncherTheme& th) {
                     }
                 }
             }
+            } /* else disc ok */
         }
         ImGui::EndDisabled();
+        if (!launcher_model_netplay_disc_ok(m) && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("%s",
+                              m->verify.netplay_detail[0]
+                                  ? m->verify.netplay_detail
+                                  : "Mount the supported .cue dump for netplay.");
         if (host_create_status[0])
             ImGui::TextColored(col(th.warn), "%s", host_create_status);
         ImGui::EndPopup();
@@ -4015,6 +4042,16 @@ static void np_ingest_last_error(LauncherModel* m, const RecompLauncherCNetplayC
     else if (std::strcmp(err, "netplay_start_failed") == 0)
         std::snprintf(m->netplay_status, sizeof(m->netplay_status),
                       "Netplay could not start. Check the log and retry.");
+    else if (std::strcmp(err, "disc_mismatch") == 0)
+        std::snprintf(m->netplay_status, sizeof(m->netplay_status),
+                      "Disc dump does not match the host (TOC / tracks). "
+                      "Mount the same supported .cue dump.");
+    else if (std::strcmp(err, "version_mismatch") == 0)
+        std::snprintf(m->netplay_status, sizeof(m->netplay_status),
+                      "Game version does not match the lobby.");
+    else if (std::strcmp(err, "game_mismatch") == 0)
+        std::snprintf(m->netplay_status, sizeof(m->netplay_status),
+                      "This lobby is for a different game.");
     else
         std::snprintf(m->netplay_status, sizeof(m->netplay_status),
                       "Lobby error: %s", err);
@@ -4782,11 +4819,21 @@ void draw_netplay(LauncherModel* m, const LauncherTheme& th) {
                 ImGui::SetCursorScreenPos(ImVec2(
                     cell.x + (avail_x - join_btn_w) * 0.5f,
                     cell.y + (lobby_row_h - join_btn_h) * 0.5f));
+                ImGui::BeginDisabled(!launcher_model_netplay_disc_ok(m));
                 if (ImGui::Button("Join", ImVec2(join_btn_w, join_btn_h))) {
-                    m->netplay_selected_lobby = i;
-                    m->netplay_status[0] = '\0';
-                    np_join_selected(m);
+                    if (!launcher_model_netplay_disc_ok(m)) {
+                        std::snprintf(m->netplay_status, sizeof(m->netplay_status),
+                                      "%s",
+                                      m->verify.netplay_detail[0]
+                                          ? m->verify.netplay_detail
+                                          : "Mount the supported .cue dump before joining.");
+                    } else {
+                        m->netplay_selected_lobby = i;
+                        m->netplay_status[0] = '\0';
+                        np_join_selected(m);
+                    }
                 }
+                ImGui::EndDisabled();
             }
             ImGui::PopID();
         }
@@ -5648,6 +5695,13 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
         const bool compact = fullw < row_need + px(8);
 
         auto open_host = [&]() {
+            if (!launcher_model_netplay_disc_ok(m)) {
+                const char* why = m->verify.netplay_detail[0]
+                                      ? m->verify.netplay_detail
+                                      : "Mount the supported .cue dump before hosting.";
+                std::snprintf(m->netplay_status, sizeof(m->netplay_status), "%s", why);
+                return;
+            }
             if (!m->s.netplay_player_name[0]) {
                 m->netplay_name_modal_open = true;
                 return;
@@ -6044,8 +6098,8 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::TextColored(col(th.text_muted),
             "%s needs a playable %s before you can launch. This build includes "
             "a bundled BIOS (OpenBIOS) by default — a retail SCPH1001.BIN dump "
-            "is optional. Prefer a Redump-style .cue (not a lone .bin) so "
-            "multitrack discs stay intact. Pick your %s below (you must "
+            "is optional. Use a Redump-style .cue with sibling .bin tracks "
+            "(.iso is not accepted). Pick your %s below (you must "
             "legally own these dumps).",
             game, noun, noun);
     } else if (plat == SETUP_PLAT_GBA && m->has_bios) {
@@ -6143,11 +6197,10 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     {
         const char* media_help =
             (plat == SETUP_PLAT_PSX)
-                ? "Select the .cue sheet (MODE2/2352), not the .bin track file. "
-                  "The .cue keeps multitrack / audio-track layout correct for "
-                  "generate and boot. Cooked .iso dumps are OK — Generate "
-                  "converts them to a working .bin/.cue, then verifies the "
-                  "result against the game’s known digests."
+                ? "Select the Redump-style .cue (sibling .bin track files in "
+                  "the same folder). Track count is verified against the "
+                  "title’s policy. .iso dumps are not accepted — they cannot "
+                  "reliably become multi-track cues."
             : (plat == SETUP_PLAT_GBA)
                 ? "Select your verified Game Boy Advance ROM (.gba)."
             : (plat == SETUP_PLAT_SNES)
@@ -6177,7 +6230,7 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             char title[96];
             if (plat == SETUP_PLAT_PSX)
                 std::snprintf(title, sizeof(title),
-                              "Select %s (.cue preferred)", noun);
+                              "Select %s (.cue)", noun);
             else
                 std::snprintf(title, sizeof(title), "Select %s", noun);
             bool picked = false;
@@ -6228,8 +6281,8 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             (m->prepare_disc_note && m->prepare_disc_note[0])
                 ? m->prepare_disc_note
                 : (plat == SETUP_PLAT_PSX
-                       ? "Uses the selected .cue (or converts a cooked .iso "
-                         "to MODE2/2352 .bin/.cue) with the local SDK, then "
+                       ? "Uses the selected .cue + track .bin files with the "
+                         "local SDK, then "
                          "verifies digests against the game identity. Always "
                          "point Generate at the .cue when both files exist."
                        : "If your disc image is a raw dump that this game "
@@ -6256,15 +6309,14 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
                     launcher_model_start_prepare_disc(m, m->rom_full);
             } else {
                 char buf[512];
-                static const char* kDumpPatterns[] = {
-                    "*.cue", "*.iso", "*.bin", "*.img", "*.*" };
+                static const char* kDumpPatterns[] = { "*.cue" };
                 if (launcher_pick_file(
                         plat == SETUP_PLAT_PSX
-                            ? "Select disc (.cue preferred; .iso OK)"
+                            ? "Select disc (.cue)"
                             : "Select raw disc dump to convert",
-                        kDumpPatterns, 5,
+                        kDumpPatterns, 1,
                         plat == SETUP_PLAT_PSX
-                            ? "PlayStation disc (.cue .iso .bin)"
+                            ? "PlayStation disc (.cue)"
                             : "Disc dump",
                         buf, sizeof(buf)))
                     launcher_model_start_prepare_disc(m, buf);

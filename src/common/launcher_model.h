@@ -101,6 +101,10 @@ typedef struct {
     char region[8];    // e.g. "NTSC-U"; "" => unknown/unread
     bool iso_ok;        // ISO9660/system header sanity check passed
     int  verdict;       // 0 none, 1 ok, 2 warn, 3 bad
+    int  track_count;   // mounted TOC track count (0 if unknown)
+    int  netplay_ok;    // 1 = OK for online; 0 = TOC/cue policy failed
+    char disc_fp[65];   // TOC fingerprint for lobby peer matching
+    char netplay_detail[160];
 } VerifyResult;
 
 typedef struct {
@@ -687,6 +691,9 @@ void launcher_model_set_gyro_sensitivity(LauncherModel* m, float value);
 bool launcher_model_can_finish_setup(const LauncherModel* m);
 // True when BIOS (if required) and ROM/disc are ready to launch (incl. fingerprint).
 bool launcher_model_can_launch(const LauncherModel* m);
+// True when the mounted disc is OK for online (TOC/cue policy + content).
+// Non-disc games (verify.mode!=1) always return true when netplay is supported.
+bool launcher_model_netplay_disc_ok(const LauncherModel* m);
 // Re-run bios_verify_cb against m->s.bios_path. Empty path means "bundled
 // BIOS" — OK unless the host verifier refuses "".
 void launcher_model_refresh_bios_status(LauncherModel* m);
