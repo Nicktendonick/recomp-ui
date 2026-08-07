@@ -905,9 +905,11 @@ typedef struct RecompLauncherCGameInfo {
     /* ---- portable toolchain step (appended; local codegen hosts) ----------
      * When setup_needs_toolchain is 1, the first-run wizard shows a page to
      * download cmake-clang-v1 or pick an offline zip before BIOS/ROM/generate.
-     * toolchain_is_ready: optional quick check (non-NULL + returns 1 => skip
-     * page 0). ensure_toolchain_with_progress: download (download!=0) or install
-     * from zip_path (non-empty); download==0 and empty zip = resolve cache only. */
+     * toolchain_is_ready: optional quick check (usable local cmake/clang).
+     * ensure_toolchain_with_progress: download==0 zip/cache only; 1 = download
+     * if missing; 2 = force GitHub /releases/latest (update). Empty zip_path
+     * with download==0 resolves cache only. See toolchain_update_available
+     * (appended below) for remote newer-than-local prompts. */
     int setup_needs_toolchain;
     int (*toolchain_is_ready)(void);
     int (*ensure_toolchain_with_progress)(
@@ -926,6 +928,13 @@ typedef struct RecompLauncherCGameInfo {
     /* Master switch for the first-run setup wizard + Generate & rebuild UI.
      * Appended for ABI stability; zero-init keeps every existing host dark. */
     int  setup_wizard_supported;
+
+    /* Optional: return 1 when the installed cmake-clang-v1 pack is older than
+     * GitHub /releases/latest (fills local/remote version strings). Wizard
+     * keeps page 0 open to prompt Update / Skip. NULL => no update checks.
+     * Appended for ABI stability. */
+    int (*toolchain_update_available)(char* local_ver, size_t local_cap,
+                                      char* remote_ver, size_t remote_cap);
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */

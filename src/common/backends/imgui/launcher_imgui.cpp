@@ -225,15 +225,10 @@ static void open_builtin_file_picker(LauncherModel* m, BuiltinPickerKind kind,
     g_rom_picker.focus_path = true;
 }
 
-/* On Linux, prefer the in-app browser: zenity/kdialog frequently open behind
- * the SDL/ImGui window (or fail without a visible UI), which looks like Browse
- * did nothing. On other platforms try native first and fall back on -1. */
+/* Prefer native (zenity/kdialog on Linux, tinyfiledialogs elsewhere). Fall
+ * back to the in-app browser when native is unavailable or returns -1. */
 static bool prefer_builtin_file_picker(void) {
-#if defined(__linux__)
-    return true;
-#else
     return false;
-#endif
 }
 
 static void apply_builtin_picker_selection(LauncherModel* m, const char* path) {
@@ -6513,13 +6508,25 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
 
     /* ---- Page 0: portable toolchain ------------------------------------ */
     if (m->setup_needs_toolchain && m->setup_page == 0) {
-        ImGui::TextColored(col(th.accent), "Build tools");
+        const bool want_update =
+            m->setup_tc_ready && m->setup_tc_update_available &&
+            !m->setup_tc_update_skipped;
+        ImGui::TextColored(col(th.accent),
+                           want_update ? "Toolchain update" : "Build tools");
         ImGui::PushTextWrapPos(wrap_x);
-        ImGui::TextColored(col(th.text_muted),
-            "%s builds game sources on your machine. Install the portable "
-            "cmake/clang pack (cmake-clang-v1), or provide a matching zip for "
-            "offline setup.",
-            game);
+        if (want_update) {
+            ImGui::TextColored(col(th.text_muted),
+                "%s found a newer portable cmake/clang pack. Update now "
+                "(recommended), keep your current install for this session, "
+                "or install from an offline zip.",
+                game);
+        } else {
+            ImGui::TextColored(col(th.text_muted),
+                "%s builds game sources on your machine. Install the portable "
+                "cmake/clang pack (cmake-clang-v1), or provide a matching zip "
+                "for offline setup.",
+                game);
+        }
         ImGui::PopTextWrapPos();
         ImGui::Dummy(ImVec2(0, px(12)));
 
@@ -6531,6 +6538,17 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             "Uncheck to browse a local zip instead "
             "(for offline machines, grab a release asset from the repo below).");
         ImGui::PopTextWrapPos();
+        if (want_update || m->setup_tc_local_ver[0] ||
+            m->setup_tc_remote_ver[0]) {
+            ImGui::Dummy(ImVec2(0, px(4)));
+            char ver_line[160];
+            std::snprintf(
+                ver_line, sizeof(ver_line), "Installed: %s   Latest: %s",
+                m->setup_tc_local_ver[0] ? m->setup_tc_local_ver : "—",
+                m->setup_tc_remote_ver[0] ? m->setup_tc_remote_ver : "—");
+            ImGui::TextColored(col(want_update ? th.warn : th.good), "%s",
+                               ver_line);
+        }
         ImGui::Dummy(ImVec2(0, px(4)));
         ImGui::TextColored(col(th.text_muted), "Source / manual download:");
         ImGui::SameLine();
@@ -6538,7 +6556,9 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
                        kRetcommToolchainsUrl);
         ImGui::Dummy(ImVec2(0, px(6)));
 
-        if (ImGui::Checkbox("Download latest portable toolchain##tc",
+        if (ImGui::Checkbox(want_update
+                                ? "Download toolchain update##tc"
+                                : "Download latest portable toolchain##tc",
                             &m->setup_tc_auto)) {
             if (m->setup_tc_auto)
                 m->setup_error[0] = '\0';
@@ -6594,7 +6614,8 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::Dummy(ImVec2(0, px(14)));
         const bool can_next = launcher_model_can_advance_toolchain(m);
         if (!can_next) ImGui::BeginDisabled();
-        if (ImGui::Button("Next", ImVec2(px(140), px(34)))) {
+        if (ImGui::Button(want_update ? "Update##tc_next" : "Next##tc_next",
+                          ImVec2(px(140), px(34)))) {
             launcher_model_start_ensure_toolchain(m);
             if (m->setup_preparing) {
                 ImGui::CloseCurrentPopup();
@@ -6608,6 +6629,14 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 ImGui::SetTooltip(
                     "Enable automatic download or select a toolchain zip");
+        }
+        if (want_update) {
+            ImGui::SameLine();
+            if (ImGui::Button("Skip for now##tc_skip", ImVec2(px(140), px(34))))
+                launcher_model_skip_toolchain_update(m);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Keep the installed toolchain for this session.");
         }
         ImGui::SameLine();
         if (ImGui::Button("Quit", ImVec2(px(100), px(34))))

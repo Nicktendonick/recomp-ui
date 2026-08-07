@@ -228,6 +228,8 @@ typedef struct {
     int (*ensure_toolchain_with_progress_cb)(
         int download, const char* zip_path, char* err_msg, size_t err_cap,
         RecompLauncherCPrepareProgressFn on_progress, void* progress_ctx);
+    int (*toolchain_update_available_cb)(char* local_ver, size_t local_cap,
+                                         char* remote_ver, size_t remote_cap);
     bool        setup_prepare_satisfied; // prepare (+ rebuild if chained) succeeded
     char        relaunch_exe[512];       // set when rebuild requests relaunch
     // Box-art path relative to the assets dir (GameInfo.boxart_path);
@@ -377,6 +379,10 @@ typedef struct {
     int       setup_page;            // 0 = toolchain, 1 = BIOS/ROM/generate
     bool      setup_tc_auto;         // download portable toolchain (default true)
     bool      setup_tc_ready;        // toolchain resolved / installed
+    bool      setup_tc_update_available; // remote latest newer than local
+    bool      setup_tc_update_skipped;   // user skipped update this session
+    char      setup_tc_local_ver[64];
+    char      setup_tc_remote_ver[64];
     char      setup_tc_zip[512];     // offline cmake-clang-v1 zip when !auto
     bool      setup_bios_ok;         // last bios_verify_cb result (or path-only ok)
     bool      setup_bios_warn;
@@ -752,8 +758,11 @@ void launcher_model_fmv_timing_confirm_cancel(LauncherModel* m);
 // Kick ensure_toolchain_with_progress (download and/or offline zip). On success
 // advances setup_page to the BIOS/ROM/generate step.
 void launcher_model_start_ensure_toolchain(LauncherModel* m);
-// True when Next on the toolchain page can run (auto, zip path, or already ready).
+// True when Next on the toolchain page can run (auto, zip path, already ready,
+// or an update is available with auto-download / zip selected).
 bool launcher_model_can_advance_toolchain(const LauncherModel* m);
+// Keep the current pack for this session and leave toolchain page 0.
+void launcher_model_skip_toolchain_update(LauncherModel* m);
 // Poll prepare/rebuild/toolchain job; call once per frame while setup_preparing.
 void launcher_model_poll_prepare_disc(LauncherModel* m);
 // Dismiss the wizard once can_finish_setup is true (keeps dashboard).

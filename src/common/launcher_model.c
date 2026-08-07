@@ -162,6 +162,7 @@ void launcher_model_init(LauncherModel* m,
             m->toolchain_is_ready_cb = game->toolchain_is_ready;
             m->ensure_toolchain_with_progress_cb =
                 game->ensure_toolchain_with_progress;
+            m->toolchain_update_available_cb = game->toolchain_update_available;
         } else {
             m->prepare_disc_cb = NULL;
             m->prepare_with_progress_cb = NULL;
@@ -180,6 +181,7 @@ void launcher_model_init(LauncherModel* m,
             m->setup_needs_toolchain = false;
             m->toolchain_is_ready_cb = NULL;
             m->ensure_toolchain_with_progress_cb = NULL;
+            m->toolchain_update_available_cb = NULL;
         }
         /* PGO / FMV-timing are Settings actions, not the first-run wizard. */
         m->pgo_optimize_with_progress_cb = game->pgo_optimize_with_progress;
@@ -449,6 +451,10 @@ void launcher_model_init(LauncherModel* m,
     m->setup_page = 1;
     m->setup_tc_auto = true;
     m->setup_tc_ready = false;
+    m->setup_tc_update_available = false;
+    m->setup_tc_update_skipped = false;
+    m->setup_tc_local_ver[0] = '\0';
+    m->setup_tc_remote_ver[0] = '\0';
     m->setup_tc_zip[0] = '\0';
     m->setup_bios_needs_regen = false;
     m->bios_confirm_open = false;
@@ -468,6 +474,7 @@ void launcher_model_init(LauncherModel* m,
         m->setup_needs_toolchain = false;
         m->toolchain_is_ready_cb = NULL;
         m->ensure_toolchain_with_progress_cb = NULL;
+        m->toolchain_update_available_cb = NULL;
     }
     launcher_model_refresh_bios_status(m);
 
@@ -512,15 +519,42 @@ void launcher_model_init(LauncherModel* m,
 
     /* Probe toolchain readiness even when the wizard is closed — BIOS switch
      * Generate & rebuild needs setup_tc_ready, and codegen hosts always set
-     * setup_needs_toolchain. */
+     * setup_needs_toolchain. When a usable pack exists, also compare against
+     * GitHub /releases/latest so page 0 can prompt for an update. */
     if (m->setup_needs_toolchain) {
         m->setup_tc_ready =
             (m->toolchain_is_ready_cb && m->toolchain_is_ready_cb()) ? true
                                                                     : false;
-        if (m->setup_wizard_open)
-            m->setup_page = m->setup_tc_ready ? 1 : 0;
-        else
+        m->setup_tc_update_available = false;
+        m->setup_tc_local_ver[0] = '\0';
+        m->setup_tc_remote_ver[0] = '\0';
+        if (m->setup_tc_ready && m->toolchain_update_available_cb) {
+            char local_ver[64] = {0};
+            char remote_ver[64] = {0};
+            if (m->toolchain_update_available_cb(local_ver, sizeof(local_ver),
+                                                remote_ver, sizeof(remote_ver))) {
+                m->setup_tc_update_available = true;
+                safe_copy(m->setup_tc_local_ver, sizeof(m->setup_tc_local_ver),
+                          local_ver);
+                safe_copy(m->setup_tc_remote_ver, sizeof(m->setup_tc_remote_ver),
+                          remote_ver);
+            } else {
+                if (local_ver[0])
+                    safe_copy(m->setup_tc_local_ver,
+                              sizeof(m->setup_tc_local_ver), local_ver);
+                if (remote_ver[0])
+                    safe_copy(m->setup_tc_remote_ver,
+                              sizeof(m->setup_tc_remote_ver), remote_ver);
+            }
+        }
+        if (m->setup_wizard_open) {
+            const int need_tc_page =
+                !m->setup_tc_ready ||
+                (m->setup_tc_update_available && !m->setup_tc_update_skipped);
+            m->setup_page = need_tc_page ? 0 : 1;
+        } else {
             m->setup_page = 1;
+        }
     } else {
         m->setup_page = 1;
         m->setup_tc_ready = true;
@@ -1821,10 +1855,22 @@ void launcher_model_fmv_timing_confirm_accept(LauncherModel* m) {
 
 bool launcher_model_can_advance_toolchain(const LauncherModel* m) {
     if (!m || !m->setup_needs_toolchain) return true;
-    if (m->setup_tc_ready) return true;
     if (m->setup_preparing) return false;
+    const int want_update =
+        m->setup_tc_update_available && !m->setup_tc_update_skipped;
+    if (m->setup_tc_ready && !want_update) return true;
     if (m->setup_tc_auto) return true;
     return m->setup_tc_zip[0] != '\0';
+}
+
+void launcher_model_skip_toolchain_update(LauncherModel* m) {
+    if (!m || !m->setup_needs_toolchain) return;
+    if (!m->setup_tc_ready || !m->setup_tc_update_available) return;
+    m->setup_tc_update_skipped = true;
+    m->setup_page = 1;
+    m->setup_error[0] = '\0';
+    safe_copy(m->setup_status, sizeof(m->setup_status),
+              "Keeping current toolchain — continue with BIOS and disc.");
 }
 
 void launcher_model_start_ensure_toolchain(LauncherModel* m) {
@@ -1834,8 +1880,11 @@ void launcher_model_start_ensure_toolchain(LauncherModel* m) {
         m->setup_page = 1;
         return;
     }
-    if (m->setup_tc_ready ||
-        (m->toolchain_is_ready_cb && m->toolchain_is_ready_cb())) {
+    const int want_update =
+        m->setup_tc_update_available && !m->setup_tc_update_skipped;
+    if ((m->setup_tc_ready ||
+         (m->toolchain_is_ready_cb && m->toolchain_is_ready_cb())) &&
+        !want_update) {
         m->setup_tc_ready = true;
         m->setup_page = 1;
         m->setup_error[0] = '\0';
@@ -1857,7 +1906,11 @@ void launcher_model_start_ensure_toolchain(LauncherModel* m) {
     g_prep_job.m = m;
     g_prep_job.kind = PREP_JOB_TOOLCHAIN;
     g_prep_job.progress_pct = -1.0f;
-    g_prep_job.download = m->setup_tc_auto ? 1 : 0;
+    /* download: 0 = zip only, 1 = fetch if missing, 2 = force latest update */
+    if (m->setup_tc_auto)
+        g_prep_job.download = want_update ? 2 : 1;
+    else
+        g_prep_job.download = 0;
     if (!m->setup_tc_auto && m->setup_tc_zip[0])
         safe_copy(g_prep_job.zip_path, sizeof(g_prep_job.zip_path), m->setup_tc_zip);
     m->setup_preparing = true;
@@ -1865,10 +1918,12 @@ void launcher_model_start_ensure_toolchain(LauncherModel* m) {
     m->setup_prepare_fraction = -1.0f;
     m->setup_error[0] = '\0';
     safe_copy(m->setup_progress_title, sizeof(m->setup_progress_title),
-              "Installing build tools…");
+              want_update ? "Updating build tools…" : "Installing build tools…");
     safe_copy(m->setup_status, sizeof(m->setup_status),
-              m->setup_tc_auto ? "Downloading portable cmake/clang…"
-                               : "Installing toolchain from zip…");
+              m->setup_tc_auto
+                  ? (want_update ? "Downloading toolchain update…"
+                                 : "Downloading portable cmake/clang…")
+                  : "Installing toolchain from zip…");
     prep_spawn_thread(m);
 }
 
@@ -1932,6 +1987,8 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
         m->setup_progress_title[0] = '\0';
         if (result) {
             m->setup_tc_ready = true;
+            m->setup_tc_update_available = false;
+            m->setup_tc_update_skipped = false;
             m->setup_page = 1;
             m->setup_error[0] = '\0';
             safe_copy(m->setup_status, sizeof(m->setup_status),
