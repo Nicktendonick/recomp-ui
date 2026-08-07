@@ -619,9 +619,10 @@ void launcher_model_toggle_memcard(LauncherModel* m, int slot);
 // no-op (path left untouched) if the format write fails.
 void launcher_model_new_memcard(LauncherModel* m, int slot, const char* path);
 
-// ---- PSX multitap (seats 5+ on the controller dashboard) ----------------
-// Available when the active profile is PSX and player_count > 4. When off,
-// visible_player_count clamps to 4; netplay still uses full player_count.
+// ---- PSX multitap (3+ player seats on the controller dashboard) ---------
+// Available when the active profile is PSX and player_count >= 3. When off,
+// visible_player_count clamps to 2 (native dual ports); netplay still uses
+// full player_count / slot_count.
 int  launcher_model_multitap_available(const LauncherModel* m);
 int  launcher_model_multitap_enabled(const LauncherModel* m);
 void launcher_model_toggle_multitap(LauncherModel* m);

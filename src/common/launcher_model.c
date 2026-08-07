@@ -2053,7 +2053,7 @@ void launcher_model_toggle_memcard(LauncherModel* m, int slot) {
 }
 
 int launcher_model_multitap_available(const LauncherModel* m) {
-    if (!m || m->player_count <= 4) return 0;
+    if (!m || m->player_count < 3) return 0;
     const SystemProfile* prof = (const SystemProfile*)m->profile;
     return (prof && prof->id && strcmp(prof->id, "psx") == 0) ? 1 : 0;
 }
@@ -2079,7 +2079,7 @@ int launcher_model_visible_player_count(const LauncherModel* m) {
     int n = m->player_count > 0 ? m->player_count : 1;
     if (n > LNG_MAX_PLAYERS) n = LNG_MAX_PLAYERS;
     if (launcher_model_multitap_available(m) && !m->s.multitap_enabled) {
-        if (n > 4) n = 4;
+        if (n > 2) n = 2;
     }
     return n;
 }

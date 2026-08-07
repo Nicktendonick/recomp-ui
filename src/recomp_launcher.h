@@ -518,11 +518,11 @@ struct RecompLauncherCSettings {
     int  perspective_texturing;  // bool: perspective-correct UVs
 
     // ---- PSX multitap (SCPH-1070) ----------------------------------------
-    // Appended additively. When a PSX game advertises num_players > 4, the
-    // launcher can hide seats 5+ until multitap is on. 0 = off, 1 = on.
-    // Hosts should seed from settings (psxrecomp defaults ON when unset).
-    // Netplay lobbies with more than 2 seats always arm multitap in the
-    // runtime regardless of this flag.
+    // Appended additively. When a PSX game advertises num_players >= 3, the
+    // launcher can hide seats beyond the two native ports until multitap is
+    // on. 0 = off, 1 = on. Hosts should seed from settings (psxrecomp
+    // defaults ON when unset). Netplay lobbies with more than 2 seats always
+    // arm multitap in the runtime regardless of this flag.
     int  multitap_enabled;
 
     // Opt-in DualShock-on-multitap-tap hack (0 off, 1 on). Persisted to

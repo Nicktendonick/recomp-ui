@@ -1972,39 +1972,6 @@ void draw_controllers_row(LauncherModel* m, const LauncherTheme& th) {
 }
 
 void panel_controller_draw(LauncherModel* m, const LauncherTheme* th) {
-    if (launcher_model_multitap_available(m)) {
-        bool on = launcher_model_multitap_enabled(m) != 0;
-        if (ImGui::Checkbox("Multitap", &on) &&
-            (on ? 1 : 0) != launcher_model_multitap_enabled(m))
-            launcher_model_toggle_multitap(m);
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-            ImGui::BeginTooltip();
-            ImGui::PushTextWrapPos(px(320));
-            ImGui::TextUnformatted(
-                "Enable SCPH-1070 multitap seats beyond Player 4. "
-                "Netplay lobbies with 3 or more players always use multitap.");
-            ImGui::PopTextWrapPos();
-            ImGui::EndTooltip();
-        }
-        ImGui::Dummy(ImVec2(0, px(th->spacing_sm)));
-    }
-    if (launcher_model_multitap_analog_available(m)) {
-        bool on = launcher_model_multitap_analog_enabled(m) != 0;
-        if (ImGui::Checkbox("Multitap analog (hack)", &on) &&
-            (on ? 1 : 0) != launcher_model_multitap_analog_enabled(m))
-            launcher_model_toggle_multitap_analog(m);
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-            ImGui::BeginTooltip();
-            ImGui::PushTextWrapPos(px(320));
-            ImGui::TextUnformatted(
-                "Allow DualShock sticks on multitap tap seats (not faithful — "
-                "many titles expect digital taps). Saved to game.toml / "
-                "settings. Netplay hosts can enforce this for the lobby.");
-            ImGui::PopTextWrapPos();
-            ImGui::EndTooltip();
-        }
-        ImGui::Dummy(ImVec2(0, px(th->spacing_sm)));
-    }
     draw_controllers_row(m, *th);
 }
 
@@ -2601,6 +2568,55 @@ void panel_audio_draw(LauncherModel* m, const LauncherTheme* th) {
     }
 }
 
+// INPUT module: multitap / pad-bus options — half-width card stacked under
+// AUDIO and above SYSTEM in the right column (see draw_settings). Composed
+// for PSX; shown when the title can use multitap seats or the analog hack.
+int avail_input(const LauncherModel* m) {
+    return launcher_model_multitap_available(m) ||
+           launcher_model_multitap_analog_available(m);
+}
+void draw_input_controls(LauncherModel* m, const LauncherTheme& th) {
+    eyebrow("INPUT");
+    if (launcher_model_multitap_available(m)) {
+        bool on = launcher_model_multitap_enabled(m) != 0;
+        if (ImGui::Checkbox("Multitap", &on) &&
+            (on ? 1 : 0) != launcher_model_multitap_enabled(m))
+            launcher_model_toggle_multitap(m);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+            ImGui::BeginTooltip();
+            ImGui::PushTextWrapPos(px(320));
+            ImGui::TextUnformatted(
+                "Enable SCPH-1070 multitap for 3+ player seats. "
+                "Off limits Play Local to two native controller ports. "
+                "Netplay lobbies with 3 or more players always use multitap.");
+            ImGui::PopTextWrapPos();
+            ImGui::EndTooltip();
+        }
+    }
+    if (launcher_model_multitap_analog_available(m)) {
+        if (launcher_model_multitap_available(m))
+            ImGui::Dummy(ImVec2(0, px(th.spacing_sm)));
+        bool on = launcher_model_multitap_analog_enabled(m) != 0;
+        if (ImGui::Checkbox("Multitap analog (hack)", &on) &&
+            (on ? 1 : 0) != launcher_model_multitap_analog_enabled(m))
+            launcher_model_toggle_multitap_analog(m);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+            ImGui::BeginTooltip();
+            ImGui::PushTextWrapPos(px(320));
+            ImGui::TextUnformatted(
+                "Allow DualShock sticks on multitap tap seats (not faithful — "
+                "many titles expect digital taps). Saved to game.toml / "
+                "settings. Netplay hosts can enforce this for the lobby.");
+            ImGui::PopTextWrapPos();
+            ImGui::EndTooltip();
+        }
+    }
+}
+void panel_input_draw(LauncherModel* m, const LauncherTheme* th) {
+    if (begin_panel("input", 0)) draw_input_controls(m, *th);
+    end_panel();
+}
+
 // SYSTEM module: BIOS path picker — a half-width card stacked under AUDIO in
 // the right column (see draw_settings), composed only for systems whose
 // profile lists "system" (PSX, GBA) AND only shown for a game instance that
@@ -2909,12 +2925,10 @@ void panel_hotkeys_draw(LauncherModel* m, const LauncherTheme* th) {
 
 // The settings VIEW composes whichever panels this game's SystemProfile
 // lists in panels_settings, in order: DISPLAY (MAIN) + AUDIO (SIDE) share the
-// top band; SYSTEM (SIDE, PSX/GBA only — its BIOS "Browse" row) then stacks
-// directly beneath AUDIO as a second half-width card in the SAME right
-// column, instead of spanning full width under both columns; any WIDE panels
-// (HOTKEYS) still stack full-width below that — exactly today's fixed layout
-// otherwise, now driven by the composition array + the registry's
-// available() gate instead of hardcoded calls.
+// top band; further SIDE cards (INPUT, SYSTEM, SOLAR, …) then stack under
+// AUDIO in the same right column in composition order; WIDE panels (HOTKEYS)
+// still stack full-width below that — driven by the composition array + the
+// registry's available() gate.
 void draw_settings(LauncherModel* m, const LauncherTheme& th) {
     // Row 1: DISPLAY | AUDIO share the top band. For the legacy minimal
     // surface (no deep caps set — e.g. SNES) both cards are pinned to the
@@ -2938,7 +2952,6 @@ void draw_settings(LauncherModel* m, const LauncherTheme& th) {
 
     const LauncherPanel* video_p   = find_composed(prof->panels_settings, "video", m);
     const LauncherPanel* audio_p   = find_composed(prof->panels_settings, "audio", m);
-    const LauncherPanel* system_p  = find_composed(prof->panels_settings, "system", m);
     const LauncherPanel* hotkeys_p = find_composed(prof->panels_settings, "hotkeys", m);
 
     // Left content edge in SCREEN space — where DISPLAY starts and where any
@@ -2954,11 +2967,10 @@ void draw_settings(LauncherModel* m, const LauncherTheme& th) {
         left_bottom = ImGui::GetItemRectMax().y;
     }
     if (video_p && audio_p) ImGui::SameLine(0, gap);
-    // Capture the right column's SCREEN x BEFORE opening AUDIO's child, so a
-    // SYSTEM card composed alongside it (SIDE slot — see kPanelRegistry) can
-    // be reopened at the same x once AUDIO's child ends (a finished child,
-    // like any item, returns the cursor to the LEFT edge of the row on the
-    // next line, not to its own column).
+    // Capture the right column's SCREEN x BEFORE opening AUDIO's child, so
+    // additional SIDE cards (INPUT/SYSTEM/…) can reopen at the same x once
+    // AUDIO's child ends (a finished child returns the cursor to the LEFT
+    // edge of the row on the next line, not to its own column).
     const float right_x = ImGui::GetCursorScreenPos().x;
     float audio_bottom = 0.0f;   // AUDIO's bottom edge (screen space)
     if (audio_p) {
@@ -2969,32 +2981,45 @@ void draw_settings(LauncherModel* m, const LauncherTheme& th) {
         audio_bottom = ImGui::GetItemRectMax().y;
     }
 
-    // SYSTEM (PSX/GBA's BIOS row) is a SIDE-slot card: stack it as a second
-    // half-width card directly under AUDIO, in the same right column, rather
-    // than spanning the full width below both columns. Falls back to full
-    // width only if some profile composes "system" without "audio".
-    if (system_p) {
-        if (audio_p) {
-            // Place SYSTEM's top edge one standard card-gap below AUDIO's
-            // bottom edge specifically (not "wherever the taller of the two
-            // columns ended up", which is what plain SameLine/next-line flow
-            // would give — DISPLAY's deep surface is usually taller than
-            // AUDIO, and that gap would show as dead space above SYSTEM).
-            ImGui::SetCursorScreenPos(ImVec2(right_x, audio_bottom + gap));
-            begin_container("set_r2", ImVec2(half, 0), ImGuiChildFlags_AutoResizeY);
-            system_p->draw(m, &th);
-            end_container();
-            const float system_bottom = ImGui::GetItemRectMax().y;
-            // The manual SetCursorScreenPos above pulled SYSTEM out of the
-            // normal same-line row flow, so ImGui's auto-advanced cursor now
-            // only accounts for SYSTEM's own bottom, not DISPLAY's (which can
-            // still be the taller column). Explicitly resume the layout below
-            // whichever column is taller so HOTKEYS never overlaps DISPLAY.
-            const float below_y = (left_bottom > system_bottom) ? left_bottom : system_bottom;
-            ImGui::SetCursorScreenPos(ImVec2(content_left_x, below_y + gap));
-        } else {
-            system_p->draw(m, &th);
+    // Remaining SIDE-slot cards (INPUT, SYSTEM, SOLAR, …) stack under AUDIO
+    // in panels_settings order. Falls back to full width only if a profile
+    // composes them without "audio".
+    float stack_bottom = audio_bottom;
+    bool stacked_side = false;
+    if (prof->panels_settings) {
+        for (int i = 0; prof->panels_settings[i]; ++i) {
+            const char* id = prof->panels_settings[i];
+            if (!id || !id[0]) continue;
+            if (strcmp(id, "video") == 0 || strcmp(id, "audio") == 0 ||
+                strcmp(id, "hotkeys") == 0)
+                continue;
+            const LauncherPanel* side_p =
+                find_composed(prof->panels_settings, id, m);
+            if (!side_p || side_p->slot != LNG_SLOT_SIDE) continue;
+            if (audio_p) {
+                ImGui::SetCursorScreenPos(
+                    ImVec2(right_x, stack_bottom + gap));
+                char cname[48];
+                snprintf(cname, sizeof(cname), "set_r_%s", id);
+                begin_container(cname, ImVec2(half, 0),
+                                ImGuiChildFlags_AutoResizeY);
+                side_p->draw(m, &th);
+                end_container();
+                stack_bottom = ImGui::GetItemRectMax().y;
+                stacked_side = true;
+            } else {
+                side_p->draw(m, &th);
+                stack_bottom = ImGui::GetItemRectMax().y;
+                stacked_side = true;
+            }
         }
+    }
+    if (stacked_side && audio_p) {
+        // Manual SetCursorScreenPos pulled SIDE cards out of row flow — resume
+        // below the taller column so HOTKEYS never overlaps DISPLAY.
+        const float below_y =
+            (left_bottom > stack_bottom) ? left_bottom : stack_bottom;
+        ImGui::SetCursorScreenPos(ImVec2(content_left_x, below_y + gap));
     }
     if (hotkeys_p) hotkeys_p->draw(m, &th);
 }
@@ -6073,6 +6098,7 @@ const LauncherPanel kPanelRegistry[] = {
     { "tpak",              LNG_VIEW_DASHBOARD,  LNG_SLOT_WIDE, avail_tpak,   panel_tpak_draw },
     { "video",             LNG_VIEW_SETTINGS,   LNG_SLOT_MAIN, nullptr,      panel_video_draw },
     { "audio",             LNG_VIEW_SETTINGS,   LNG_SLOT_SIDE, nullptr,      panel_audio_draw },
+    { "input",             LNG_VIEW_SETTINGS,   LNG_SLOT_SIDE, avail_input,  panel_input_draw },
     { "system",            LNG_VIEW_SETTINGS,   LNG_SLOT_SIDE, avail_system, panel_system_draw },
     { "solar",             LNG_VIEW_SETTINGS,   LNG_SLOT_SIDE, avail_solar,  panel_solar_draw },
     { "hotkeys",           LNG_VIEW_SETTINGS,   LNG_SLOT_WIDE, nullptr,      panel_hotkeys_draw },

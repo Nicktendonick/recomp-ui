@@ -52,7 +52,8 @@ static const int kPsxGamepadBindOrder[LNG_PSX_PAD_BUTTON_COUNT] = {
 // UI) below the game/controller row. SNES keeps kPanelsDashboardCommon
 // unchanged — its SRAM row stays folded into the GAME card exactly as today.
 static const char* const kPanelsDashboardPsx[] = { "game", "controller", "save", NULL };
-static const char* const kPanelsSettingsPsx[]   = { "video", "audio", "system", "hotkeys", NULL };
+static const char* const kPanelsSettingsPsx[]   =
+    { "video", "audio", "input", "system", "hotkeys", NULL };
 
 // ---- ROM (disc) file-picker filter ----------------------------------------------
 // Prefer .cue (multitrack-safe). .iso is accepted and normalized to .bin/.cue
