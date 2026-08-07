@@ -86,7 +86,8 @@ typedef struct RecompLauncherCNetplayLaunch {
      * opens the SFU; this flag stays for launch/diagnostics. LAN/direct
      * keeps host-as-relay / P2P when unset. */
     int      force_input_relay;
-    /* Host match_caps: ICE relay-only / Force TURN for UDP (0/1). */
+    /* Host match_caps: Force TURN delay-floor hint (0/1). Online transport
+     * is always lobby SFU (§108) — this no longer selects ICE relay. */
     int      force_turn;
     /* Host match_caps: rollback invent/episode path (0/1; lobby default on). */
     int      rollback;
@@ -177,8 +178,8 @@ typedef struct RecompLauncherCNetplayCallbacks {
     /* Optional: current room seat ceiling (2..RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS).
      * 0 when not in a lobby / unknown. Prefer this over game num_players. */
     int  (*lobby_max_slots)(void* ctx);
-    /* Optional: host Force TURN / ICE relay-only (0/1). Server lobbies only;
-     * published in match_caps.force_turn so every peer uses typ relay. */
+    /* Optional: host Force TURN delay-floor hint (0/1). Server lobbies only;
+     * published in match_caps.force_turn. Does not change online transport. */
     int  (*force_turn_get)(void* ctx);
     int  (*force_turn_set)(void* ctx, int force);
     /* Optional: host Rollback (0/1). Published in match_caps.rollback;

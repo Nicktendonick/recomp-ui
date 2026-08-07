@@ -238,7 +238,7 @@ void launcher_model_init(LauncherModel* m,
     m->netplay_lobby_input_prediction = 6; /* P = 4 + D at default D=2 */
     m->netplay_manual_input_prediction = false; /* auto P from RTT when rollback */
     /* Default off so waiting-room ICE can prove a direct path; host Force
-     * Relay / Force TURN still force SFU at start. */
+     * Online start is always lobby SFU (§108). */
     m->netplay_force_input_relay = false;
     m->netplay_force_turn = false;
     /* Rollback on by default; Lobby Settings “Disable Rollback” opts out. */
