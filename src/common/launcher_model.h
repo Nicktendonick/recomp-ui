@@ -290,6 +290,9 @@ typedef struct {
     // Number of players the GAME actually supports. Mega Man X is 1-player, so
     // the launcher must not show a dead Player 2 row. Games that support 2
     // report 2 and the second row appears. Driven by data, never hardcoded.
+    // Netplay host Max Players and lobby ceilings use this full capability.
+    // Dashboard controller cards use launcher_model_visible_player_count()
+    // (PSX multitap may hide seats 5+).
     int         player_count;
 
     // ---- ROM verification ----
@@ -615,6 +618,18 @@ void launcher_model_toggle_memcard(LauncherModel* m, int slot);
 // any host project's runtime headers), then adopt it as the slot's path. A
 // no-op (path left untouched) if the format write fails.
 void launcher_model_new_memcard(LauncherModel* m, int slot, const char* path);
+
+// ---- PSX multitap (seats 5+ on the controller dashboard) ----------------
+// Available when the active profile is PSX and player_count > 4. When off,
+// visible_player_count clamps to 4; netplay still uses full player_count.
+int  launcher_model_multitap_available(const LauncherModel* m);
+int  launcher_model_multitap_enabled(const LauncherModel* m);
+void launcher_model_toggle_multitap(LauncherModel* m);
+int  launcher_model_visible_player_count(const LauncherModel* m);
+/* DualShock-on-tap hack UI (PSX, player_count >= 3). */
+int  launcher_model_multitap_analog_available(const LauncherModel* m);
+int  launcher_model_multitap_analog_enabled(const LauncherModel* m);
+void launcher_model_toggle_multitap_analog(LauncherModel* m);
 
 // ---- N64 Transfer Pak slots (tpak_slots only; no-op guarded by slot range) ----
 // Adopt a GB cartridge ROM for one port's Transfer Pak. Re-runs the host's

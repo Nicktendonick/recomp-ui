@@ -1797,9 +1797,10 @@ void draw_source_selectables(LauncherModel* m, int p) {
     for (int i = 0; i < g_pad_count; ++i)
         push_opt(g_pads[i].guid, g_pads[i].name, g_pads[i].id, true);
 
+    const int claim_n = launcher_model_visible_player_count(m);
     for (int i = 0; i < nopt; ++i) {
         bool claimed = false;
-        for (int o = 0; o < m->player_count; ++o) {
+        for (int o = 0; o < claim_n; ++o) {
             if (o == p) continue;
             if (m->s.player_src[o] == 2 && m->s.player_gamepad_guid[o][0] &&
                 std::strcmp(m->s.player_gamepad_guid[o], opts[i].guid) == 0) {
@@ -1948,7 +1949,7 @@ void draw_player_panel(LauncherModel* m, const LauncherTheme& th, int p, float w
 // stay fixed-width via dash_card_width).
 void draw_controllers_row(LauncherModel* m, const LauncherTheme& th) {
     if (m->lock_device) return;   // fixed pad: hide the player controller cards entirely
-    int n = m->player_count;
+    int n = launcher_model_visible_player_count(m);
     if (n < 1) n = 1;
     if (n > LNG_MAX_PLAYERS) n = LNG_MAX_PLAYERS;
     const float gap = px(th.spacing_md);
@@ -1971,6 +1972,39 @@ void draw_controllers_row(LauncherModel* m, const LauncherTheme& th) {
 }
 
 void panel_controller_draw(LauncherModel* m, const LauncherTheme* th) {
+    if (launcher_model_multitap_available(m)) {
+        bool on = launcher_model_multitap_enabled(m) != 0;
+        if (ImGui::Checkbox("Multitap", &on) &&
+            (on ? 1 : 0) != launcher_model_multitap_enabled(m))
+            launcher_model_toggle_multitap(m);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+            ImGui::BeginTooltip();
+            ImGui::PushTextWrapPos(px(320));
+            ImGui::TextUnformatted(
+                "Enable SCPH-1070 multitap seats beyond Player 4. "
+                "Netplay lobbies with 3 or more players always use multitap.");
+            ImGui::PopTextWrapPos();
+            ImGui::EndTooltip();
+        }
+        ImGui::Dummy(ImVec2(0, px(th->spacing_sm)));
+    }
+    if (launcher_model_multitap_analog_available(m)) {
+        bool on = launcher_model_multitap_analog_enabled(m) != 0;
+        if (ImGui::Checkbox("Multitap analog (hack)", &on) &&
+            (on ? 1 : 0) != launcher_model_multitap_analog_enabled(m))
+            launcher_model_toggle_multitap_analog(m);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+            ImGui::BeginTooltip();
+            ImGui::PushTextWrapPos(px(320));
+            ImGui::TextUnformatted(
+                "Allow DualShock sticks on multitap tap seats (not faithful — "
+                "many titles expect digital taps). Saved to game.toml / "
+                "settings. Netplay hosts can enforce this for the lobby.");
+            ImGui::PopTextWrapPos();
+            ImGui::EndTooltip();
+        }
+        ImGui::Dummy(ImVec2(0, px(th->spacing_sm)));
+    }
     draw_controllers_row(m, *th);
 }
 
@@ -2005,7 +2039,7 @@ void draw_dashboard(LauncherModel* m, const LauncherTheme& th, int logical_w) {
             // even Browse/New pad) are never clipped by a boxart-height cap.
             // Multitap (3+): fill to footer and scroll controllers when they
             // would crush the save band.
-            const bool many_players = m->player_count > 2;
+            const bool many_players = launcher_model_visible_player_count(m) > 2;
             if (game_p) {
                 g_game_fill_h = false;
                 begin_container("dash_l", ImVec2(px(400), 0), ImGuiChildFlags_AutoResizeY);
@@ -5013,6 +5047,27 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
             ImGui::EndDisabled();
         }
         ImGui::Spacing();
+        if (launcher_model_multitap_analog_available(m)) {
+            bool analog_hack = m->s.multitap_analog != 0;
+            if (np->multitap_analog_get)
+                analog_hack = np->multitap_analog_get(np->ctx) != 0;
+            if (ImGui::Checkbox("Multitap analog (hack)", &analog_hack)) {
+                m->s.multitap_analog = analog_hack ? 1 : 0;
+                if (np->multitap_analog_set)
+                    (void)np->multitap_analog_set(np->ctx, analog_hack ? 1 : 0);
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos(px(360));
+                ImGui::TextUnformatted(
+                    "Host-enforced DualShock sticks on multitap tap seats for "
+                    "this match (match_caps.multitap_analog). Off = faithful "
+                    "digital taps. Peers apply the host setting at launch.");
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
+            ImGui::Spacing();
+        }
         if (ImGui::Button("Close", ImVec2(px(120), 0))) {
             m->netplay_lobby_settings_open = false;
             ImGui::CloseCurrentPopup();

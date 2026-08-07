@@ -35,6 +35,10 @@ extern "C" {
 #define RECOMP_LAUNCHER_MAX_PLAYERS 8
 /* Host may #ifdef this when reading player_gamepad_guid[] from settings. */
 #define RECOMP_LAUNCHER_HAS_PLAYER_GAMEPAD_GUID 1
+/* Host may #ifdef this when reading multitap_enabled from settings. */
+#define RECOMP_LAUNCHER_HAS_MULTITAP_ENABLED 1
+/* Host may #ifdef this when reading multitap_analog (DualShock-on-tap hack). */
+#define RECOMP_LAUNCHER_HAS_MULTITAP_ANALOG 1
 
 // N64 Transfer Pak slots — one per controller port.
 #define RECOMP_LAUNCHER_MAX_TPAKS 4
@@ -189,6 +193,10 @@ typedef struct RecompLauncherCNetplayCallbacks {
     /* Optional host invent runway (P), frames, clamped 2..16. Rollback only. */
     int  (*input_prediction_get)(void* ctx);
     int  (*input_prediction_set)(void* ctx, int prediction_frames);
+    /* Optional: DualShock-on-multitap-tap hack (0/1). Host publishes in
+     * match_caps.multitap_analog; peers apply at match start. */
+    int  (*multitap_analog_get)(void* ctx);
+    int  (*multitap_analog_set)(void* ctx, int enable);
 } RecompLauncherCNetplayCallbacks;
 
 /* ---- schema-driven mods --------------------------------------------------
@@ -508,6 +516,19 @@ struct RecompLauncherCSettings {
     // 0 = off (the faithful default on a fresh config).
     int  geometry_correction;    // bool: sub-pixel vertex precision
     int  perspective_texturing;  // bool: perspective-correct UVs
+
+    // ---- PSX multitap (SCPH-1070) ----------------------------------------
+    // Appended additively. When a PSX game advertises num_players > 4, the
+    // launcher can hide seats 5+ until multitap is on. 0 = off, 1 = on.
+    // Hosts should seed from settings (psxrecomp defaults ON when unset).
+    // Netplay lobbies with more than 2 seats always arm multitap in the
+    // runtime regardless of this flag.
+    int  multitap_enabled;
+
+    // Opt-in DualShock-on-multitap-tap hack (0 off, 1 on). Persisted to
+    // settings.toml and game.toml [controller] multitap_analog. Hosts may
+    // also publish it in match_caps for the session.
+    int  multitap_analog;
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----

@@ -651,7 +651,7 @@ void launcher_binds_sync_psx_pad_sources(LauncherModel* m,
                                          const LauncherPad* pads, int pad_count) {
     if (!m || !is_psx_profile(m)) return;
     const char* path = psx_input_ini_path();
-    const int nplayers = m->player_count > 0 ? m->player_count : 1;
+    const int nplayers = launcher_model_visible_player_count(m);
 
     for (int p = 0; p < nplayers; ++p) {
         if (m->s.player_src[p] != 2) continue;

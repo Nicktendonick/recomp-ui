@@ -2052,6 +2052,54 @@ void launcher_model_toggle_memcard(LauncherModel* m, int slot) {
     m->s.memcard_enabled[slot] = m->s.memcard_enabled[slot] ? 0 : 1;
 }
 
+int launcher_model_multitap_available(const LauncherModel* m) {
+    if (!m || m->player_count <= 4) return 0;
+    const SystemProfile* prof = (const SystemProfile*)m->profile;
+    return (prof && prof->id && strcmp(prof->id, "psx") == 0) ? 1 : 0;
+}
+
+int launcher_model_multitap_enabled(const LauncherModel* m) {
+    if (!m) return 0;
+    if (!launcher_model_multitap_available(m)) return 0;
+    return m->s.multitap_enabled ? 1 : 0;
+}
+
+void launcher_model_toggle_multitap(LauncherModel* m) {
+    if (!m || !launcher_model_multitap_available(m)) return;
+    m->s.multitap_enabled = m->s.multitap_enabled ? 0 : 1;
+    /* Drop the configure target if it was on a now-hidden seat. */
+    {
+        const int vis = launcher_model_visible_player_count(m);
+        if (m->cfg_player >= vis) m->cfg_player = vis > 0 ? vis - 1 : 0;
+    }
+}
+
+int launcher_model_visible_player_count(const LauncherModel* m) {
+    if (!m) return 1;
+    int n = m->player_count > 0 ? m->player_count : 1;
+    if (n > LNG_MAX_PLAYERS) n = LNG_MAX_PLAYERS;
+    if (launcher_model_multitap_available(m) && !m->s.multitap_enabled) {
+        if (n > 4) n = 4;
+    }
+    return n;
+}
+
+int launcher_model_multitap_analog_available(const LauncherModel* m) {
+    if (!m || m->player_count < 3) return 0;
+    const SystemProfile* prof = (const SystemProfile*)m->profile;
+    return (prof && prof->id && strcmp(prof->id, "psx") == 0) ? 1 : 0;
+}
+
+int launcher_model_multitap_analog_enabled(const LauncherModel* m) {
+    if (!m || !launcher_model_multitap_analog_available(m)) return 0;
+    return m->s.multitap_analog ? 1 : 0;
+}
+
+void launcher_model_toggle_multitap_analog(LauncherModel* m) {
+    if (!m || !launcher_model_multitap_analog_available(m)) return;
+    m->s.multitap_analog = m->s.multitap_analog ? 0 : 1;
+}
+
 void launcher_model_new_memcard(LauncherModel* m, int slot, const char* path) {
     if (slot < 0 || slot > 1 || !path || !path[0]) return;
     if (recompui_memcard_format_file(path) != 0) return;  // I/O failure: leave as-is
