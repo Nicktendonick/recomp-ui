@@ -5322,43 +5322,6 @@ static bool draw_mod_integer_option(const RecompLauncherCModOption& option,
     return true;
 }
 
-static void draw_linkified_mod_author(
-    const char* author_text,
-    const RecompLauncherCModAuthorLink* author_links,
-    int author_link_count,
-    const LauncherTheme& th) {
-    if (!author_text || !author_text[0]) return;
-    const std::string author(author_text);
-    size_t cursor = 0;
-    ImGui::TextColored(col(th.text_muted), "by: ");
-    ImGui::SameLine(0, 0);
-    while (cursor < author.size()) {
-        size_t next = std::string::npos;
-        const RecompLauncherCModAuthorLink* link = nullptr;
-        for (int i = 0; i < author_link_count; ++i) {
-            const auto& candidate = author_links[i];
-            if (!candidate.name[0] || !candidate.url[0]) continue;
-            const size_t found = author.find(candidate.name, cursor);
-            if (found < next) {
-                next = found;
-                link = &candidate;
-            }
-        }
-        if (!link) {
-            ImGui::TextColored(col(th.text_muted), "%s", author.c_str() + cursor);
-            break;
-        }
-        if (next > cursor) {
-            const std::string prefix = author.substr(cursor, next - cursor);
-            ImGui::TextColored(col(th.text_muted), "%s", prefix.c_str());
-            ImGui::SameLine(0, 0);
-        }
-        ImGui::TextLinkOpenURL(link->name, link->url);
-        cursor = next + std::strlen(link->name);
-        if (cursor < author.size()) ImGui::SameLine(0, 0);
-    }
-}
-
 static void draw_mod_packages(LauncherModel* m, const LauncherTheme& th) {
     const auto* mods = m ? m->mods : nullptr;
     if (!mods || !mods->package_count || !mods->package_get) return;
