@@ -758,9 +758,14 @@ typedef struct RecompLauncherCGameInfo {
     const char* resume_netplay_endpoint;
 
     /* ---- first-run setup wizard -------------------------------------------
-     * When needs_setup is 1, OR the launcher detects a missing ROM/disc (and
-     * missing BIOS when has_bios), a blocking setup modal opens before the
-     * dashboard. Cart-only games (has_bios=0) only prompt for a ROM.
+     * Opt-in product surface. When setup_wizard_supported is 0 (default), the
+     * launcher never opens the first-run modal and never shows Generate /
+     * rebuild — even if prepare_* callbacks are non-NULL. Hosts that ship a
+     * self-build flow set this to 1 and fill prepare/rebuild/toolchain fields.
+     *
+     * When supported AND (needs_setup is 1 OR the launcher detects a missing
+     * ROM/disc, and missing BIOS when has_bios), a blocking setup modal opens
+     * before the dashboard. Cart-only games (has_bios=0) only prompt for a ROM.
      *
      * bios_verify (optional): host checks BIOS size/CRC. Return 1 and fill
      * `out` (ok/warn/detail). Called with an empty path when the player has
@@ -896,6 +901,10 @@ typedef struct RecompLauncherCGameInfo {
      * withdrawn from the UI while staying readable from game.toml/settings.toml
      * (psxrecomp ENHANCEMENTS.md G1.8/G1.9). Appended for ABI stability. */
     int  has_geometry_precision;
+
+    /* Master switch for the first-run setup wizard + Generate & rebuild UI.
+     * Appended for ABI stability; zero-init keeps every existing host dark. */
+    int  setup_wizard_supported;
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */

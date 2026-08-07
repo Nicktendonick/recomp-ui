@@ -269,6 +269,8 @@ typedef struct {
     bool has_sharp_filter;
     bool has_affine_filter;
     bool netplay_supported;
+    /* Host opted into first-run wizard + Generate & rebuild (GameInfo). */
+    bool setup_wizard_supported;
     const RecompLauncherCNetplayCallbacks* netplay;
     const RecompLauncherCModProvider* mods;
     int       mod_selected;

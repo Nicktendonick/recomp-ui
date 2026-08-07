@@ -138,32 +138,57 @@ void launcher_model_init(LauncherModel* m,
         m->bios_verify_cb       = game->bios_verify;
         m->persist_setup_cb     = game->persist_setup;
         m->persist_setup_ctx    = game->persist_setup_ctx;
-        m->prepare_disc_cb      = game->prepare_disc;
-        m->prepare_with_progress_cb = game->prepare_with_progress;
-        m->rebuild_with_progress_cb = game->rebuild_with_progress;
+        /* Wizard + Generate & rebuild are a single opt-in. Without the flag,
+         * ignore prepare/rebuild/toolchain even if a host filled them — keeps
+         * unadvertised platforms from surfacing in-development UI. */
+        m->setup_wizard_supported = game->setup_wizard_supported != 0;
+        if (m->setup_wizard_supported) {
+            m->prepare_disc_cb      = game->prepare_disc;
+            m->prepare_with_progress_cb = game->prepare_with_progress;
+            m->rebuild_with_progress_cb = game->rebuild_with_progress;
+            m->prepare_disc_label   = game->prepare_disc_label;
+            m->prepare_disc_note    = game->prepare_disc_note;
+            m->prepare_section_title = game->prepare_section_title;
+            m->prepare_busy_status  = game->prepare_busy_status;
+            m->prepare_success_status = game->prepare_success_status;
+            m->rebuild_busy_status  = game->rebuild_busy_status;
+            m->rebuild_success_status = game->rebuild_success_status;
+            m->prepare_use_selected_rom = game->prepare_use_selected_rom != 0;
+            m->rebuild_after_prepare = game->rebuild_after_prepare != 0;
+            m->relaunch_after_rebuild = game->relaunch_after_rebuild != 0;
+            m->prepare_required_before_continue =
+                game->prepare_required_before_continue != 0;
+            m->setup_needs_toolchain = game->setup_needs_toolchain != 0;
+            m->toolchain_is_ready_cb = game->toolchain_is_ready;
+            m->ensure_toolchain_with_progress_cb =
+                game->ensure_toolchain_with_progress;
+        } else {
+            m->prepare_disc_cb = NULL;
+            m->prepare_with_progress_cb = NULL;
+            m->rebuild_with_progress_cb = NULL;
+            m->prepare_disc_label = NULL;
+            m->prepare_disc_note = NULL;
+            m->prepare_section_title = NULL;
+            m->prepare_busy_status = NULL;
+            m->prepare_success_status = NULL;
+            m->rebuild_busy_status = NULL;
+            m->rebuild_success_status = NULL;
+            m->prepare_use_selected_rom = false;
+            m->rebuild_after_prepare = false;
+            m->relaunch_after_rebuild = false;
+            m->prepare_required_before_continue = false;
+            m->setup_needs_toolchain = false;
+            m->toolchain_is_ready_cb = NULL;
+            m->ensure_toolchain_with_progress_cb = NULL;
+        }
+        /* PGO / FMV-timing are Settings actions, not the first-run wizard. */
         m->pgo_optimize_with_progress_cb = game->pgo_optimize_with_progress;
         m->fmv_timing_optimize_with_progress_cb =
             game->fmv_timing_optimize_with_progress;
-        m->prepare_disc_label   = game->prepare_disc_label;
-        m->prepare_disc_note    = game->prepare_disc_note;
-        m->prepare_section_title = game->prepare_section_title;
-        m->prepare_busy_status  = game->prepare_busy_status;
-        m->prepare_success_status = game->prepare_success_status;
-        m->rebuild_busy_status  = game->rebuild_busy_status;
-        m->rebuild_success_status = game->rebuild_success_status;
         m->pgo_busy_status      = game->pgo_busy_status;
         m->pgo_success_status   = game->pgo_success_status;
         m->fmv_timing_busy_status = game->fmv_timing_busy_status;
         m->fmv_timing_success_status = game->fmv_timing_success_status;
-        m->prepare_use_selected_rom = game->prepare_use_selected_rom != 0;
-        m->rebuild_after_prepare = game->rebuild_after_prepare != 0;
-        m->relaunch_after_rebuild = game->relaunch_after_rebuild != 0;
-        m->prepare_required_before_continue =
-            game->prepare_required_before_continue != 0;
-        m->setup_needs_toolchain = game->setup_needs_toolchain != 0;
-        m->toolchain_is_ready_cb = game->toolchain_is_ready;
-        m->ensure_toolchain_with_progress_cb =
-            game->ensure_toolchain_with_progress;
         m->boxart_path          = game->boxart_path;      // NULL => default boxart.tga
         m->aspect_labels        = game->aspect_labels;    // NULL => built-in 4:3/16:9/21:9
         m->num_aspect_labels    = game->num_aspect_labels;
@@ -472,10 +497,11 @@ void launcher_model_init(LauncherModel* m,
         }
     }
 
-    /* First-run setup: host can force it, or we open when ROM/BIOS is missing.
-     * A selected BIOS that merely needs Generate & rebuild (needs_regen) is
-     * handled by the Switch-BIOS / PLAY prompts — not the full wizard. */
-    {
+    /* First-run setup: only when the host opted into the wizard product.
+     * Host can force it, or we open when ROM/BIOS is missing. A selected BIOS
+     * that merely needs Generate & rebuild (needs_regen) is handled by the
+     * Switch-BIOS / PLAY prompts — not the full wizard. */
+    if (m->setup_wizard_supported) {
         const int force = game && game->needs_setup;
         const int missing_rom = !m->rom_present || strcmp(m->rom_size, "--") == 0;
         const int missing_bios = m->has_bios && !m->setup_bios_ok &&
@@ -1321,6 +1347,10 @@ static void lm_bios_commit_uncommitted(LauncherModel* m) {
 static void lm_bios_kick_generate(LauncherModel* m) {
     if (!m) return;
     if (m->setup_preparing) return; /* ignore double-clicks / overlapping jobs */
+    if (!m->setup_wizard_supported) {
+        lm_bios_revert_uncommitted(m);
+        return;
+    }
     m->setup_wizard_open = false;
     m->bios_confirm_open = false;
     m->bios_play_modal_open = false;

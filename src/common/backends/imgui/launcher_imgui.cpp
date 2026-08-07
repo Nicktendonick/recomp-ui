@@ -3709,7 +3709,7 @@ void np_format_local_address(const RecompLauncherCNetplayLocalAddress& address,
 
 /* Matches snes_lobby_default_url() when SNES_NET_LOBBY_URL is unset. */
 static const char kNpDefaultLobbyUrl[] =
-    "ws://netplay.technicallycomputers.ca:8765";
+    "ws://netplay.retcomm.net:8765";
 /* Persisted next to guest netplay saves (cwd-relative). */
 static const char kNpNetworkSettingsPath[] = "saves/netplay/network settings";
 
@@ -6190,7 +6190,7 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
             ImGui::SetTooltip("Select a valid %s first", noun);
         }
     }
-    if (!play_enabled && ImGui::IsItemClicked())
+    if (!play_enabled && ImGui::IsItemClicked() && m->setup_wizard_supported)
         m->setup_wizard_open = true;
     ImGui::SetItemDefaultFocus();   // gamepad/keyboard start on the primary action
     (void)win;
@@ -6319,6 +6319,7 @@ static void draw_setup_progress_modal(LauncherModel* m, const LauncherTheme& th)
 }
 
 void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
+    if (!m->setup_wizard_supported) return;
     if (!m->setup_wizard_open && !m->setup_preparing) return;
     launcher_model_poll_prepare_disc(m);
 
