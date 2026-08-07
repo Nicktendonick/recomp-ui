@@ -164,6 +164,18 @@ static int linux_pick_open_zenity(const char* title, const char* const* patterns
     else
         snprintf(filter_arg, sizeof(filter_arg), "--file-filter=%s", pats);
 
+    /* When the caller supplies patterns (e.g. PSX *.cue only), do not offer
+     * "All files" — that undoes the filter in the native dialog. */
+    if (patterns && num_patterns > 0) {
+        char* argv[] = {
+            "zenity",
+            "--file-selection",
+            title_arg,
+            filter_arg,
+            NULL
+        };
+        return linux_spawn_capture(argv, out, out_cap);
+    }
     char* argv[] = {
         "zenity",
         "--file-selection",
@@ -215,6 +227,18 @@ static int linux_pick_save_zenity(const char* title, const char* const* patterns
     else
         snprintf(filter_arg, sizeof(filter_arg), "--file-filter=%s", pats);
 
+    if (patterns && num_patterns > 0) {
+        char* argv[] = {
+            "zenity",
+            "--file-selection",
+            "--save",
+            "--confirm-overwrite",
+            title_arg,
+            filter_arg,
+            NULL
+        };
+        return linux_spawn_capture(argv, out, out_cap);
+    }
     char* argv[] = {
         "zenity",
         "--file-selection",

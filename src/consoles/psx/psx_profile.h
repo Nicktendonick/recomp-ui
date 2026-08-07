@@ -56,11 +56,10 @@ static const char* const kPanelsSettingsPsx[]   =
     { "video", "audio", "input", "system", "hotkeys", NULL };
 
 // ---- ROM (disc) file-picker filter ----------------------------------------------
-// Prefer .cue (multitrack-safe). .iso is accepted and normalized to .bin/.cue
-// by prepare_disc / generate. Steam's .car is a raw disc image and can be
-// selected directly. Bare track images follow the formats with their own TOC.
+// Cue sheets only (Redump-style). Track .bin files sit beside the .cue; bare
+// .iso/.bin/.img are not offered in the picker — generate/boot need a TOC.
 static const char* const kPsxDiscPatterns[] = {
-    "*.cue", "*.iso", "*.pbp", "*.chd", "*.img", "*.bin", "*.car"
+    "*.cue",
 };
 #define LNG_PSX_DISC_PATTERN_COUNT \
     ((int)(sizeof(kPsxDiscPatterns) / sizeof(kPsxDiscPatterns[0])))
@@ -109,7 +108,7 @@ static const SystemProfile kSystemProfilePsx = {
     /* screen_kind_names */ NULL,   /* legacy Raw/CRT/Composite/Trinitron set */
     /* screen_kind_count */ 0,
     /* rom_filter        */ { kPsxDiscPatterns, LNG_PSX_DISC_PATTERN_COUNT,
-                              "PlayStation disc (.cue preferred; .iso/.bin/.img/.car/.pbp/.chd)" },
+                              "PlayStation disc (.cue)" },
     /* renderer_labels   */ NULL,
     /* hide_audio_freq   */ 0,
     /* brand             */ "brand_psx.tga",
