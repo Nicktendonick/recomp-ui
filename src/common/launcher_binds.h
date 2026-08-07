@@ -119,6 +119,12 @@ void launcher_binds_set_hotkey(LauncherModel* m, LngHotkey h, int keycode, int k
 // (the model gates the UI on GameInfo.zapper).
 void launcher_binds_set_zapper(int mouse_enabled, int crosshair);
 
+/* NES Voxel camera bindings ([camera] in keybinds.ini). The Controls page
+ * calls these only when an enabled feature advertises camera_controls. */
+void launcher_binds_refresh_camera(LauncherModel* m);
+void launcher_binds_set_camera(LauncherModel* m, int action, int scancode);
+void launcher_binds_reset_camera(LauncherModel* m);
+
 // Surgically set "Key = value" inside [section] of `path`, preserving every
 // other line (comments, blank lines, unrelated sections). Creates the file
 // and/or section when absent. Shared by the config.ini [KeyMap] hotkey

@@ -249,6 +249,10 @@ typedef struct RecompLauncherCModFeature {
     int  enabled;
     int  option_count;
     int  has_error;
+    /* Feature exposes a live 3D camera. When enabled, the Controller page
+     * conditionally presents camera bindings and the Mods detail links there.
+     * Appended for ABI stability; zero keeps every existing feature unchanged. */
+    int  camera_controls;
 } RecompLauncherCModFeature;
 
 typedef struct RecompLauncherCModOption {
@@ -766,7 +770,7 @@ typedef struct RecompLauncherCGameInfo {
      *
      * prepare_disc (optional): convert a raw dump into a playable image.
      * Blocking host callback; the UI shows a busy state while it runs.
-     * Return 1 and write the playable .cue/.bin/.iso path into out_disc_path.
+     * Return 1 and write the playable .cue/.bin/.img/.iso/.car path into out_disc_path.
      * prepare_disc_label / prepare_disc_note are button + help text (NULL =>
      * "Convert raw dump…" / default note).
      *

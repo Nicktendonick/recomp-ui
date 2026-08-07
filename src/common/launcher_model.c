@@ -556,8 +556,17 @@ void launcher_model_set_rom(LauncherModel* m, const char* path) {
                     fseek(f, 0, SEEK_SET);
                     uint8_t* buf = (uint8_t*)malloc((size_t)n);
                     if (buf && fread(buf, 1, (size_t)n, f) == (size_t)n) {
-                        /* SMC copier header is present when (size % 1024 == 512). */
-                        size_t hdr  = ((size_t)n % 1024 == 512) ? 512 : 0;
+                        /* Normalize container headers before fingerprinting.
+                         * SNES .smc images may carry a 512-byte copier header;
+                         * NES .nes images carry a 16-byte iNES/NES 2.0 header.
+                         * NESRecomp's ROM and package CRCs intentionally cover
+                         * every byte after that 16-byte header. */
+                        size_t hdr = ((size_t)n % 1024 == 512) ? 512 : 0;
+                        if ((size_t)n > 16 &&
+                            buf[0] == 'N' && buf[1] == 'E' &&
+                            buf[2] == 'S' && buf[3] == 0x1A) {
+                            hdr = 16;
+                        }
                         const uint8_t* body = buf + hdr;
                         size_t blen = (size_t)n - hdr;
                         uint32_t crc = recompui_crc32_compute(body, blen);
@@ -2451,6 +2460,7 @@ void launcher_model_begin_capture_slot(LauncherModel* m, int b, int slot) {
     if (bc > LNG_MAX_BUTTONS) bc = LNG_MAX_BUTTONS;
     if (b < 0 || b >= bc) return;
     m->hk_capturing  = false;
+    m->camera_capturing = false;
     m->capturing     = true;
     m->capture_btn   = b;
     m->capture_slot  = (slot == 1) ? 1 : 0;
@@ -2501,10 +2511,24 @@ void launcher_model_cancel_capture(LauncherModel* m) {
 void launcher_model_begin_hk_capture(LauncherModel* m, LngHotkey h) {
     if (h < 0 || h >= LNG_HK_COUNT) return;
     m->capturing    = false;
+    m->camera_capturing = false;
     m->hk_capturing = true;
     m->capture_hk   = h;
 }
 void launcher_model_cancel_hk_capture(LauncherModel* m) { m->hk_capturing = false; }
+
+void launcher_model_begin_camera_capture(LauncherModel* m, int action) {
+    if (!m || action < 0 || action >= LNG_CAMERA_BIND_COUNT) return;
+    m->capturing = false;
+    m->capture_pad = false;
+    m->hk_capturing = false;
+    m->camera_capturing = true;
+    m->capture_camera = action;
+}
+
+void launcher_model_cancel_camera_capture(LauncherModel* m) {
+    if (m) m->camera_capturing = false;
+}
 
 const char* launcher_model_scale_label(const LauncherModel* m) {
     static char buf[8];

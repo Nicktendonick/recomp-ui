@@ -90,6 +90,22 @@ typedef enum {
     LNG_HK_COUNT
 } LngHotkey;
 
+enum {
+    LNG_CAMERA_LOOK_UP = 0,
+    LNG_CAMERA_LOOK_DOWN,
+    LNG_CAMERA_LOOK_LEFT,
+    LNG_CAMERA_LOOK_RIGHT,
+    LNG_CAMERA_ROLL_LEFT,
+    LNG_CAMERA_ROLL_RIGHT,
+    LNG_CAMERA_ZOOM_IN,
+    LNG_CAMERA_ZOOM_OUT,
+    LNG_CAMERA_SPRITE_SMALLER,
+    LNG_CAMERA_SPRITE_LARGER,
+    LNG_CAMERA_RESET,
+    LNG_CAMERA_TOGGLE,
+    LNG_CAMERA_BIND_COUNT
+};
+
 // Disc-verdict result (SystemProfile.verify.mode == 1 systems, e.g. PSX).
 // Populated by the profile's VerifyProbeFn (launcher_system.h) — or
 // synthesized from available facts when the probe is NULL — every time the
@@ -446,6 +462,8 @@ typedef struct {
     bool      map_all_active;
     bool      map_all_wait_release;
     int       map_all_step;
+    bool      camera_capturing;  // capturing an enabled Voxel camera key
+    int       capture_camera;    // LNG_CAMERA_* index
     bool      hk_capturing;      // capturing a system hotkey
     LngHotkey capture_hk;
     // Per-player bind-label display strings, indexed like capture_btn.
@@ -457,6 +475,7 @@ typedef struct {
     // "dpup", "a", "leftx+", "(unbound)"). Parallel to binds[], filled by
     // launcher_binds.c's per-console bridge alongside the keyboard labels.
     char      pad_binds[LNG_MAX_PLAYERS][LNG_MAX_BUTTONS][32];
+    char      camera_binds[LNG_CAMERA_BIND_COUNT][32];
     char      hotkeys[LNG_HK_COUNT][32];    // [KeyMap] value strings, e.g. "Ctrl+R"
 } LauncherModel;
 
@@ -484,6 +503,8 @@ bool launcher_model_rom_verified(const LauncherModel* m);
 // ---- navigation ----
 void launcher_model_set_view(LauncherModel* m, LngView v);
 void launcher_model_open_config(LauncherModel* m, int player);  // -> Controller view
+void launcher_model_begin_camera_capture(LauncherModel* m, int action);
+void launcher_model_cancel_camera_capture(LauncherModel* m);
 
 // ---- display settings ----
 void launcher_model_cycle_scale(LauncherModel* m);   // 1..6 wrap
