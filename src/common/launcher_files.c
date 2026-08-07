@@ -349,10 +349,25 @@ static int linux_pick_folder(const char* title, char* out, size_t out_cap) {
 }
 #endif /* __linux__ */
 
+bool launcher_native_file_picker_available(void) {
+#if defined(__linux__)
+    return linux_have_cmd("zenity") || linux_have_cmd("kdialog");
+#else
+    return true;
+#endif
+}
+
 bool launcher_pick_rom(char* out_path, size_t out_cap) {
     if (!out_path || out_cap == 0) return false;
     out_path[0] = '\0';
 
+#if defined(__linux__)
+    {
+        const int r = linux_pick_open("Select game file", NULL, 0, NULL,
+                                      out_path, out_cap);
+        return r == 1;
+    }
+#else
     // No filter: this fallback runs only when the active console's profile
     // supplied no rom_filter, and it cannot know what that console accepts.
     // Offering "All files" is honest; naming one system's extensions here is
@@ -367,6 +382,7 @@ bool launcher_pick_rom(char* out_path, size_t out_cap) {
 
     snprintf(out_path, out_cap, "%s", sel);
     return true;
+#endif
 }
 
 bool launcher_pick_folder(const char* title, char* out_path, size_t out_cap) {
@@ -377,6 +393,7 @@ bool launcher_pick_folder(const char* title, char* out_path, size_t out_cap) {
     {
         const int r = linux_pick_folder(title, out_path, out_cap);
         if (r >= 0) return r == 1; /* ok or cancel — never fall through to tinyfd */
+        return false;
     }
 #endif
 
@@ -396,6 +413,7 @@ bool launcher_pick_file(const char* title, const char* const* patterns, int num_
         const int r = linux_pick_open(title, patterns, num_patterns, desc,
                                       out_path, out_cap);
         if (r >= 0) return r == 1; /* ok or cancel — never fall through to tinyfd */
+        return false;
     }
 #endif
 
@@ -421,6 +439,7 @@ bool launcher_pick_save_file(const char* title, const char* const* patterns, int
         const int r = linux_pick_save(title, patterns, num_patterns, desc,
                                       out_path, out_cap);
         if (r >= 0) return r == 1; /* ok or cancel — never fall through to tinyfd */
+        return false;
     }
 #endif
 

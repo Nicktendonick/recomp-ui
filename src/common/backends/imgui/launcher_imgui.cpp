@@ -71,6 +71,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -121,6 +122,251 @@ LauncherPad g_pads[LNG_MAX_PADS];   // live gamepad list (repolled every frame)
 int         g_pad_count = 0;
 
 char        g_pick_buf[512] = {};    // ROM picker result
+
+struct BuiltinRomPicker {
+    bool active = false;
+    bool from_setup = false;
+    bool focus_path = false;
+    char title[96] = "Select game file";
+    char directory[1024] = {};
+    char selected[1024] = {};
+    char error[256] = {};
+    std::vector<std::string> patterns;
+    std::string description;
+};
+BuiltinRomPicker g_rom_picker;
+
+static std::string lower_ascii(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    return s;
+}
+
+static bool builtin_picker_matches(const std::filesystem::path& path) {
+    if (g_rom_picker.patterns.empty()) return true;
+    const std::string filename = lower_ascii(path.filename().string());
+    for (const std::string& raw : g_rom_picker.patterns) {
+        const std::string pattern = lower_ascii(raw);
+        if (pattern.empty() || pattern == "*" || pattern == "*.*") return true;
+        if (pattern.size() > 1 && pattern[0] == '*' &&
+            filename.size() >= pattern.size() - 1 &&
+            filename.compare(filename.size() - (pattern.size() - 1),
+                             pattern.size() - 1, pattern.substr(1)) == 0)
+            return true;
+        if (filename == pattern) return true;
+    }
+    return false;
+}
+
+static std::filesystem::path builtin_picker_initial_path(LauncherModel* m) {
+    std::error_code ec;
+    if (m && m->rom_full[0]) {
+        std::filesystem::path current(m->rom_full);
+        if (std::filesystem::is_regular_file(current, ec)) return current;
+    }
+    if (const char* hint = std::getenv("RECOMP_DISC_HINT")) {
+        std::filesystem::path hinted(hint);
+        ec.clear();
+        if (std::filesystem::is_regular_file(hinted, ec)) return hinted;
+    }
+    if (const char* image = std::getenv("RECOMP_APPIMAGE_PATH")) {
+        std::filesystem::path appimage(image);
+        ec.clear();
+        if (std::filesystem::exists(appimage.parent_path(), ec))
+            return appimage.parent_path();
+    }
+    if (const char* home = std::getenv("HOME")) return std::filesystem::path(home);
+    return std::filesystem::current_path(ec);
+}
+
+static void open_builtin_rom_picker(LauncherModel* m, const char* title,
+                                    const char* const* patterns, int pattern_count,
+                                    const char* description, bool from_setup) {
+    g_rom_picker = BuiltinRomPicker{};
+    g_rom_picker.active = true;
+    g_rom_picker.from_setup = from_setup;
+    std::snprintf(g_rom_picker.title, sizeof(g_rom_picker.title), "%s",
+                  title && title[0] ? title : "Select game file");
+    for (int i = 0; patterns && i < pattern_count; ++i)
+        if (patterns[i]) g_rom_picker.patterns.emplace_back(patterns[i]);
+    if (description) g_rom_picker.description = description;
+
+    std::filesystem::path initial = builtin_picker_initial_path(m);
+    std::error_code ec;
+    if (std::filesystem::is_regular_file(initial, ec)) {
+        std::snprintf(g_rom_picker.selected, sizeof(g_rom_picker.selected), "%s",
+                      initial.string().c_str());
+        initial = initial.parent_path();
+    }
+    if (initial.empty() || !std::filesystem::is_directory(initial, ec))
+        initial = std::filesystem::current_path(ec);
+    std::snprintf(g_rom_picker.directory, sizeof(g_rom_picker.directory), "%s",
+                  initial.string().c_str());
+    g_rom_picker.focus_path = true;
+}
+
+static void request_rom_picker(LauncherModel* m, const char* title,
+                               const char* const* patterns, int pattern_count,
+                               const char* description, bool from_setup) {
+    if (launcher_native_file_picker_available()) {
+        if (launcher_pick_file(title, patterns, pattern_count, description,
+                               g_pick_buf, sizeof(g_pick_buf)))
+            launcher_model_set_rom(m, g_pick_buf);
+        return;
+    }
+    open_builtin_rom_picker(m, title, patterns, pattern_count, description,
+                            from_setup);
+}
+
+static void draw_builtin_rom_picker_contents(LauncherModel* m,
+                                             const LauncherTheme& th,
+                                             bool standalone_popup) {
+    namespace fs = std::filesystem;
+    ImGui::TextColored(col(th.accent), "%s", g_rom_picker.title);
+    ImGui::TextColored(col(th.text_muted),
+                       "Built-in browser (no desktop file-picker service required)");
+    if (!g_rom_picker.description.empty())
+        ImGui::TextColored(col(th.text_muted), "Showing: %s",
+                           g_rom_picker.description.c_str());
+    ImGui::Dummy(ImVec2(0, px(6)));
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Folder");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(px(500));
+    bool enter_dir = ImGui::InputText("##builtin_picker_directory",
+                                      g_rom_picker.directory,
+                                      sizeof(g_rom_picker.directory),
+                                      ImGuiInputTextFlags_EnterReturnsTrue);
+    if (enter_dir) {
+        std::error_code ec;
+        if (!fs::is_directory(fs::path(g_rom_picker.directory), ec))
+            std::snprintf(g_rom_picker.error, sizeof(g_rom_picker.error),
+                          "That folder does not exist or cannot be opened.");
+        else
+            g_rom_picker.error[0] = '\0';
+    }
+
+    if (ImGui::Button("Up", ImVec2(px(82), px(30)))) {
+        fs::path parent = fs::path(g_rom_picker.directory).parent_path();
+        if (!parent.empty()) {
+            std::snprintf(g_rom_picker.directory, sizeof(g_rom_picker.directory),
+                          "%s", parent.string().c_str());
+            g_rom_picker.selected[0] = '\0';
+            g_rom_picker.error[0] = '\0';
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Home", ImVec2(px(82), px(30)))) {
+        if (const char* home = std::getenv("HOME")) {
+            std::snprintf(g_rom_picker.directory, sizeof(g_rom_picker.directory),
+                          "%s", home);
+            g_rom_picker.selected[0] = '\0';
+            g_rom_picker.error[0] = '\0';
+        }
+    }
+
+    struct PickerEntry {
+        fs::path path;
+        bool directory;
+    };
+    std::vector<PickerEntry> entries;
+    std::error_code ec;
+    const fs::path directory(g_rom_picker.directory);
+    fs::directory_iterator it(directory, fs::directory_options::skip_permission_denied, ec);
+    if (!ec) {
+        for (const fs::directory_entry& entry : it) {
+            std::error_code type_ec;
+            const bool is_dir = entry.is_directory(type_ec);
+            if (type_ec) continue;
+            if (is_dir || builtin_picker_matches(entry.path()))
+                entries.push_back({entry.path(), is_dir});
+        }
+        std::sort(entries.begin(), entries.end(),
+                  [](const PickerEntry& a, const PickerEntry& b) {
+                      if (a.directory != b.directory) return a.directory > b.directory;
+                      return lower_ascii(a.path.filename().string()) <
+                             lower_ascii(b.path.filename().string());
+                  });
+    } else if (!g_rom_picker.error[0]) {
+        std::snprintf(g_rom_picker.error, sizeof(g_rom_picker.error),
+                      "Unable to open this folder.");
+    }
+
+    ImGui::BeginChild("##builtin_picker_entries", ImVec2(0, px(300)),
+                      ImGuiChildFlags_Borders);
+    for (const PickerEntry& entry : entries) {
+        const std::string name = entry.path.filename().string();
+        std::string label = entry.directory ? "[Folder] " + name : name;
+        label += "##" + entry.path.string();
+        const bool selected =
+            !entry.directory && entry.path.string() == g_rom_picker.selected;
+        if (ImGui::Selectable(label.c_str(), selected,
+                              ImGuiSelectableFlags_AllowDoubleClick)) {
+            if (entry.directory) {
+                std::snprintf(g_rom_picker.directory,
+                              sizeof(g_rom_picker.directory), "%s",
+                              entry.path.string().c_str());
+                g_rom_picker.selected[0] = '\0';
+                g_rom_picker.error[0] = '\0';
+            } else {
+                std::snprintf(g_rom_picker.selected,
+                              sizeof(g_rom_picker.selected), "%s",
+                              entry.path.string().c_str());
+                g_rom_picker.error[0] = '\0';
+            }
+        }
+    }
+    ImGui::EndChild();
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("File");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1);
+    if (g_rom_picker.focus_path) {
+        ImGui::SetKeyboardFocusHere();
+        g_rom_picker.focus_path = false;
+    }
+    ImGui::InputText("##builtin_picker_selected", g_rom_picker.selected,
+                     sizeof(g_rom_picker.selected));
+    if (g_rom_picker.error[0])
+        ImGui::TextColored(col(th.warn), "%s", g_rom_picker.error);
+
+    ImGui::Dummy(ImVec2(0, px(6)));
+    if (ImGui::Button("Use selected file", ImVec2(px(180), px(34)))) {
+        std::error_code file_ec;
+        fs::path selected(g_rom_picker.selected);
+        if (fs::is_regular_file(selected, file_ec) &&
+            builtin_picker_matches(selected)) {
+            launcher_model_set_rom(m, selected.string().c_str());
+            g_rom_picker.active = false;
+            if (standalone_popup) ImGui::CloseCurrentPopup();
+        } else {
+            std::snprintf(g_rom_picker.error, sizeof(g_rom_picker.error),
+                          "Select an existing file matching this game's file types.");
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(px(110), px(34)))) {
+        g_rom_picker.active = false;
+        if (standalone_popup) ImGui::CloseCurrentPopup();
+    }
+}
+
+static void draw_standalone_builtin_rom_picker(LauncherModel* m,
+                                                const LauncherTheme& th) {
+    if (!g_rom_picker.active || g_rom_picker.from_setup) return;
+    ImGui::OpenPopup("Select game file##builtin");
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(px(720), 0), ImGuiCond_Always);
+    if (ImGui::BeginPopupModal("Select game file##builtin", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize |
+                               ImGuiWindowFlags_NoMove)) {
+        draw_builtin_rom_picker_contents(m, th, true);
+        ImGui::EndPopup();
+    }
+}
 
 // Context flag the dashboard composer sets just before invoking the "game"
 // panel's registered draw() — the LauncherPanelDrawFn signature (Model*,
@@ -794,16 +1040,12 @@ void draw_game_panel(LauncherModel* m, const LauncherTheme& th, bool fill_h = fa
         const SystemProfile* prof = (const SystemProfile*)m->profile;
         char title[48];
         snprintf(title, sizeof(title), "Select %s", noun);
-        bool picked;
         if (prof && prof->rom_filter.patterns && prof->rom_filter.pattern_count > 0)
-            picked = launcher_pick_file(title, prof->rom_filter.patterns,
-                                        prof->rom_filter.pattern_count,
-                                        prof->rom_filter.desc,
-                                        g_pick_buf, sizeof(g_pick_buf));
+            request_rom_picker(m, title, prof->rom_filter.patterns,
+                               prof->rom_filter.pattern_count,
+                               prof->rom_filter.desc, false);
         else
-            picked = launcher_pick_file(title, NULL, 0, NULL,
-                                        g_pick_buf, sizeof(g_pick_buf));
-        if (picked) launcher_model_set_rom(m, g_pick_buf);
+            request_rom_picker(m, title, NULL, 0, NULL, false);
     }
 
     // MSU-1 patch-available sub-block: this game ships an IPS patch that
@@ -1647,7 +1889,15 @@ void draw_player_panel(LauncherModel* m, const LauncherTheme& th, int p, float w
     {
         const SystemProfile* aprof = (const SystemProfile*)m->profile;
         const bool has_swap_art = aprof && aprof->controller.image_analog != nullptr;
-        const bool digital = has_swap_art && m->s.pad_mode[p] == 2;
+        // Show the digital pad ONLY for a game LOCKED to D-Pad mode. pad_mode
+        // selects which controller PROTOCOL the game is given, not which
+        // hardware the player is holding: on a title that offers analog at all,
+        // the player has an analog-capable pad in hand, and picking D-Pad mode
+        // does not turn their DualShock into a 1994 digital controller. Keying
+        // the art off the mode made Ape Escape — a dual-analog game — show the
+        // original PSX pad whenever the saved mode happened to be digital.
+        const bool digital_only = !m->pad_mode_selectable && m->locked_pad_mode == 2;
+        const bool digital = has_swap_art && digital_only;
         const LauncherTexture& art = has_swap_art
             ? (digital ? g_pad_digital : g_pad_analog) : g_pad;
         // Center on the FITTED width so a near-square pad (N64) or a portrait
@@ -1867,8 +2117,8 @@ static const char* elide_left(const char* s, float max_w, char* out, size_t cap)
 bool any_deep_display(const LauncherModel* m) {
     return m->has_window_size || m->has_renderer || m->has_supersampling ||
            m->has_antialiasing || m->has_texture_filter || m->has_screen_kind ||
-           m->has_frame_interp || m->has_skip_fmv || m->has_turbo_loads ||
-           m->has_geometry_precision;
+           m->has_frame_interp || m->has_skip_fmv ||
+           m->has_geometry_precision;   /* has_turbo_loads draws no row — see below */
 }
 
 // Whether the DISPLAY card should grow to fit its content (AutoResizeY) rather
@@ -2106,9 +2356,18 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
     }
 
     if (m->has_geometry_precision) {
-        // Geometry correction deliberately draws NO row (cracks meshes at the
-        // coverage the runtime can achieve; see psxrecomp ENHANCEMENTS.md
-        // G1.8/G1.9). ABI + game.toml/settings.toml remain readable.
+        // Geometry correction deliberately draws NO row. It moves vertices, and
+        // the runtime can only recover the sub-pixel original for ~5% of them
+        // (93% of lookups are ambiguous), so a corrected triangle meets an
+        // uncorrected neighbour and their shared edge splits open. Measured on
+        // Ape Escape; see psxrecomp ENHANCEMENTS.md G1.8/G1.9. The setting stays
+        // in the ABI and remains readable from game.toml/settings.toml so the
+        // work is still testable, exactly as has_turbo_loads/Settings.turbo_loads
+        // stayed after their row was dropped — it simply has no control.
+        //
+        // Perspective textures are unaffected by that problem: they only change
+        // UV interpolation inside a polygon whose provenance is already proven,
+        // so no vertex moves and adjacent polygons cannot disagree about an edge.
         row_label("Perspective textures", th);
         bool persp = m->s.perspective_texturing != 0;
         if (ImGui::Checkbox("##persptex", &persp))
@@ -2149,11 +2408,14 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         if (ImGui::Checkbox("##skipfmv", &sk)) launcher_model_toggle_skip_fmv(m);
     }
 
-    if (m->has_turbo_loads) {
-        row_label("Turbo loads", th);
-        bool tl = m->s.turbo_loads != 0;
-        if (ImGui::Checkbox("##turbo", &tl)) launcher_model_toggle_turbo_loads(m);
-    }
+    /* Turbo loads is deliberately NOT a Display row on any console. Load
+     * acceleration is owned by the framework's Mods catalog (Fast Loading /
+     * CD Speed), which exposes the multiplier, the instant scheduler and the
+     * distinction between host pacing and drive speed. A single opaque
+     * checkbox here duplicated that at lower fidelity and let the two
+     * surfaces disagree. The has_turbo_loads capability and
+     * Settings.turbo_loads remain in the ABI for hosts that still persist the
+     * value; they simply no longer draw a control. */
 
     // HD texture packs (NES module) — same enable + folder row as the legacy
     // branch renders; kept last, below the console-shape rows.
@@ -2703,6 +2965,19 @@ void draw_settings(LauncherModel* m, const LauncherTheme& th) {
     if (hotkeys_p) hotkeys_p->draw(m, &th);
 }
 
+static bool enabled_camera_controls(const LauncherModel* m) {
+    const auto* mods = m ? m->mods : nullptr;
+    if (!mods || !mods->feature_count || !mods->feature_get) return false;
+    const int count = mods->feature_count(mods->ctx);
+    for (int index = 0; index < count; ++index) {
+        RecompLauncherCModFeature feature{};
+        if (mods->feature_get(mods->ctx, index, &feature) &&
+            feature.enabled && feature.camera_controls)
+            return true;
+    }
+    return false;
+}
+
 // CONTROLLER-view rebind page: input source + deadzone, and the keyboard
 // bindings grid — reached from the dashboard CONTROLLER panel's Configure
 // button. The bindings grid walks the ACTIVE SystemProfile's
@@ -2935,6 +3210,82 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
                 "A compatible controller motion sensor is used automatically. "
                 "Mouse drag remains available as a fallback.");
             ImGui::PopStyleColor();
+        } end_panel();
+    }
+
+    /* Voxel/3D camera bindings are feature-driven, not a permanent NES
+     * capability. The card appears only while at least one enabled feature
+     * advertises camera_controls, and only on Player 1's page because the
+     * presentation camera is global. */
+    if (p == 0 && enabled_camera_controls(m)) {
+        static const char* kActionLabels[LNG_CAMERA_BIND_COUNT] = {
+            "Look up", "Look down", "Look left", "Look right",
+            "Roll left", "Roll right", "Zoom in", "Zoom out",
+            "Sprites smaller", "Sprites larger", "Reset view",
+            "Toggle Voxel 3D",
+        };
+        static const char* kPadDefaults[LNG_CAMERA_BIND_COUNT] = {
+            "Right stick up", "Right stick down",
+            "Right stick left", "Right stick right",
+            "-", "-", "-", "-", "-", "-", "-", "-",
+        };
+        launcher_binds_refresh_camera(m);
+        if (begin_panel("cfg_camera", 0)) {
+            eyebrow("3D CAMERA");
+            ImGui::TextColored(
+                col(th.text_muted),
+                "Active while the enabled Voxel mod is running. Right-stick "
+                "look is the gamepad default; keyboard actions use the numpad.");
+            ImGui::Spacing();
+            if (ImGui::BeginTable(
+                    "camera_binds", 3,
+                    ImGuiTableFlags_SizingStretchProp |
+                    ImGuiTableFlags_RowBg)) {
+                ImGui::TableSetupColumn("Action",
+                                        ImGuiTableColumnFlags_WidthStretch,
+                                        1.2f);
+                ImGui::TableSetupColumn("Keyboard",
+                                        ImGuiTableColumnFlags_WidthStretch,
+                                        1.0f);
+                ImGui::TableSetupColumn("Gamepad default",
+                                        ImGuiTableColumnFlags_WidthStretch,
+                                        1.0f);
+                ImGui::TableHeadersRow();
+                for (int action = 0; action < LNG_CAMERA_BIND_COUNT;
+                     ++action) {
+                    ImGui::PushID(action);
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextUnformatted(kActionLabels[action]);
+                    ImGui::TableSetColumnIndex(1);
+                    const bool capturing =
+                        m->camera_capturing &&
+                        m->capture_camera == action;
+                    if (capturing)
+                        ImGui::PushStyleColor(
+                            ImGuiCol_Button, col(th.accent));
+                    if (ImGui::Button(
+                            capturing ? "[ press a key... ]"
+                                      : m->camera_binds[action],
+                            ImVec2(-FLT_MIN, 0)))
+                        launcher_model_begin_camera_capture(m, action);
+                    if (capturing) ImGui::PopStyleColor();
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextColored(
+                        col(th.text_muted), "%s",
+                        kPadDefaults[action]);
+                    ImGui::PopID();
+                }
+                ImGui::EndTable();
+            }
+            ImGui::Spacing();
+            if (ImGui::Button("Reset Camera Bindings"))
+                launcher_binds_reset_camera(m);
+            if (m->camera_capturing)
+                ImGui::TextColored(
+                    col(th.warn), "Listening... (Esc cancels)");
         } end_panel();
     }
 
@@ -4971,6 +5322,43 @@ static bool draw_mod_integer_option(const RecompLauncherCModOption& option,
     return true;
 }
 
+static void draw_linkified_mod_author(
+    const char* author_text,
+    const RecompLauncherCModAuthorLink* author_links,
+    int author_link_count,
+    const LauncherTheme& th) {
+    if (!author_text || !author_text[0]) return;
+    const std::string author(author_text);
+    size_t cursor = 0;
+    ImGui::TextColored(col(th.text_muted), "by: ");
+    ImGui::SameLine(0, 0);
+    while (cursor < author.size()) {
+        size_t next = std::string::npos;
+        const RecompLauncherCModAuthorLink* link = nullptr;
+        for (int i = 0; i < author_link_count; ++i) {
+            const auto& candidate = author_links[i];
+            if (!candidate.name[0] || !candidate.url[0]) continue;
+            const size_t found = author.find(candidate.name, cursor);
+            if (found < next) {
+                next = found;
+                link = &candidate;
+            }
+        }
+        if (!link) {
+            ImGui::TextColored(col(th.text_muted), "%s", author.c_str() + cursor);
+            break;
+        }
+        if (next > cursor) {
+            const std::string prefix = author.substr(cursor, next - cursor);
+            ImGui::TextColored(col(th.text_muted), "%s", prefix.c_str());
+            ImGui::SameLine(0, 0);
+        }
+        ImGui::TextLinkOpenURL(link->name, link->url);
+        cursor = next + std::strlen(link->name);
+        if (cursor < author.size()) ImGui::SameLine(0, 0);
+    }
+}
+
 static void draw_mod_packages(LauncherModel* m, const LauncherTheme& th) {
     const auto* mods = m ? m->mods : nullptr;
     if (!mods || !mods->package_count || !mods->package_get) return;
@@ -5579,6 +5967,23 @@ static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
                 ImGui::TextWrapped("%s", feature.description);
             ImGui::Spacing();
 
+            if (feature.camera_controls) {
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::TextColored(col(th.accent), "3D camera controls");
+                ImGui::TextWrapped(
+                    feature.enabled
+                        ? "This mod adds live camera input. Review the current "
+                          "right-stick and keyboard bindings before playing."
+                        : "Enable this feature to expose its camera bindings "
+                          "on the Controller page.");
+                if (feature.enabled &&
+                    ImGui::Button("Review Camera Bindings")) {
+                    launcher_model_open_config(m, 0);
+                }
+                ImGui::Spacing();
+            }
+
             // The list-row checkbox is the single enable/disable control.
             // The detail pane owns configuration values only.
             draw_mod_feature_diagnostics(m, th, feature);
@@ -5963,19 +6368,29 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
 
     ImGui::OpenPopup("First-run setup");
     const ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    // Auto-sized setup content changes height as validation details appear.
+    // Recenter against its current size every frame so it cannot drift or clip.
+    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     /* Prefer content height (AlwaysAutoResize). Clamp to the work area. */
     const float max_h = vp->WorkSize.y * 0.92f;
-    ImGui::SetNextWindowSize(ImVec2(px(640), 0), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(
+        ImVec2(px(g_rom_picker.active && g_rom_picker.from_setup ? 720 : 640), 0),
+        ImGuiCond_Always);
     ImGui::SetNextWindowSizeConstraints(ImVec2(px(520), 0),
                                         ImVec2(FLT_MAX, max_h));
     if (!ImGui::BeginPopupModal("First-run setup", nullptr,
-                                ImGuiWindowFlags_AlwaysAutoResize))
+                                ImGuiWindowFlags_AlwaysAutoResize |
+                                ImGuiWindowFlags_NoMove))
         return;
 
     const float wrap_x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
     const char* noun = (m->rom_noun && m->rom_noun[0]) ? m->rom_noun : "ROM";
     const char* game = (m->game_name && m->game_name[0]) ? m->game_name : "this game";
+    if (g_rom_picker.active && g_rom_picker.from_setup) {
+        draw_builtin_rom_picker_contents(m, th, false);
+        ImGui::EndPopup();
+        return;
+    }
 
     /* ---- Page 0: portable toolchain ------------------------------------ */
     if (m->setup_needs_toolchain && m->setup_page == 0) {
@@ -6197,10 +6612,12 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     {
         const char* media_help =
             (plat == SETUP_PLAT_PSX)
-                ? "Select the Redump-style .cue (sibling .bin track files in "
-                  "the same folder). Track count is verified against the "
-                  "title’s policy. .iso dumps are not accepted — they cannot "
-                  "reliably become multi-track cues."
+                ? "Select the .cue sheet (MODE2/2352) when present. Steam .car "
+                  "disc images can be selected directly. "
+                  "The .cue keeps multitrack / audio-track layout correct for "
+                  "generate and boot. Cooked .iso dumps are OK — Generate "
+                  "converts them to a working .bin/.cue, then verifies the "
+                  "result against the game’s known digests."
             : (plat == SETUP_PLAT_GBA)
                 ? "Select your verified Game Boy Advance ROM (.gba)."
             : (plat == SETUP_PLAT_SNES)
@@ -6233,22 +6650,20 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
                               "Select %s (.cue)", noun);
             else
                 std::snprintf(title, sizeof(title), "Select %s", noun);
-            bool picked = false;
             if (prof && prof->rom_filter.pattern_count > 0)
-                picked = launcher_pick_file(title, prof->rom_filter.patterns,
-                                            prof->rom_filter.pattern_count,
-                                            prof->rom_filter.desc,
-                                            g_pick_buf, sizeof(g_pick_buf));
+                request_rom_picker(m, title, prof->rom_filter.patterns,
+                                   prof->rom_filter.pattern_count,
+                                   prof->rom_filter.desc, true);
             else
-                picked = launcher_pick_rom(g_pick_buf, sizeof(g_pick_buf));
-            if (picked) launcher_model_set_rom(m, g_pick_buf);
+                request_rom_picker(m, title, NULL, 0, NULL, true);
         }
         ImGui::PopStyleVar();
         if (m->profile && m->profile->verify.mode == 1)
             draw_verdict_block(m, th, ImGui::GetContentRegionAvail().x);
         if (plat == SETUP_PLAT_PSX && m->rom_present && m->rom_full[0]) {
             const char* ext = strrchr(m->rom_full, '.');
-            if (ext && (lps_streq_ci(ext, ".bin") || lps_streq_ci(ext, ".img"))) {
+            if (ext && (lps_streq_ci(ext, ".bin") || lps_streq_ci(ext, ".img") ||
+                        lps_streq_ci(ext, ".car"))) {
                 ImGui::PushTextWrapPos(wrap_x);
                 ImGui::TextColored(col(th.warn),
                     "You picked a track image (%s). Prefer the matching .cue "
@@ -6309,14 +6724,15 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
                     launcher_model_start_prepare_disc(m, m->rom_full);
             } else {
                 char buf[512];
-                static const char* kDumpPatterns[] = { "*.cue" };
+                static const char* kDumpPatterns[] = {
+                    "*.cue", "*.iso", "*.bin", "*.img", "*.car", "*.chd", "*.*" };
                 if (launcher_pick_file(
                         plat == SETUP_PLAT_PSX
                             ? "Select disc (.cue)"
                             : "Select raw disc dump to convert",
-                        kDumpPatterns, 1,
+                        kDumpPatterns, 7,
                         plat == SETUP_PLAT_PSX
-                            ? "PlayStation disc (.cue)"
+                            ? "PlayStation disc (.cue .iso .bin .img .car .chd)"
                             : "Disc dump",
                         buf, sizeof(buf)))
                     launcher_model_start_prepare_disc(m, buf);
@@ -6696,6 +7112,7 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
     draw_bios_play_modal(m, th);
     draw_pgo_confirm_modal(m, th);
     draw_fmv_timing_confirm_modal(m, th);
+    draw_standalone_builtin_rom_picker(m, th);
     draw_skip_modal(m);
     draw_netplay_player_modal(m);
     draw_netplay_network_modal(m, th);
@@ -6741,12 +7158,23 @@ static bool raw_input_is_mapped(SDL_JoystickID which, bool is_axis, int raw_inde
 #endif
 
 bool try_capture(LauncherModel* m, const SDL_Event& ev) {
-    if (!m->capturing && !m->hk_capturing) return false;
+    if (!m->capturing && !m->hk_capturing &&
+        !m->camera_capturing)
+        return false;
 
     // ESC cancels any capture — keyboard, pad, or hotkey.
     if (ev.type == SDL_EVENT_KEY_DOWN && LNG_EVKEY(ev) == SDLK_ESCAPE) {
         launcher_model_cancel_capture(m);
         launcher_model_cancel_hk_capture(m);
+        launcher_model_cancel_camera_capture(m);
+        return true;
+    }
+
+    if (m->camera_capturing) {
+        if (ev.type != SDL_EVENT_KEY_DOWN) return true;
+        launcher_binds_set_camera(
+            m, m->capture_camera, (int)LNG_EVSCAN(ev));
+        launcher_model_cancel_camera_capture(m);
         return true;
     }
 
