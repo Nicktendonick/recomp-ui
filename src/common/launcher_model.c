@@ -113,7 +113,6 @@ void launcher_model_init(LauncherModel* m,
 
         m->pad_mode_supported   = game->pad_mode_supported != 0;
         m->pad_mode_selectable  = game->pad_mode_selectable != 0;
-        m->allow_hybrid         = game->allow_hybrid != 0;
         m->locked_pad_mode      = clampi(game->locked_pad_mode, 0, 2);
         m->lock_device          = game->lock_device != 0;
         m->aspect_mask          = game->aspect_mask;
@@ -333,8 +332,10 @@ void launcher_model_init(LauncherModel* m,
                 for (int i = 0; i < pm_spec->mode_count; ++i)
                     if (pm_spec->modes[i].mode == m->s.pad_mode[p]) { ok = 1; break; }
                 if (!ok) m->s.pad_mode[p] = pm_spec->modes[0].mode;
-            } else if (!m->allow_hybrid && m->s.pad_mode[p] == 0) {
-                m->s.pad_mode[p] = 1;   // snap Hybrid -> Analog
+            } else if (m->s.pad_mode[p] == 0) {
+                /* Hybrid is mod-only and never selectable: migrate any stale
+                 * persisted value. The mod requests it at runtime instead. */
+                m->s.pad_mode[p] = 1;
             }
             /* Keyboard cannot drive Analog/Hybrid — force D-Pad. */
             if (m->s.player_src[p] == 1 &&
@@ -2531,10 +2532,10 @@ void launcher_model_set_pad_mode(LauncherModel* m, int player, int mode) {
             if (spec->modes[i].mode == mode) { m->s.pad_mode[player] = mode; return; }
         return;
     }
-    /* Keyboard has no sticks — Analog/Hybrid are unavailable. */
+    /* Keyboard has no sticks — Analog is unavailable. */
     if (m->s.player_src[player] == 1 && mode != 2) return;
     mode = clampi(mode, 0, 2);
-    if (mode == 0 && !m->allow_hybrid) mode = 1;   // Hybrid hidden -> snap to Analog
+    if (mode == 0) mode = 1;   /* Hybrid is mod-only -> snap to Analog */
     m->s.pad_mode[player] = mode;
 }
 

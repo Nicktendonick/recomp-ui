@@ -134,7 +134,6 @@ static inline void launcher_profile_apply_psx(RecompLauncherCGameInfo* gi) {
     // Controller: PSX has analog/digital pad modes + swapping DualShock art.
     gi->pad_mode_supported  = 1;
     gi->pad_mode_selectable = 1;       // per-game lock_mode may set this to 0
-    gi->allow_hybrid        = 1;
     gi->aspect_mask         = 0x1;     // 4:3 always; game adds 16:9 (0x2) / 21:9 (0x4)
     // Full PS1 settings surface.
     gi->has_window_size = 1; gi->has_renderer = 1; gi->has_supersampling = 1;

@@ -319,7 +319,6 @@ typedef struct {
     // ---- controller pad-mode caps (PlayStation-style analog/digital) ----
     bool     pad_mode_supported;    // false => no selector/art swap; generic pad.tga
     bool     pad_mode_selectable;   // false => selector hidden, mode forced to locked_pad_mode
-    bool     allow_hybrid;          // false => Hybrid option hidden
     int      locked_pad_mode;       // forced mode when !pad_mode_selectable
     bool     lock_device;           // true => hide the player controller cards entirely
 
@@ -721,9 +720,10 @@ void launcher_model_apply_msu1_patch(LauncherModel* m);
 void launcher_model_skip_msu1_patch(LauncherModel* m);
 
 // ---- controllers ----
-// PSX-style pad mode: 0=Hybrid, 1=Analog, 2=D-Pad. Gated: no-op when
-// !pad_mode_selectable (mode is locked); snaps away from Hybrid when
-// !allow_hybrid.
+// PSX-style pad mode: 1=Analog, 2=D-Pad. Gated: no-op when
+// !pad_mode_selectable (mode is locked). Mode 0 (Hybrid) is NOT selectable —
+// it is a mod-only mode requested at runtime by a trusted game plugin — so a
+// stale persisted 0 snaps to Analog.
 void launcher_model_set_pad_mode(LauncherModel* m, int player, int mode);
 void launcher_model_cycle_player_src(LauncherModel* m, int player); // None/Kbd/Pad
 void launcher_model_deadzone_delta(LauncherModel* m, int player, int delta);
