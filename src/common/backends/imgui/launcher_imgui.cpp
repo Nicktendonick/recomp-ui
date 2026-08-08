@@ -6656,10 +6656,11 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     if (plat == SETUP_PLAT_PSX && m->has_bios) {
         ImGui::TextColored(col(th.text_muted),
             "%s needs a playable %s before you can launch. This build includes "
-            "a bundled BIOS (OpenBIOS) by default — a retail SCPH1001.BIN dump "
-            "is optional. Use a Redump-style .cue with sibling .bin tracks "
-            "(.iso is not accepted). Pick your %s below (you must "
-            "legally own these dumps).",
+            "a bundled BIOS (OpenBIOS) by default. Setup also looks for a "
+            "retail SCPH1001.BIN beside the install and uses it when found; "
+            "otherwise OpenBIOS stays selected. Use a Redump-style .cue with "
+            "sibling .bin tracks (.iso is not accepted). Pick your %s below "
+            "(you must legally own these dumps).",
             game, noun, noun);
     } else if (plat == SETUP_PLAT_GBA && m->has_bios) {
         ImGui::TextColored(col(th.text_muted),
@@ -6698,8 +6699,9 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
                   "300c20df… — dumped from a Game Boy Advance). Setup packages "
                   "do not ship a redistributable GBA BIOS."
             : (plat == SETUP_PLAT_PSX)
-                ? "Default: bundled OpenBIOS. Optionally browse for your own "
-                  "SCPH1001.BIN (exactly 512 KB, dumped from your console)."
+                ? "Default: bundled OpenBIOS. Setup auto-selects SCPH1001.BIN "
+                  "if it finds a validated dump beside the install; otherwise "
+                  "browse for your own (exactly 512 KB)."
                 : "Browse for a BIOS image required by this console.";
         const char* empty_bios_label =
             offers_bundled ? "OpenBIOS" : "(none selected)";
