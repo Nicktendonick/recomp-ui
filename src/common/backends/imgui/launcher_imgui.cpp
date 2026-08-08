@@ -7368,10 +7368,34 @@ bool try_capture(LauncherModel* m, const SDL_Event& ev) {
                     try_clear_release_wait((uint32_t)LNG_EVGAXISWHICH(ev));
                     return true;
                 }
-                int val = (int)LNG_EVGAXISVAL(ev);
-                if (val >= 20000 || val <= -20000)   // ignore rest/jitter
-                    commit_pad(LNG_PADBIND_AXIS, (int)LNG_EVGAXIS(ev),
-                               val < 0 ? -1 : +1);
+                const int val = (int)LNG_EVGAXISVAL(ev);
+                if (val < 20000 && val > -20000) return true; // rest/jitter
+                const int axis = (int)LNG_EVGAXIS(ev);
+                // PSX: every pad slot is a digital bit. Stick axes belong on
+                // L-Stick/R-Stick direction rows (indices 16..23); ignore them
+                // on face/shoulder slots so a twitchy stick cannot steal
+                // L1/Cross/etc. Trigger axes (L2/R2) are always OK — the
+                // runtime thresholds them to digital. Buttons still win when
+                // SDL emits GAMEPAD_BUTTON_DOWN for the same physical control.
+                if (psx_cap) {
+                    const int slot = m->capture_btn;
+                    const bool stick_dir_slot = (slot >= 16 && slot < 24);
+#if defined(LNG_SDL3)
+                    const bool stick_axis =
+                        axis == (int)SDL_GAMEPAD_AXIS_LEFTX ||
+                        axis == (int)SDL_GAMEPAD_AXIS_LEFTY ||
+                        axis == (int)SDL_GAMEPAD_AXIS_RIGHTX ||
+                        axis == (int)SDL_GAMEPAD_AXIS_RIGHTY;
+#else
+                    const bool stick_axis =
+                        axis == (int)SDL_CONTROLLER_AXIS_LEFTX ||
+                        axis == (int)SDL_CONTROLLER_AXIS_LEFTY ||
+                        axis == (int)SDL_CONTROLLER_AXIS_RIGHTX ||
+                        axis == (int)SDL_CONTROLLER_AXIS_RIGHTY;
+#endif
+                    if (!stick_dir_slot && stick_axis) return true;
+                }
+                commit_pad(LNG_PADBIND_AXIS, axis, val < 0 ? -1 : +1);
             }
             return true;
         }
