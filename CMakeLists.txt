@@ -109,6 +109,17 @@ if(BUILD_TESTING)
     target_include_directories(recomp-runtime-ui-test PRIVATE src)
     add_test(NAME recomp-runtime-ui COMMAND $<TARGET_FILE:recomp-runtime-ui-test>)
 
+    add_executable(recomp-ui-psx-binds-test
+        tests/psx_binds_test.c
+        src/consoles/psx/psx_binds.c)
+    target_include_directories(recomp-ui-psx-binds-test PRIVATE
+        src src/common src/consoles/psx)
+    target_link_libraries(recomp-ui-psx-binds-test PRIVATE ${RUI_SDL_TARGET})
+    add_test(
+        NAME recomp-ui-psx-binds
+        COMMAND $<TARGET_FILE:recomp-ui-psx-binds-test>
+                "${CMAKE_CURRENT_BINARY_DIR}/psx-binds-test.ini")
+
     add_executable(recomp-runtime-ui-imgui-test
         tests/runtime_ui_imgui_test.cpp
         src/common/recomp_runtime_ui.c
