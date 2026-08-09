@@ -6751,14 +6751,20 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
 
     ImGui::Text("%s. %s image", m->has_bios ? "2" : "1", noun);
     ImGui::PushTextWrapPos(wrap_x);
-    {
+    if (plat == SETUP_PLAT_PSX) {
+        ImGui::TextColored(col(th.text_muted),
+            "NOTE: psxrecomp games require a .cue + .bin dump of the disc. "
+            "Note the number of tracks required by this project; multitrack "
+            "discs are often Redump-formatted dumps. You can generate your own "
+            "from the original disc with ");
+        ImGui::SameLine(0.0f, 0.0f);
+        setup_url_link("redumper", "https://github.com/superg/redumper");
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::TextColored(col(th.text_muted),
+            ". You cannot convert a single-track .bin or .iso to multitrack.");
+    } else {
         const char* media_help =
-            (plat == SETUP_PLAT_PSX)
-                ? "Select the Redump-style .cue sheet only (sibling .bin track "
-                  "files stay in the same folder). The .cue keeps multitrack / "
-                  "audio-track layout correct for generate and boot. Bare "
-                  ".iso / .bin / .img dumps are not accepted here."
-            : (plat == SETUP_PLAT_GBA)
+            (plat == SETUP_PLAT_GBA)
                 ? "Select your verified Game Boy Advance ROM (.gba)."
             : (plat == SETUP_PLAT_SNES)
                 ? "Select your Super Nintendo ROM (.sfc / .smc)."
@@ -6911,7 +6917,10 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     if (m->setup_needs_toolchain) {
         if (ImGui::Button("Back", ImVec2(px(100), px(34)))) {
             m->setup_page = 0;
+            /* Re-offer the update UI if a newer pack is still available. */
+            m->setup_tc_update_skipped = false;
             m->setup_error[0] = '\0';
+            m->setup_status[0] = '\0';
         }
         ImGui::SameLine();
     }
