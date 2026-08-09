@@ -567,5 +567,8 @@ and its `.c` files + assets wired into `recomp_ui.cmake`.
 
 ## License
 
+recomp-ui is licensed under the [MIT License](LICENSE). Copyright (c) 2026
+Matthew Stanley.
+
 Bundled third-party code (Dear ImGui, stb, tinyfiledialogs) retains its own
 licenses under `src/third_party/`.
