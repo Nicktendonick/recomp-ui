@@ -46,7 +46,9 @@ bool launcher_pick_folder(const char* title, char* out_path, size_t out_cap);
 
 // Open the OS "choose a file" dialog for an arbitrary single file (e.g. a PSX
 // BIOS image). `patterns`/`num_patterns` may be NULL/0 for "all files"; `desc`
-// is the filter's display description (may be NULL). Returns true and fills
+// is the filter's display description (may be NULL). When patterns are set,
+// Windows/macOS tinyfd does not offer "All Files", and a picked path that
+// fails the filter is rejected (message box). Returns true and fills
 // `out_path` on success.
 bool launcher_pick_file(const char* title, const char* const* patterns, int num_patterns,
                         const char* desc, char* out_path, size_t out_cap);

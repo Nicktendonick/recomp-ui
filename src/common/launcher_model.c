@@ -2149,6 +2149,10 @@ int launcher_model_visible_player_count(const LauncherModel* m) {
 
 int launcher_model_multitap_analog_available(const LauncherModel* m) {
     if (!m || m->player_count < 3) return 0;
+    /* Digital-only titles (lock_mode + locked_pad_mode=D-Pad): DualShock-on-tap
+     * is unsupported — hide the Lobby / Controllers toggle. */
+    if (!m->pad_mode_selectable && m->locked_pad_mode == 2)
+        return 0;
     const SystemProfile* prof = (const SystemProfile*)m->profile;
     return (prof && prof->id && strcmp(prof->id, "psx") == 0) ? 1 : 0;
 }

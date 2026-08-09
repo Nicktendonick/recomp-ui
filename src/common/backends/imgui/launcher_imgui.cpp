@@ -6656,10 +6656,11 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     if (plat == SETUP_PLAT_PSX && m->has_bios) {
         ImGui::TextColored(col(th.text_muted),
             "%s needs a playable %s before you can launch. This build includes "
-            "a bundled BIOS (OpenBIOS) by default — a retail SCPH1001.BIN dump "
-            "is optional. Use a Redump-style .cue with sibling .bin tracks "
-            "(.iso is not accepted). Pick your %s below (you must "
-            "legally own these dumps).",
+            "a bundled BIOS (OpenBIOS) by default. Setup also looks for a "
+            "retail SCPH1001.BIN beside the install and uses it when found; "
+            "otherwise OpenBIOS stays selected. Use a Redump-style .cue with "
+            "sibling .bin tracks (.iso is not accepted). Pick your %s below "
+            "(you must legally own these dumps).",
             game, noun, noun);
     } else if (plat == SETUP_PLAT_GBA && m->has_bios) {
         ImGui::TextColored(col(th.text_muted),
@@ -6698,8 +6699,9 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
                   "300c20df… — dumped from a Game Boy Advance). Setup packages "
                   "do not ship a redistributable GBA BIOS."
             : (plat == SETUP_PLAT_PSX)
-                ? "Default: bundled OpenBIOS. Optionally browse for your own "
-                  "SCPH1001.BIN (exactly 512 KB, dumped from your console)."
+                ? "Default: bundled OpenBIOS. Setup auto-selects SCPH1001.BIN "
+                  "if it finds a validated dump beside the install; otherwise "
+                  "browse for your own (exactly 512 KB)."
                 : "Browse for a BIOS image required by this console.";
         const char* empty_bios_label =
             offers_bundled ? "OpenBIOS" : "(none selected)";
@@ -6749,14 +6751,20 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
 
     ImGui::Text("%s. %s image", m->has_bios ? "2" : "1", noun);
     ImGui::PushTextWrapPos(wrap_x);
-    {
+    if (plat == SETUP_PLAT_PSX) {
+        ImGui::TextColored(col(th.text_muted),
+            "NOTE: psxrecomp games require a .cue + .bin dump of the disc. "
+            "Note the number of tracks required by this project; multitrack "
+            "discs are often Redump-formatted dumps. You can generate your own "
+            "from the original disc with ");
+        ImGui::SameLine(0.0f, 0.0f);
+        setup_url_link("redumper", "https://github.com/superg/redumper");
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::TextColored(col(th.text_muted),
+            ". You cannot convert a single-track .bin or .iso to multitrack.");
+    } else {
         const char* media_help =
-            (plat == SETUP_PLAT_PSX)
-                ? "Select the Redump-style .cue sheet only (sibling .bin track "
-                  "files stay in the same folder). The .cue keeps multitrack / "
-                  "audio-track layout correct for generate and boot. Bare "
-                  ".iso / .bin / .img dumps are not accepted here."
-            : (plat == SETUP_PLAT_GBA)
+            (plat == SETUP_PLAT_GBA)
                 ? "Select your verified Game Boy Advance ROM (.gba)."
             : (plat == SETUP_PLAT_SNES)
                 ? "Select your Super Nintendo ROM (.sfc / .smc)."
@@ -6909,7 +6917,10 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     if (m->setup_needs_toolchain) {
         if (ImGui::Button("Back", ImVec2(px(100), px(34)))) {
             m->setup_page = 0;
+            /* Re-offer the update UI if a newer pack is still available. */
+            m->setup_tc_update_skipped = false;
             m->setup_error[0] = '\0';
+            m->setup_status[0] = '\0';
         }
         ImGui::SameLine();
     }
@@ -7368,10 +7379,34 @@ bool try_capture(LauncherModel* m, const SDL_Event& ev) {
                     try_clear_release_wait((uint32_t)LNG_EVGAXISWHICH(ev));
                     return true;
                 }
-                int val = (int)LNG_EVGAXISVAL(ev);
-                if (val >= 20000 || val <= -20000)   // ignore rest/jitter
-                    commit_pad(LNG_PADBIND_AXIS, (int)LNG_EVGAXIS(ev),
-                               val < 0 ? -1 : +1);
+                const int val = (int)LNG_EVGAXISVAL(ev);
+                if (val < 20000 && val > -20000) return true; // rest/jitter
+                const int axis = (int)LNG_EVGAXIS(ev);
+                // PSX: every pad slot is a digital bit. Stick axes belong on
+                // L-Stick/R-Stick direction rows (indices 16..23); ignore them
+                // on face/shoulder slots so a twitchy stick cannot steal
+                // L1/Cross/etc. Trigger axes (L2/R2) are always OK — the
+                // runtime thresholds them to digital. Buttons still win when
+                // SDL emits GAMEPAD_BUTTON_DOWN for the same physical control.
+                if (psx_cap) {
+                    const int slot = m->capture_btn;
+                    const bool stick_dir_slot = (slot >= 16 && slot < 24);
+#if defined(LNG_SDL3)
+                    const bool stick_axis =
+                        axis == (int)SDL_GAMEPAD_AXIS_LEFTX ||
+                        axis == (int)SDL_GAMEPAD_AXIS_LEFTY ||
+                        axis == (int)SDL_GAMEPAD_AXIS_RIGHTX ||
+                        axis == (int)SDL_GAMEPAD_AXIS_RIGHTY;
+#else
+                    const bool stick_axis =
+                        axis == (int)SDL_CONTROLLER_AXIS_LEFTX ||
+                        axis == (int)SDL_CONTROLLER_AXIS_LEFTY ||
+                        axis == (int)SDL_CONTROLLER_AXIS_RIGHTX ||
+                        axis == (int)SDL_CONTROLLER_AXIS_RIGHTY;
+#endif
+                    if (!stick_dir_slot && stick_axis) return true;
+                }
+                commit_pad(LNG_PADBIND_AXIS, axis, val < 0 ? -1 : +1);
             }
             return true;
         }
