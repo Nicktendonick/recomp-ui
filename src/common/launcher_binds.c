@@ -184,7 +184,8 @@ static const char* kHotkeyKey[LNG_HK_COUNT] = {
 // Built-in defaults (shown when config.ini has no line; "" = unbound).
 static const char* kHotkeyDef[LNG_HK_COUNT] = {
     "Alt+Return", "Ctrl+R", "Shift+P", "P", "Tab",
-    /* WindowBigger/Smaller unbound; VolumeUp/Down = numpad +/- (MotK runtime). */
+    /* WindowBigger/Smaller unbound; VolumeUp/Down default keypad +/-
+     * (psxrecomp host_keymap reads these from [KeyMap]). */
     "", "", "Keypad +", "Keypad -", "F", "R",
     "", "", ""
 };
