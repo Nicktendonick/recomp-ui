@@ -940,6 +940,12 @@ typedef struct RecompLauncherCGameInfo {
      * removed a broken cache (failed clang/lld smoke test). NULL/empty => none.
      * Appended for ABI stability. */
     const char* (*toolchain_repair_note)(void);
+
+    /* Optional copy for a host-defined aspect cycle. When NULL, the row keeps
+     * the historical "View mode" label and has no explanatory tooltip. These
+     * are appended so older zero-initialized hosts retain their exact UI. */
+    const char* aspect_setting_label;
+    const char* aspect_setting_help;
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */

@@ -195,6 +195,8 @@ void launcher_model_init(LauncherModel* m,
         m->aspect_labels        = game->aspect_labels;    // NULL => built-in 4:3/16:9/21:9
         m->num_aspect_labels    = game->num_aspect_labels;
         m->aspect_experimental  = game->aspect_experimental != 0;
+        m->aspect_setting_label = game->aspect_setting_label;
+        m->aspect_setting_help  = game->aspect_setting_help;
         m->adaptive_view_supported = game->adaptive_view_supported != 0;
         m->display_layout_labels = game->display_layout_labels;
         m->num_display_layouts = game->num_display_layouts;
