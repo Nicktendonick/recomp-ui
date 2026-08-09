@@ -186,6 +186,7 @@ typedef struct RecompLauncherCNetplayCallbacks {
 #define RECOMP_LAUNCHER_MOD_ID_MAX 96
 #define RECOMP_LAUNCHER_MOD_VALUE_MAX 128
 #define RECOMP_LAUNCHER_MOD_AUTHOR_LINK_MAX 8
+#define RECOMP_LAUNCHER_MOD_PATH_MAX 1024
 
 typedef struct RecompLauncherCModAuthorLink {
     char name[64];
@@ -286,6 +287,22 @@ typedef struct RecompLauncherCModDiagnostic {
     char related_feature_id[RECOMP_LAUNCHER_MOD_ID_MAX];
 } RecompLauncherCModDiagnostic;
 
+/* Owner-supplied files required by a feature, such as a source ROM used by a
+ * character port. Providers validate identity; the UI only chooses a path and
+ * displays the provider's verdict. Paths are never copied into a package. */
+typedef struct RecompLauncherCModResource {
+    char id[RECOMP_LAUNCHER_MOD_ID_MAX];
+    char label[128];
+    char description[512];
+    char path[RECOMP_LAUNCHER_MOD_PATH_MAX];
+    char status[256];
+    /* Comma-separated native-dialog patterns, e.g. "*.z64,*.v64,*.n64". */
+    char file_patterns[128];
+    char file_description[128];
+    int required;
+    int verified;
+} RecompLauncherCModResource;
+
 typedef struct RecompLauncherCModProvider {
     void* ctx;
     int (*package_count)(void* ctx);
@@ -340,6 +357,20 @@ typedef struct RecompLauncherCModProvider {
      * "skip commit entirely" (no mods applied for that launch). Appended for
      * ABI stability — zero-init leaves it NULL. */
     int (*commit_netplay)(void* ctx, const char* image_path);
+    /* Optional owner-resource surface. Appended for source compatibility in
+     * the statically paired runner/UI build; this struct does not yet expose a
+     * negotiated byte size for loading an older binary provider object.
+     * Feature enable and commit remain authoritative gates; the UI verdict
+     * alone is never sufficient. */
+    int (*feature_resource_count)(void* ctx, const char* package_id,
+                                  const char* feature_id);
+    int (*feature_resource_get)(void* ctx, const char* package_id,
+                                const char* feature_id, int index,
+                                RecompLauncherCModResource* out);
+    int (*feature_resource_set_path)(void* ctx, const char* package_id,
+                                     const char* feature_id,
+                                     const char* resource_id,
+                                     const char* path);
 } RecompLauncherCModProvider;
 
 // Plain-C mirror of the launcher's internal settings (bools as int).
