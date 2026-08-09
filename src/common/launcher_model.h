@@ -264,6 +264,8 @@ typedef struct {
     const char* const* aspect_labels;
     int  num_aspect_labels;
     bool aspect_experimental;
+    const char* aspect_setting_label;
+    const char* aspect_setting_help;
     bool adaptive_view_supported;
     const char* const* display_layout_labels;
     int  num_display_layouts;

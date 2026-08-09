@@ -2095,11 +2095,16 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         }
         if (m->aspect_mask || m->num_aspect_labels > 0 ||
             m->widescreen_supported || m->adaptive_view_supported) {
-            row_label("View mode", th, cw);
+            row_label(m->aspect_setting_label ? m->aspect_setting_label : "View mode",
+                      th, cw);
             if (ImGui::Button(launcher_model_view_mode_label(m),
-                              ImVec2(px(180), px(30))))
+                              ImVec2(px(180), px(30)))) {
                 launcher_model_cycle_view_mode(m);
-            experimental_tag(th);
+            }
+            if (m->aspect_setting_help && ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", m->aspect_setting_help);
+            if (!m->aspect_labels || m->aspect_experimental)
+                experimental_tag(th);
             // Genesis-style "extra cells per side" stepper: only when the
             // console opts in (video.widescreen_cells) AND widescreen is on.
             const SystemProfile* wprof = (const SystemProfile*)m->profile;
@@ -2194,11 +2199,15 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
 
     if (m->aspect_mask || m->num_aspect_labels > 0 ||
         m->widescreen_supported || m->adaptive_view_supported) {
-        row_label("View mode", th);
+        row_label(m->aspect_setting_label ? m->aspect_setting_label : "View mode", th);
         if (ImGui::Button(launcher_model_view_mode_label(m),
-                          ImVec2(px(180), px(30))))
+                          ImVec2(px(180), px(30)))) {
             launcher_model_cycle_view_mode(m);
-        experimental_tag(th);
+        }
+        if (m->aspect_setting_help && ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", m->aspect_setting_help);
+        if (!m->aspect_labels || m->aspect_experimental)
+            experimental_tag(th);
     }
 
     if (m->has_sharp_filter) {
