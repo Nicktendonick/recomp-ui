@@ -120,6 +120,14 @@ if(BUILD_TESTING)
         COMMAND $<TARGET_FILE:recomp-ui-psx-binds-test>
                 "${CMAKE_CURRENT_BINARY_DIR}/psx-binds-test.ini")
 
+    add_executable(recomp-ui-psx-profile-test
+        tests/psx_profile_test.c)
+    target_include_directories(recomp-ui-psx-profile-test PRIVATE
+        src src/common src/consoles/psx)
+    add_test(
+        NAME recomp-ui-psx-profile
+        COMMAND $<TARGET_FILE:recomp-ui-psx-profile-test>)
+
     add_executable(recomp-runtime-ui-imgui-test
         tests/runtime_ui_imgui_test.cpp
         src/common/recomp_runtime_ui.c
