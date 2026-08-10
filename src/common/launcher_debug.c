@@ -75,13 +75,25 @@ bool launcher_capture_png(const char* path, int w, int h) {
 // that sample SDL_GetMouseState see it) and push button events (so backends
 // that consume the event queue see it). Covers both ImGui and Clay.
 static void synth_click(LauncherPlatform* p, float x, float y) {
+#if defined(LNG_SDL3)
     SDL_WarpMouseInWindow(p->window, x, y);
+#else
+    // SDL2 stores mouse coordinates as integers. Make its existing truncation
+    // behavior explicit while preserving SDL3's subpixel coordinates.
+    const int event_x = (int)x;
+    const int event_y = (int)y;
+    SDL_WarpMouseInWindow(p->window, event_x, event_y);
+#endif
 
     SDL_Event e;
     SDL_zero(e);
     e.type = SDL_EVENT_MOUSE_MOTION;
     e.motion.windowID = SDL_GetWindowID(p->window);
+#if defined(LNG_SDL3)
     e.motion.x = x; e.motion.y = y;
+#else
+    e.motion.x = event_x; e.motion.y = event_y;
+#endif
     SDL_PushEvent(&e);
 
     SDL_zero(e);
@@ -89,10 +101,11 @@ static void synth_click(LauncherPlatform* p, float x, float y) {
     e.button.windowID = SDL_GetWindowID(p->window);
     e.button.button = SDL_BUTTON_LEFT;
     e.button.clicks = 1;
-    e.button.x = x; e.button.y = y;
 #if defined(LNG_SDL3)
+    e.button.x = x; e.button.y = y;
     e.button.down = true;
 #else
+    e.button.x = event_x; e.button.y = event_y;
     e.button.state = SDL_PRESSED;
 #endif
     SDL_PushEvent(&e);
