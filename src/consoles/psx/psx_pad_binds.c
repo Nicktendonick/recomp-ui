@@ -333,7 +333,7 @@ static void source_from_bind(int kind, int code, int axis_dir,
         const char* n = SDL_GetGamepadStringForButton((LNG_GamepadButton)code);
         copy_str(out, cap, (n && n[0]) ? n : "");
     } else if (kind == 2) {
-        const char* n = SDL_GetGamepadStringForAxis(code);
+        const char* n = SDL_GetGamepadStringForAxis((LNG_GamepadAxis)code);
         char buf[32];
         snprintf(buf, sizeof(buf), "%s%c", (n && n[0]) ? n : "axis",
                  axis_dir < 0 ? '-' : '+');

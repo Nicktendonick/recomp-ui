@@ -3136,7 +3136,7 @@ void settings_pad_label(int binding, char* out, size_t capacity) {
         snprintf(text, sizeof text, "%s", (name && name[0]) ? name : "button");
     } else if (RECOMP_LAUNCHER_PAD_IS_AXIS(binding)) {
         int code = RECOMP_LAUNCHER_PAD_AXIS_CODE(binding);
-        name = SDL_GetGamepadStringForAxis(code);
+        name = SDL_GetGamepadStringForAxis((LNG_GamepadAxis)code);
         snprintf(text, sizeof text, "%s%c",
                  (name && name[0]) ? name : "axis",
                  RECOMP_LAUNCHER_PAD_AXIS_POSITIVE(binding) ? '+' : '-');

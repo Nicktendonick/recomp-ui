@@ -59,6 +59,7 @@
 // axis->name lookup
 #define SDL_GetGamepadStringForAxis(a)    SDL_GameControllerGetStringForAxis((SDL_GameControllerAxis)(a))
 typedef SDL_GameControllerButton  LNG_GamepadButton;
+typedef SDL_GameControllerAxis    LNG_GamepadAxis;
 
 // key-modifier masks (SDL3 renamed KMOD_* -> SDL_KMOD_*)
 #define SDL_KMOD_CTRL   KMOD_CTRL
@@ -82,6 +83,7 @@ typedef SDL_GameControllerButton  LNG_GamepadButton;
 #define LNG_EVJAXISVAL(ev)  ((ev).jaxis.value)
 #define LNG_EVJAXISWHICH(ev) ((ev).jaxis.which)
 typedef SDL_GamepadButton  LNG_GamepadButton;
+typedef SDL_GamepadAxis    LNG_GamepadAxis;
 #endif
 
 #endif // LAUNCHER_NG_SDLCOMPAT_H
