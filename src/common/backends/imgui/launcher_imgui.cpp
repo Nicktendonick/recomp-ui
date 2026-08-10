@@ -3476,6 +3476,24 @@ void draw_assist_tools(LauncherModel* m, const LauncherTheme& th) {
               "features. The game window should disclose when it is active.");
     ImGui::PopTextWrapPos();
     ImGui::PopStyleColor();
+    // Fast-forward speed. Only hosts that publish a range get the slider; a
+    // host that leaves the bounds unset keeps its own fixed rate and the
+    // control stays absent rather than dead.
+    if (m->assist_fast_forward_max > m->assist_fast_forward_min) {
+        ImGui::Dummy(ImVec2(0, px(8)));
+        ImGui::PushStyleColor(ImGuiCol_Text, col(th.accent2));
+        ImGui::TextUnformatted("FAST-FORWARD SPEED");
+        ImGui::PopStyleColor();
+        ImGui::TextColored(col(th.text_muted),
+                           "Target emulation speed while Fast-forward is "
+                           "held or latched.");
+        int speed = m->s.assist_fast_forward_multiplier;
+        ImGui::SetNextItemWidth(px(360));
+        if (ImGui::SliderInt("##assist_fast_forward_speed", &speed,
+                             m->assist_fast_forward_min,
+                             m->assist_fast_forward_max, "%dx"))
+            m->s.assist_fast_forward_multiplier = speed;
+    }
     if (m->settings_bindings) {
         ImGui::Dummy(ImVec2(0, px(8)));
         draw_assist_binding_editor(m, th, "assist_binds", 0, true);

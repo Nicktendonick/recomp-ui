@@ -693,6 +693,13 @@ struct RecompLauncherCSettings {
                        [RECOMP_LAUNCHER_MAX_BINDINGS];
     int player_pad_bind[RECOMP_LAUNCHER_MAX_PLAYERS]
                        [RECOMP_LAUNCHER_MAX_BINDINGS];
+
+    // Fast-forward speed as a multiplier of real time, for hosts whose
+    // assist page offers a speed slider rather than a fixed rate. 0 = unset;
+    // the model seeds it from GameInfo.assist_fast_forward_min. Appended for
+    // ABI stability.
+    int  assist_fast_forward_multiplier;
+
     int assist_key_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
     int assist_pad_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
 
@@ -1223,6 +1230,18 @@ typedef struct RecompLauncherCGameInfo {
      * (PSX and friends); everything else leaves this 0 and the row is absent.
      * Appended for ABI stability. */
     int has_fmv_filter;
+
+    /* Optional defaults for the assist bindings above, each an array of
+     * assist_binding_count entries (keyboard = SDL scancodes, pad = the
+     * portable encoding). NULL leaves a binding unbound until the user sets
+     * it. Appended for ABI stability. */
+    const int* assist_default_key_bind;
+    const int* assist_default_pad_bind;
+    /* Inclusive bounds for Settings.assist_fast_forward_multiplier. Both 0
+     * hides the speed slider and leaves fast-forward at the host's fixed
+     * rate. Appended for ABI stability. */
+    int assist_fast_forward_min;
+    int assist_fast_forward_max;
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */

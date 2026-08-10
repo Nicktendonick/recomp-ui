@@ -306,6 +306,14 @@ typedef struct {
     const char* const* assist_binding_labels;
     int assist_binding_count;
     const char* credits_text;
+    int assist_fast_forward_min;
+    int assist_fast_forward_max;
+    /* Resolved defaults for the assist bindings, seeded from
+     * GameInfo.assist_default_{key,pad}_bind when the host supplies them and
+     * from the incoming settings otherwise. The Controller page's reset
+     * affordance restores these rather than zeroing a binding. */
+    int default_assist_key_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
+    int default_assist_pad_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
     // Number of players the GAME actually supports. Mega Man X is 1-player, so
     // the launcher must not show a dead Player 2 row. Games that support 2
     // report 2 and the second row appears. Driven by data, never hardcoded.
