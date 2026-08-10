@@ -43,6 +43,7 @@ typedef enum {
     LNG_VIEW_CONTROLLER,
     LNG_VIEW_NETPLAY,
     LNG_VIEW_MODS,
+    LNG_VIEW_ASSIST_TOOLS,
 } LngView;
 
 typedef enum {
@@ -221,6 +222,10 @@ typedef struct {
     bool adaptive_view_supported;
     const char* const* display_layout_labels;
     int  num_display_layouts;
+    bool has_assist_tools;
+    const char* assist_tools_note;
+    const char* const* assist_binding_labels;
+    int assist_binding_count;
     // Number of players the GAME actually supports. Mega Man X is 1-player, so
     // the launcher must not show a dead Player 2 row. Games that support 2
     // report 2 and the second row appears. Driven by data, never hardcoded.
@@ -292,6 +297,8 @@ typedef struct {
 
     // ---- editable settings (working copy of the C ABI struct) ----
     RecompLauncherCSettings s;
+    int default_assist_key_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
+    int default_assist_pad_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
 
     // ---- transient UI state ----
     LngView   view;
@@ -363,6 +370,7 @@ typedef struct {
     // ControllerSpec sets has_pad_binds (Genesis; the engine stores a gamepad
     // button/axis bind per logical button alongside the keyboard scancode).
     bool      capture_pad;
+    bool      capture_assist;    // capture_btn indexes a global assist action
     bool      hk_capturing;      // capturing a system hotkey
     LngHotkey capture_hk;
     // Per-player bind-label display strings, indexed like capture_btn.
@@ -614,6 +622,12 @@ void launcher_model_begin_capture_slot(LauncherModel* m, int b, int slot);
 // a keyboard scancode. Only meaningful on has_pad_binds consoles (Genesis) —
 // the UI never offers it elsewhere; a stray call is harmless (Esc cancels).
 void launcher_model_begin_pad_capture(LauncherModel* m, int b);
+void launcher_model_begin_assist_capture(LauncherModel* m, int action,
+                                         bool gamepad);
+void launcher_model_set_captured_assist_key(LauncherModel* m, int scancode);
+void launcher_model_set_captured_assist_pad(LauncherModel* m,
+                                            int encoded_binding);
+void launcher_model_reset_assist_bindings(LauncherModel* m);
 void launcher_model_cancel_capture(LauncherModel* m);
 // ---- hotkey capture ----
 void launcher_model_begin_hk_capture(LauncherModel* m, LngHotkey h);

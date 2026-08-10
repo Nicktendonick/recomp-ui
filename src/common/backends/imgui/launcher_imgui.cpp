@@ -2502,6 +2502,101 @@ void draw_settings(LauncherModel* m, const LauncherTheme& th) {
     if (hotkeys_p) hotkeys_p->draw(m, &th);
 }
 
+const char* assist_key_label(int scancode) {
+    if (scancode <= 0) return "(unbound)";
+    const char* name = SDL_GetScancodeName((SDL_Scancode)scancode);
+    return (name && name[0]) ? name : "(unbound)";
+}
+
+void assist_pad_label(int binding, char* out, size_t capacity) {
+    if (!out || !capacity) return;
+    const char* name = nullptr;
+    if (RECOMP_LAUNCHER_PAD_IS_BUTTON(binding)) {
+        const int code = RECOMP_LAUNCHER_PAD_BUTTON_CODE(binding);
+        name = SDL_GetGamepadStringForButton((LNG_GamepadButton)code);
+        snprintf(out, capacity, "%s", (name && name[0]) ? name : "button");
+    } else if (RECOMP_LAUNCHER_PAD_IS_AXIS(binding)) {
+        const int code = RECOMP_LAUNCHER_PAD_AXIS_CODE(binding);
+        name = SDL_GetGamepadStringForAxis(code);
+        snprintf(out, capacity, "%s%c",
+                 (name && name[0]) ? name : "axis",
+                 RECOMP_LAUNCHER_PAD_AXIS_POSITIVE(binding) ? '+' : '-');
+    } else {
+        snprintf(out, capacity, "(unbound)");
+    }
+}
+
+void draw_assist_binding_editor(LauncherModel* m, const LauncherTheme& th,
+                                const char* table_id, bool show_reset) {
+    if (m->assist_binding_count <= 0 || !m->assist_binding_labels) return;
+    ImGui::PushStyleColor(ImGuiCol_Text, col(th.accent2));
+    ImGui::TextUnformatted("ASSIST CONTROLS");
+    ImGui::PopStyleColor();
+    ImGui::TextColored(col(th.text_muted),
+                       "Global controls; active only while Assist Tools is enabled.");
+    if (ImGui::BeginTable(table_id, 3, ImGuiTableFlags_SizingFixedFit |
+                                      ImGuiTableFlags_RowBg)) {
+        ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed,
+                                px(150));
+        ImGui::TableSetupColumn("Keyboard", ImGuiTableColumnFlags_WidthFixed,
+                                px(180));
+        ImGui::TableSetupColumn("Controller", ImGuiTableColumnFlags_WidthFixed,
+                                px(180));
+        ImGui::TableHeadersRow();
+        for (int action = 0; action < m->assist_binding_count; ++action) {
+            ImGui::PushID(action);
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(m->assist_binding_labels[action]);
+            ImGui::TableSetColumnIndex(1);
+            const bool capture_key = m->capturing && m->capture_assist &&
+                                     !m->capture_pad && m->capture_btn == action;
+            if (ImGui::Button(capture_key ? "[ press a key... ]" :
+                              assist_key_label(m->s.assist_key_bind[action]),
+                              ImVec2(px(170), 0)))
+                launcher_model_begin_assist_capture(m, action, false);
+            ImGui::TableSetColumnIndex(2);
+            const bool capture_pad = m->capturing && m->capture_assist &&
+                                     m->capture_pad && m->capture_btn == action;
+            char pad[48];
+            assist_pad_label(m->s.assist_pad_bind[action], pad, sizeof pad);
+            if (ImGui::Button(capture_pad ? "[ press a button... ]" : pad,
+                              ImVec2(px(170), 0)))
+                launcher_model_begin_assist_capture(m, action, true);
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    if (show_reset && ImGui::Button("Reset Assist Controls"))
+        launcher_model_reset_assist_bindings(m);
+    if (m->capturing && m->capture_assist)
+        ImGui::TextColored(col(th.warn), "Listening... (Esc cancels)");
+}
+
+void draw_assist_tools(LauncherModel* m, const LauncherTheme& th) {
+    if (!begin_panel("assist_tools_page", 0, false)) {
+        end_panel();
+        return;
+    }
+    eyebrow("ASSIST TOOLS");
+    bool enabled = m->s.assist_tools != 0;
+    if (ImGui::Checkbox("Enable Assist Tools", &enabled))
+        m->s.assist_tools = enabled ? 1 : 0;
+    ImGui::Dummy(ImVec2(0, px(6)));
+    ImGui::PushStyleColor(ImGuiCol_Text, col(th.text_muted));
+    ImGui::PushTextWrapPos();
+    ImGui::TextWrapped("%s",
+        (m->assist_tools_note && m->assist_tools_note[0])
+            ? m->assist_tools_note
+            : "Optional convenience features supplied by the game host.");
+    ImGui::PopTextWrapPos();
+    ImGui::PopStyleColor();
+    ImGui::Dummy(ImVec2(0, px(8)));
+    draw_assist_binding_editor(m, th, "assist_binds", true);
+    end_panel();
+}
+
 // CONTROLLER-view rebind page: input source + deadzone, and the keyboard
 // bindings grid — reached from the dashboard CONTROLLER panel's Configure
 // button. The bindings grid walks the ACTIVE SystemProfile's
@@ -2822,6 +2917,12 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
             bool ch = m->zapper_crosshair;
             if (ImGui::Checkbox("Show crosshair (hides the OS cursor)", &ch))
                 launcher_model_toggle_zapper_crosshair(m);
+        } end_panel();
+    }
+
+    if (m->has_assist_tools && m->assist_binding_count > 0) {
+        if (begin_panel("cfg_assist_binds", 0)) {
+            draw_assist_binding_editor(m, th, "controller_assist_binds", false);
         } end_panel();
     }
 }
@@ -5465,10 +5566,19 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
                 m->netplay_name_modal_open = true;
             }
         }
-        if (m->view == LNG_VIEW_DASHBOARD && m->mods) {
-            ImGui::SetCursorPos(ImVec2(right - w * 2.0f - gap, nav_y));
-            if (ImGui::Button("Mods", ImVec2(w, px(34))))
-                launcher_model_set_view(m, LNG_VIEW_MODS);
+        if (m->view == LNG_VIEW_DASHBOARD) {
+            float next_x = right - w * 2.0f - gap;
+            if (m->has_assist_tools) {
+                ImGui::SetCursorPos(ImVec2(next_x, nav_y));
+                if (ImGui::Button("Assist Tools", ImVec2(w, px(34))))
+                    launcher_model_set_view(m, LNG_VIEW_ASSIST_TOOLS);
+                next_x -= w + gap;
+            }
+            if (m->mods) {
+                ImGui::SetCursorPos(ImVec2(next_x, nav_y));
+                if (ImGui::Button("Mods", ImVec2(w, px(34))))
+                    launcher_model_set_view(m, LNG_VIEW_MODS);
+            }
         }
         ImGui::SetCursorPos(ImVec2(right - w, nav_y));
         if (ImGui::Button(label, ImVec2(w, px(34)))) {
@@ -5502,6 +5612,7 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
         case LNG_VIEW_CONTROLLER: draw_controller(m, th);           break;
         case LNG_VIEW_NETPLAY:    draw_netplay(m, th);              break;
         case LNG_VIEW_MODS:       draw_mods(m, th);                 break;
+        case LNG_VIEW_ASSIST_TOOLS: draw_assist_tools(m, th);       break;
     }
     end_container();
 
@@ -5567,17 +5678,28 @@ bool try_capture(LauncherModel* m, const SDL_Event& ev) {
     // button press or a decisive axis push (past a dead threshold) commits.
     if (m->capturing && m->capture_pad) {
         if (ev.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
-            launcher_binds_set_pad_button(m, m->cfg_player + 1, m->capture_btn,
-                                          LNG_PADBIND_BUTTON, (int)LNG_EVGBTN(ev), 0);
+            if (m->capture_assist)
+                launcher_model_set_captured_assist_pad(
+                    m, RECOMP_LAUNCHER_PAD_BUTTON((int)LNG_EVGBTN(ev)));
+            else
+                launcher_binds_set_pad_button(
+                    m, m->cfg_player + 1, m->capture_btn,
+                    LNG_PADBIND_BUTTON, (int)LNG_EVGBTN(ev), 0);
             launcher_model_cancel_capture(m);
             return true;
         }
         if (ev.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
             int val = (int)LNG_EVGAXISVAL(ev);
             if (val >= 20000 || val <= -20000) {   // ignore rest/jitter near center
-                launcher_binds_set_pad_button(m, m->cfg_player + 1, m->capture_btn,
-                                              LNG_PADBIND_AXIS, (int)LNG_EVGAXIS(ev),
-                                              val < 0 ? -1 : +1);
+                if (m->capture_assist)
+                    launcher_model_set_captured_assist_pad(
+                        m, RECOMP_LAUNCHER_PAD_AXIS(
+                               (int)LNG_EVGAXIS(ev), val > 0));
+                else
+                    launcher_binds_set_pad_button(
+                        m, m->cfg_player + 1, m->capture_btn,
+                        LNG_PADBIND_AXIS, (int)LNG_EVGAXIS(ev),
+                        val < 0 ? -1 : +1);
                 launcher_model_cancel_capture(m);
             }
             return true;
@@ -5631,7 +5753,9 @@ bool try_capture(LauncherModel* m, const SDL_Event& ev) {
         // Single-bind stores (SNES/PSX/GBA) use the legacy scancode setter
         // (capture_slot is always 0 for them).
         const SystemProfile* prof = (const SystemProfile*)m->profile;
-        if (prof && prof->controller.binds_per_input >= 2)
+        if (m->capture_assist)
+            launcher_model_set_captured_assist_key(m, (int)LNG_EVSCAN(ev));
+        else if (prof && prof->controller.binds_per_input >= 2)
             launcher_binds_set_field(m, m->cfg_player + 1, m->capture_btn, m->capture_slot,
                                      RUI_N64_FIELD_KEY, (int)LNG_EVSCAN(ev));
         else

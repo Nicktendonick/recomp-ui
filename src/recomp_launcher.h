@@ -33,6 +33,18 @@ extern "C" {
 // Every consumer compiles this header from source (submodule pin), so the
 // layout change is absorbed by the consumer's normal rebuild on a pin bump.
 #define RECOMP_LAUNCHER_MAX_PLAYERS 8
+#define RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS 8
+
+/* Portable encoding for host-owned controller bindings. Button and axis
+ * numbers use SDL's standard game-controller indices; zero is unbound. */
+#define RECOMP_LAUNCHER_PAD_BUTTON(code) (1 + (code))
+#define RECOMP_LAUNCHER_PAD_AXIS(code, positive) \
+    (100 + ((code) * 2) + ((positive) ? 1 : 0))
+#define RECOMP_LAUNCHER_PAD_IS_BUTTON(value) ((value) > 0 && (value) < 100)
+#define RECOMP_LAUNCHER_PAD_IS_AXIS(value) ((value) >= 100)
+#define RECOMP_LAUNCHER_PAD_BUTTON_CODE(value) ((value) - 1)
+#define RECOMP_LAUNCHER_PAD_AXIS_CODE(value) (((value) - 100) / 2)
+#define RECOMP_LAUNCHER_PAD_AXIS_POSITIVE(value) (((value) - 100) & 1)
 /* Host may #ifdef this when reading player_gamepad_guid[] from settings. */
 #define RECOMP_LAUNCHER_HAS_PLAYER_GAMEPAD_GUID 1
 
@@ -459,6 +471,14 @@ struct RecompLauncherCSettings {
     // independent of aspect/widescreen: it describes physical host windows,
     // not how a game's camera is rendered inside one of them.
     int display_layout;
+
+    // ---- optional host assist controls -----------------------------------
+    // These bindings are host-consumed global actions rather than emulated
+    // controller buttons. Keyboard values are SDL scancodes; pad values use
+    // the portable encoding above. Appended for ABI stability.
+    int assist_tools;
+    int assist_key_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
+    int assist_pad_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
@@ -749,6 +769,15 @@ typedef struct RecompLauncherCGameInfo {
      * NULL/0 keeps every existing single-display launcher unchanged. */
     const char* const* display_layout_labels;
     int num_display_layouts;
+
+    /* Optional launcher Assist Tools page and global input bindings. The host
+     * owns the meaning and persistence of every action. */
+    int has_assist_tools;
+    const char* assist_tools_note;
+    const char* const* assist_binding_labels;
+    int assist_binding_count;
+    const int* assist_default_key_bind;
+    const int* assist_default_pad_bind;
 } RecompLauncherCGameInfo;
 
 // Returns: 0 = LAUNCH (boot out_rom_path with the edited *io),

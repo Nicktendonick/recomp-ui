@@ -48,7 +48,9 @@ static const char* kHotkeyNames[LNG_HK_COUNT] = {
     "FPS readout", "Toggle renderer",
     "Solar level up", "Solar level down", "Resume live solar"
 };
-static const char* kViewNames[5] = { "Dashboard", "Settings", "Controller", "Netplay", "Mods" };
+static const char* kViewNames[6] = {
+    "Dashboard", "Settings", "Controller", "Netplay", "Mods", "Assist Tools"
+};
 static const char* kSrcNames[3]  = { "None", "Keyboard", "Gamepad" };
 
 static void safe_copy(char* dst, size_t cap, const char* src) {
@@ -141,6 +143,12 @@ void launcher_model_init(LauncherModel* m,
         m->adaptive_view_supported = game->adaptive_view_supported != 0;
         m->display_layout_labels = game->display_layout_labels;
         m->num_display_layouts = game->num_display_layouts;
+        m->has_assist_tools = game->has_assist_tools != 0;
+        m->assist_tools_note = game->assist_tools_note;
+        m->assist_binding_labels = game->assist_binding_labels;
+        m->assist_binding_count = clampi(
+            game->assist_binding_count, 0,
+            RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS);
         m->tpak_slots           = clampi(game->tpak_slots, 0, RECOMP_LAUNCHER_MAX_TPAKS);
         m->tpak_inspect_cb      = game->tpak_inspect;
         m->audio_device_labels  = game->audio_device_labels;
@@ -170,6 +178,18 @@ void launcher_model_init(LauncherModel* m,
     }
 
     if (io) m->s = *io;
+    if (game && game->assist_default_key_bind &&
+        game->assist_default_pad_bind) {
+        memcpy(m->default_assist_key_bind, game->assist_default_key_bind,
+               sizeof m->default_assist_key_bind);
+        memcpy(m->default_assist_pad_bind, game->assist_default_pad_bind,
+               sizeof m->default_assist_pad_bind);
+    } else {
+        memcpy(m->default_assist_key_bind, m->s.assist_key_bind,
+               sizeof m->default_assist_key_bind);
+        memcpy(m->default_assist_pad_bind, m->s.assist_pad_bind,
+               sizeof m->default_assist_pad_bind);
+    }
     if (m->has_sharp_filter) {
         m->s.linear_filter = m->s.linear_filter ? 1 : 0;
         m->s.sharp_filter = m->s.sharp_filter ? 1 : 0;
@@ -560,7 +580,7 @@ bool launcher_model_rom_verified(const LauncherModel* m) {
 }
 
 void launcher_model_set_view(LauncherModel* m, LngView v) {
-    if (v < 0 || v > LNG_VIEW_MODS) return;
+    if (v < 0 || v > LNG_VIEW_ASSIST_TOOLS) return;
     /* Re-entering Netplay should rescan server + LAN lists. */
     if (m->view == LNG_VIEW_NETPLAY && v != LNG_VIEW_NETPLAY)
         m->netplay_list_fresh = false;
@@ -1597,15 +1617,45 @@ void launcher_model_begin_capture_slot(LauncherModel* m, int b, int slot) {
     m->hk_capturing = false;
     m->capturing    = true;
     m->capture_pad  = false;
+    m->capture_assist = false;
     m->capture_btn  = b;
 }
 void launcher_model_begin_pad_capture(LauncherModel* m, int b) {
     launcher_model_begin_capture(m, b);
     if (m->capturing) m->capture_pad = true;   // begin_capture validated b
 }
+void launcher_model_begin_assist_capture(LauncherModel* m, int action,
+                                         bool gamepad) {
+    if (!m || action < 0 || action >= m->assist_binding_count) return;
+    m->hk_capturing = false;
+    m->capturing = true;
+    m->capture_pad = gamepad;
+    m->capture_assist = true;
+    m->capture_btn = action;
+    m->capture_slot = 0;
+}
+void launcher_model_set_captured_assist_key(LauncherModel* m, int scancode) {
+    if (!m || !m->capturing || !m->capture_assist || m->capture_pad) return;
+    if (m->capture_btn >= 0 && m->capture_btn < m->assist_binding_count)
+        m->s.assist_key_bind[m->capture_btn] = scancode;
+}
+void launcher_model_set_captured_assist_pad(LauncherModel* m,
+                                            int encoded_binding) {
+    if (!m || !m->capturing || !m->capture_assist || !m->capture_pad) return;
+    if (m->capture_btn >= 0 && m->capture_btn < m->assist_binding_count)
+        m->s.assist_pad_bind[m->capture_btn] = encoded_binding;
+}
+void launcher_model_reset_assist_bindings(LauncherModel* m) {
+    if (!m) return;
+    memcpy(m->s.assist_key_bind, m->default_assist_key_bind,
+           sizeof m->s.assist_key_bind);
+    memcpy(m->s.assist_pad_bind, m->default_assist_pad_bind,
+           sizeof m->s.assist_pad_bind);
+}
 void launcher_model_cancel_capture(LauncherModel* m) {
     m->capturing   = false;
     m->capture_pad = false;
+    m->capture_assist = false;
 }
 
 void launcher_model_begin_hk_capture(LauncherModel* m, LngHotkey h) {
@@ -1652,6 +1702,6 @@ const char* launcher_hotkey_name(LngHotkey h) {
 }
 
 const char* launcher_view_name(LngView v) {
-    if (v < 0 || v > LNG_VIEW_MODS) return "?";
+    if (v < 0 || v > LNG_VIEW_ASSIST_TOOLS) return "?";
     return kViewNames[v];
 }
