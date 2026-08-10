@@ -7034,16 +7034,19 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     ImGui::Text("%s. %s image", m->has_bios ? "2" : "1", noun);
     ImGui::PushTextWrapPos(wrap_x);
     if (plat == SETUP_PLAT_PSX) {
+        /* Keep the note as one wrapped TextColored block — SameLine +
+         * TextLinkOpenURL after a wrapped line leaves a huge empty gap in
+         * BeginPopupModal (Windows first-run wizard regression). */
         ImGui::TextColored(col(th.text_muted),
             "NOTE: psxrecomp games require a .cue + .bin dump of the disc. "
             "Note the number of tracks required by this project; multitrack "
             "discs are often Redump-formatted dumps. You can generate your own "
-            "from the original disc with ");
-        ImGui::SameLine(0.0f, 0.0f);
-        setup_url_link("redumper", "https://github.com/superg/redumper");
-        ImGui::SameLine(0.0f, 0.0f);
-        ImGui::TextColored(col(th.text_muted),
-            ". You cannot convert a single-track .bin or .iso to multitrack.");
+            "from the original disc with redumper "
+            "(https://github.com/superg/redumper). You cannot convert a "
+            "single-track .bin or .iso to multitrack.");
+        ImGui::PopTextWrapPos();
+        setup_url_link("Open redumper", "https://github.com/superg/redumper");
+        ImGui::PushTextWrapPos(wrap_x);
     } else {
         const char* media_help =
             (plat == SETUP_PLAT_GBA)
