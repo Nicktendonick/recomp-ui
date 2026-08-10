@@ -210,6 +210,12 @@ void launcher_model_init(LauncherModel* m,
             clampi(game->assist_binding_count, 0,
                    RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS);
         m->credits_text         = game->credits_text;
+        m->assist_fast_forward_min = game->assist_fast_forward_min > 0
+            ? game->assist_fast_forward_min : 2;
+        m->assist_fast_forward_max = game->assist_fast_forward_max >=
+                                      m->assist_fast_forward_min
+            ? game->assist_fast_forward_max
+            : m->assist_fast_forward_min;
         m->tpak_slots           = clampi(game->tpak_slots, 0, RECOMP_LAUNCHER_MAX_TPAKS);
         m->tpak_inspect_cb      = game->tpak_inspect;
         m->audio_device_labels  = game->audio_device_labels;
@@ -239,6 +245,11 @@ void launcher_model_init(LauncherModel* m,
     }
 
     if (io) m->s = *io;
+    m->s.assist_fast_forward_multiplier = clampi(
+        m->s.assist_fast_forward_multiplier > 0
+            ? m->s.assist_fast_forward_multiplier
+            : m->assist_fast_forward_min,
+        m->assist_fast_forward_min, m->assist_fast_forward_max);
     if (m->has_sharp_filter) {
         m->s.linear_filter = m->s.linear_filter ? 1 : 0;
         m->s.sharp_filter = m->s.sharp_filter ? 1 : 0;

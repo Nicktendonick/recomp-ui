@@ -595,6 +595,8 @@ struct RecompLauncherCSettings {
                        [RECOMP_LAUNCHER_MAX_BINDINGS];
     int assist_key_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
     int assist_pad_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
+    // Target emulation multiplier while the host's fast-forward action is active.
+    int assist_fast_forward_multiplier;
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
@@ -1033,6 +1035,8 @@ typedef struct RecompLauncherCGameInfo {
     int settings_bindings;
     const char* const* assist_binding_labels;
     int assist_binding_count;
+    int assist_fast_forward_min;
+    int assist_fast_forward_max;
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */
