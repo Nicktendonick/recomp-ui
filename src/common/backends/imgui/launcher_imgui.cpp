@@ -6107,6 +6107,84 @@ static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
 
             // The list-row checkbox is the single enable/disable control.
             // The detail pane owns configuration values only.
+            if (mods->feature_resource_count &&
+                mods->feature_resource_get &&
+                mods->feature_resource_set_path) {
+                const int resource_count = mods->feature_resource_count(
+                    mods->ctx, feature.package_id, feature.id);
+                if (resource_count > 0) {
+                    ImGui::Spacing();
+                    ImGui::Separator();
+                    ImGui::Spacing();
+                    ImGui::TextColored(col(th.accent), "Required owner files");
+                    for (int resource_index = 0;
+                         resource_index < resource_count; ++resource_index) {
+                        RecompLauncherCModResource resource{};
+                        if (!mods->feature_resource_get(
+                                mods->ctx, feature.package_id, feature.id,
+                                resource_index, &resource))
+                            continue;
+                        ImGui::PushID(resource.id);
+                        ImGui::TextUnformatted(resource.label);
+                        if (resource.description[0])
+                            ImGui::TextWrapped("%s", resource.description);
+                        ImGui::TextColored(
+                            resource.verified ? col(th.accent2) : col(th.warn),
+                            "%s", resource.status[0]
+                                      ? resource.status : "Not selected");
+                        if (resource.path[0]) {
+                            const char* basename = resource.path;
+                            for (const char* p = resource.path; *p; ++p)
+                                if (*p == '/' || *p == '\\') basename = p + 1;
+                            ImGui::TextColored(col(th.text_muted), "%s", basename);
+                            if (ImGui::IsItemHovered())
+                                ImGui::SetTooltip("%s", resource.path);
+                        }
+                        if (ImGui::Button(resource.path[0] ? "Change file"
+                                                           : "Select file")) {
+                            std::vector<std::string> owned_patterns;
+                            std::vector<const char*> patterns;
+                            std::string remaining = resource.file_patterns;
+                            size_t start = 0;
+                            while (start <= remaining.size()) {
+                                const size_t comma = remaining.find(',', start);
+                                std::string pattern = remaining.substr(
+                                    start, comma == std::string::npos
+                                               ? std::string::npos
+                                               : comma - start);
+                                if (!pattern.empty())
+                                    owned_patterns.push_back(pattern);
+                                if (comma == std::string::npos) break;
+                                start = comma + 1;
+                            }
+                            for (const std::string& pattern : owned_patterns)
+                                patterns.push_back(pattern.c_str());
+                            char path[RECOMP_LAUNCHER_MOD_PATH_MAX] = {};
+                            if (launcher_pick_file(
+                                    resource.label,
+                                    patterns.empty() ? nullptr : patterns.data(),
+                                    (int)patterns.size(),
+                                    resource.file_description[0]
+                                        ? resource.file_description : nullptr,
+                                    path, sizeof(path))) {
+                                if (!mods->feature_resource_set_path(
+                                        mods->ctx, feature.package_id,
+                                        feature.id, resource.id, path)) {
+                                    mod_note_error(m);
+                                } else {
+                                    std::snprintf(
+                                        m->mod_status,
+                                        sizeof(m->mod_status),
+                                        "%s verified. Changes apply on PLAY.",
+                                        resource.label);
+                                }
+                            }
+                        }
+                        ImGui::PopID();
+                        ImGui::Spacing();
+                    }
+                }
+            }
             draw_mod_feature_diagnostics(m, th, feature);
             if (feature.option_count > 0) {
                 ImGui::Spacing();
