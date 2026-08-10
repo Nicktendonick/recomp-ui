@@ -7246,6 +7246,21 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     ImGui::EndPopup();
 }
 
+
+static const char* generate_disabled_reason(const LauncherModel* m) {
+    if (!m) return "Generate is unavailable.";
+    const bool has_prep =
+        m->prepare_with_progress_cb != nullptr || m->prepare_disc_cb != nullptr;
+    if (!has_prep) {
+        return "Generate is unavailable (project/SDK not found).\n"
+               "Launch from RetComM, or run the game from its source tree "
+               "(src/current).";
+    }
+    if (!m->rom_present || !m->rom_full[0])
+        return "Select a disc image first";
+    return "Generate is unavailable.";
+}
+
 void draw_bios_confirm_modal(LauncherModel* m, const LauncherTheme& th) {
     if (m->bios_confirm_open) ImGui::OpenPopup("Switch BIOS?");
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
@@ -7281,7 +7296,7 @@ void draw_bios_confirm_modal(LauncherModel* m, const LauncherTheme& th) {
     if (!can_gen) {
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Select a disc image first");
+            ImGui::SetTooltip("%s", generate_disabled_reason(m));
     }
     ImGui::SameLine();
     if (ImGui::Button("Use OpenBIOS", ImVec2(px(130), px(32)))) {
@@ -7329,7 +7344,7 @@ void draw_bios_play_modal(LauncherModel* m, const LauncherTheme& th) {
     if (!can_gen) {
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Select a disc image first");
+            ImGui::SetTooltip("%s", generate_disabled_reason(m));
     }
     ImGui::SameLine();
     if (ImGui::Button("Use OpenBIOS", ImVec2(px(130), px(32))))
