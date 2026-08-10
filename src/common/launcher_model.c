@@ -52,7 +52,10 @@ static const char* kHotkeyNames[LNG_HK_COUNT] = {
     "FPS readout", "Toggle renderer",
     "Solar level up", "Solar level down", "Resume live solar"
 };
-static const char* kViewNames[5] = { "Dashboard", "Settings", "Controller", "Netplay", "Mods" };
+static const char* kViewNames[7] = {
+    "Dashboard", "Settings", "Controller", "Netplay", "Mods",
+    "Assist Tools", "Credits"
+};
 static const char* kSrcNames[3]  = { "None", "Keyboard", "Gamepad" };
 
 static void safe_copy(char* dst, size_t cap, const char* src) {
@@ -200,6 +203,14 @@ void launcher_model_init(LauncherModel* m,
         m->adaptive_view_supported = game->adaptive_view_supported != 0;
         m->display_layout_labels = game->display_layout_labels;
         m->num_display_layouts = game->num_display_layouts;
+        m->has_assist_tools     = game->has_assist_tools != 0;
+        m->assist_tools_note    = game->assist_tools_note;
+        m->settings_bindings    = game->settings_bindings != 0;
+        m->assist_binding_labels = game->assist_binding_labels;
+        m->assist_binding_count =
+            clampi(game->assist_binding_count, 0,
+                   RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS);
+        m->credits_text         = game->credits_text;
         m->tpak_slots           = clampi(game->tpak_slots, 0, RECOMP_LAUNCHER_MAX_TPAKS);
         m->tpak_inspect_cb      = game->tpak_inspect;
         m->audio_device_labels  = game->audio_device_labels;
@@ -283,6 +294,10 @@ void launcher_model_init(LauncherModel* m,
     m->mod_selected = 0;
     m->mod_package_selected = 0;
     m->mod_show_packages = false;
+    if (game && game->default_settings) {
+        m->default_settings = *game->default_settings;
+        m->has_default_settings = true;
+    }
     m->s.adaptive_view =
         (m->adaptive_view_supported && m->s.adaptive_view) ? 1 : 0;
 
@@ -752,6 +767,25 @@ void launcher_model_set_view(LauncherModel* m, LngView v) {
 void launcher_model_open_config(LauncherModel* m, int player) {
     m->cfg_player = clampi(player, 0, LNG_MAX_PLAYERS - 1);
     m->view = LNG_VIEW_CONTROLLER;
+}
+
+bool launcher_model_can_restore_defaults(const LauncherModel* m) {
+    return m && m->has_default_settings;
+}
+
+void launcher_model_request_restore_defaults(LauncherModel* m) {
+    if (!launcher_model_can_restore_defaults(m)) return;
+    m->defaults_modal_open = true;
+}
+
+void launcher_model_restore_defaults(LauncherModel* m) {
+    if (!launcher_model_can_restore_defaults(m)) return;
+    m->s = m->default_settings;
+    m->defaults_modal_open = false;
+}
+
+void launcher_model_cancel_restore_defaults(LauncherModel* m) {
+    if (m) m->defaults_modal_open = false;
 }
 
 void launcher_model_cycle_scale(LauncherModel* m) {
@@ -2616,6 +2650,7 @@ void launcher_model_begin_capture_slot(LauncherModel* m, int b, int slot) {
      * Arm straight away: the next press is a deliberate new click. */
     m->capture_mouse_armed = true;
     m->capture_pad  = false;
+    m->capture_assist = false;
 }
 void launcher_model_begin_pad_capture(LauncherModel* m, int b) {
     launcher_model_begin_capture(m, b);
@@ -2648,9 +2683,64 @@ void launcher_model_map_all_advance(LauncherModel* m) {
     m->map_all_wait_release = true;
     launcher_model_begin_pad_capture(m, kPsxGamepadBindOrder[m->map_all_step]);
 }
+void launcher_model_begin_assist_capture(LauncherModel* m, int action,
+                                         bool gamepad) {
+    if (!m->settings_bindings || action < 0 ||
+        action >= m->assist_binding_count)
+        return;
+    m->hk_capturing = false;
+    m->capturing = true;
+    m->capture_assist = true;
+    m->capture_pad = gamepad;
+    m->capture_btn = action;
+    m->capture_slot = 0;
+}
+void launcher_model_set_captured_key(LauncherModel* m, int scancode) {
+    if (!m || !m->capturing || m->capture_pad) return;
+    if (m->capture_assist) {
+        if (m->capture_btn >= 0 &&
+            m->capture_btn < m->assist_binding_count)
+            m->s.assist_key_bind[m->capture_btn] = scancode;
+    } else {
+        int buttons = launcher_model_active_button_count(m, m->cfg_player);
+        if (m->capture_btn >= 0 && m->capture_btn < buttons)
+            m->s.player_key_bind[m->cfg_player][m->capture_btn] = scancode;
+    }
+}
+void launcher_model_set_captured_pad(LauncherModel* m, int encoded_binding) {
+    if (!m || !m->capturing || !m->capture_pad) return;
+    if (m->capture_assist) {
+        if (m->capture_btn >= 0 &&
+            m->capture_btn < m->assist_binding_count)
+            m->s.assist_pad_bind[m->capture_btn] = encoded_binding;
+    } else {
+        int buttons = launcher_model_active_button_count(m, m->cfg_player);
+        if (m->capture_btn >= 0 && m->capture_btn < buttons)
+            m->s.player_pad_bind[m->cfg_player][m->capture_btn] =
+                encoded_binding;
+    }
+}
+void launcher_model_reset_player_bindings(LauncherModel* m, int player) {
+    if (!m || !m->settings_bindings || !m->has_default_settings) return;
+    player = clampi(player, 0, LNG_MAX_PLAYERS - 1);
+    memcpy(m->s.player_key_bind[player],
+           m->default_settings.player_key_bind[player],
+           sizeof m->s.player_key_bind[player]);
+    memcpy(m->s.player_pad_bind[player],
+           m->default_settings.player_pad_bind[player],
+           sizeof m->s.player_pad_bind[player]);
+}
+void launcher_model_reset_assist_bindings(LauncherModel* m) {
+    if (!m || !m->settings_bindings || !m->has_default_settings) return;
+    memcpy(m->s.assist_key_bind, m->default_settings.assist_key_bind,
+           sizeof m->s.assist_key_bind);
+    memcpy(m->s.assist_pad_bind, m->default_settings.assist_pad_bind,
+           sizeof m->s.assist_pad_bind);
+}
 void launcher_model_cancel_capture(LauncherModel* m) {
     m->capturing      = false;
     m->capture_pad    = false;
+    m->capture_assist = false;
     m->map_all_active = false;
     m->map_all_wait_release = false;
     m->map_all_step   = 0;
@@ -2721,6 +2811,6 @@ const char* launcher_hotkey_name(LngHotkey h) {
 }
 
 const char* launcher_view_name(LngView v) {
-    if (v < 0 || v > LNG_VIEW_MODS) return "?";
+    if (v < 0 || v > LNG_VIEW_CREDITS) return "?";
     return kViewNames[v];
 }

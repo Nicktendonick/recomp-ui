@@ -105,6 +105,11 @@ RecompLauncherCGameInfo gi = {0};
 launcher_profile_apply("snes", &gi);   // "psx", "n64", ... — one call sets the console identity
 gi.name = "My Game";
 gi.expected_crc = 0x1B4B2E9C; gi.has_expected_crc = 1;
+RecompLauncherCSettings defaults = { /* authoritative first-run values */ };
+gi.default_settings = &defaults;       // optional Restore Defaults action
+gi.has_assist_tools = 1;               // optional host-defined opt-in page
+gi.assist_tools_note = "Enables host convenience features.";
+gi.credits_text = "Original game and port credits."; // optional read-only page
 /* ...per-game overrides... */
 
 char out_rom[512];
@@ -417,6 +422,28 @@ snesrecomp `docs/RECOMP_NET.md` → "Soft-return rematch checklist".
   resolution, and committing changes before launch; recomp-ui never executes
   package code.
 - **Footer** — PLAY, skip-launcher-on-boot (+ confirm modal), gamepad navigation.
+- **Optional host pages** — an Assist Tools opt-in backed by
+  `RecompLauncherCSettings.assist_tools`, plus host-owned read-only Credits
+  text. Games that do not supply these capabilities retain the original three
+  views.
+
+---
+
+When `RecompLauncherCGameInfo.default_settings` is non-NULL, the Settings
+footer also exposes a confirmed **Restore Defaults** action. The snapshot is
+copied at launcher initialization; resetting never changes the separately
+owned ROM selection or deletes save files.
+
+`RecompLauncherCGameInfo.has_assist_tools` adds an Assist Tools page and
+persists its checkbox through `RecompLauncherCSettings.assist_tools`.
+An opt-in `settings_bindings` host can keep keyboard and standard-controller
+bindings directly in the settings structure instead of pointing the launcher
+at a runtime-specific bind file. The same mode can supply named global Assist
+actions; they appear on the Assist page and are returned to the host as SDL
+scancodes plus portable standard-controller button/axis encodings.
+`credits_text` adds a Credits page. Both are additive host capabilities:
+recomp-ui defines presentation and navigation, while the game host defines
+the meaning of Assist Tools and owns the UTF-8 credits text.
 
 ---
 
