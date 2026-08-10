@@ -477,6 +477,7 @@ struct RecompLauncherCSettings {
     // controller buttons. Keyboard values are SDL scancodes; pad values use
     // the portable encoding above. Appended for ABI stability.
     int assist_tools;
+    int assist_fast_forward_multiplier;
     int assist_key_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
     int assist_pad_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
 };
@@ -778,6 +779,8 @@ typedef struct RecompLauncherCGameInfo {
     int assist_binding_count;
     const int* assist_default_key_bind;
     const int* assist_default_pad_bind;
+    int assist_fast_forward_min;
+    int assist_fast_forward_max;
 } RecompLauncherCGameInfo;
 
 // Returns: 0 = LAUNCH (boot out_rom_path with the edited *io),

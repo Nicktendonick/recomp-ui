@@ -149,6 +149,12 @@ void launcher_model_init(LauncherModel* m,
         m->assist_binding_count = clampi(
             game->assist_binding_count, 0,
             RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS);
+        m->assist_fast_forward_min = game->assist_fast_forward_min > 0
+            ? game->assist_fast_forward_min : 2;
+        m->assist_fast_forward_max = game->assist_fast_forward_max >=
+                                      m->assist_fast_forward_min
+            ? game->assist_fast_forward_max
+            : m->assist_fast_forward_min;
         m->tpak_slots           = clampi(game->tpak_slots, 0, RECOMP_LAUNCHER_MAX_TPAKS);
         m->tpak_inspect_cb      = game->tpak_inspect;
         m->audio_device_labels  = game->audio_device_labels;
@@ -178,6 +184,11 @@ void launcher_model_init(LauncherModel* m,
     }
 
     if (io) m->s = *io;
+    m->s.assist_fast_forward_multiplier = clampi(
+        m->s.assist_fast_forward_multiplier > 0
+            ? m->s.assist_fast_forward_multiplier
+            : m->assist_fast_forward_min,
+        m->assist_fast_forward_min, m->assist_fast_forward_max);
     if (game && game->assist_default_key_bind &&
         game->assist_default_pad_bind) {
         memcpy(m->default_assist_key_bind, game->assist_default_key_bind,
