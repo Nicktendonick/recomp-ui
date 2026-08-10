@@ -219,7 +219,7 @@ static void genesis_pad_label(int kind, int code, int axis_dir, char* out, size_
         const char* n = SDL_GetGamepadStringForButton((LNG_GamepadButton)code);
         copy_str(out, cap, (n && n[0]) ? n : "(unbound)");
     } else if (kind == RUI_GEN_BIND_AXIS) {
-        const char* n = SDL_GetGamepadStringForAxis(code);
+        const char* n = SDL_GetGamepadStringForAxis((LNG_GamepadAxis)code);
         char buf[32];
         snprintf(buf, sizeof(buf), "%s%c", (n && n[0]) ? n : "axis",
                  axis_dir < 0 ? '-' : '+');
