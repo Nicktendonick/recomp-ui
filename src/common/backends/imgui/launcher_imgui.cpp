@@ -1706,17 +1706,18 @@ void panel_tpak_draw(LauncherModel* m, const LauncherTheme* th) {
     }
 }
 
-// PSX-style 3-way pad-mode selector: Hybrid / Analog / D-Pad segmented row.
-// Caller only draws this when pad_mode_supported && pad_mode_selectable (a
-// locked mode draws nothing — there's nothing to pick). The Hybrid segment is
-// itself hidden when !allow_hybrid, matching the original PSX launcher.
+// PSX-style pad-mode selector: Analog / D-Pad segmented row. Caller only draws
+// this when pad_mode_supported && pad_mode_selectable (a locked mode draws
+// nothing — there's nothing to pick). Hybrid is deliberately absent: it is a
+// mod-only mode a trusted game plugin requests at runtime, never a player
+// choice.
 void pad_mode_selector(LauncherModel* m, const LauncherTheme& th, int p, float w) {
     struct Seg { int mode; const char* label; };
     Seg segs[8];
     int n = 0;
     // A console with a custom pad-mode list (ControllerSpec.modes, e.g. Genesis
     // 3-Button/6-Button) drives the segments from that list; otherwise the
-    // legacy PSX-shaped Hybrid/Analog/D-Pad set (Hybrid gated by allow_hybrid).
+    // legacy PSX-shaped Analog/D-Pad set.
     const SystemProfile* prof = (const SystemProfile*)m->profile;
     if (prof && prof->controller.modes && prof->controller.mode_count > 0) {
         int mc = prof->controller.mode_count;
@@ -1724,12 +1725,11 @@ void pad_mode_selector(LauncherModel* m, const LauncherTheme& th, int p, float w
         for (int i = 0; i < mc; ++i)
             segs[n++] = { prof->controller.modes[i].mode, prof->controller.modes[i].label };
     } else {
-        if (m->allow_hybrid) segs[n++] = { 0, "Hybrid" };
         segs[n++] = { 1, "Analog" };
         segs[n++] = { 2, "D-Pad" };
     }
 
-    // Keyboard has no analog sticks — Hybrid/Analog are unavailable (PSX modes).
+    // Keyboard has no analog sticks — Analog is unavailable (PSX modes).
     const bool kb_digital_only =
         m->s.player_src[p] == 1 &&
         !(prof && prof->controller.modes && prof->controller.mode_count > 0);
@@ -1739,8 +1739,8 @@ void pad_mode_selector(LauncherModel* m, const LauncherTheme& th, int p, float w
     for (int i = 0; i < n; ++i) {
         if (i) ImGui::SameLine(0, gap);
         bool sel = m->s.pad_mode[p] == segs[i].mode;
-        // Modes 0 (Hybrid) and 1 (Analog) need sticks; grey out on keyboard.
-        const bool stick_mode = (segs[i].mode == 0 || segs[i].mode == 1);
+        // Analog needs sticks; grey out on keyboard.
+        const bool stick_mode = (segs[i].mode == 1);
         const bool disabled = kb_digital_only && stick_mode;
         ImGui::PushID(i);
         if (disabled) {
