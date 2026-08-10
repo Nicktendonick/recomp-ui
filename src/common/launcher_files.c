@@ -11,9 +11,67 @@
 
 #include "third_party/tinyfiledialogs.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* True if path's filename matches any "*.ext" / "*.*" pattern (case-insensitive).
+ * Used after native pick so typed paths / residual All-Files bypasses cannot
+ * accept a PSX track .bin when the picker asked for *.cue only. */
+static int launcher_path_matches_patterns(const char* path,
+                                          const char* const* patterns,
+                                          int num_patterns) {
+    if (!path || !path[0]) return 0;
+    if (!patterns || num_patterns <= 0) return 1;
+    const char* slash = strrchr(path, '/');
+#if defined(_WIN32)
+    {
+        const char* bslash = strrchr(path, '\\');
+        if (!slash || (bslash && bslash > slash)) slash = bslash;
+    }
+#endif
+    const char* name = slash ? slash + 1 : path;
+    const char* dot = strrchr(name, '.');
+    for (int i = 0; i < num_patterns; i++) {
+        const char* pat = patterns[i];
+        if (!pat || !pat[0]) continue;
+        if (strcmp(pat, "*") == 0 || strcmp(pat, "*.*") == 0) return 1;
+        if (pat[0] == '*' && pat[1] == '.' && pat[2] != '\0') {
+            if (!dot) continue;
+            const char* want = pat + 1; /* ".cue" */
+            const char* have = dot;
+            int ok = 1;
+            while (*want && *have) {
+                if (tolower((unsigned char)*want) != tolower((unsigned char)*have)) {
+                    ok = 0;
+                    break;
+                }
+                want++;
+                have++;
+            }
+            if (ok && !*want && !*have) return 1;
+        }
+    }
+    return 0;
+}
+
+static int launcher_reject_if_pattern_mismatch(const char* title,
+                                               const char* const* patterns,
+                                               int num_patterns,
+                                               char* out_path) {
+    if (num_patterns <= 0 || !patterns) return 0;
+    if (launcher_path_matches_patterns(out_path, patterns, num_patterns))
+        return 0;
+    tinyfd_messageBox(
+        title && title[0] ? title : "Select file",
+        "That file type is not allowed for this picker.\n"
+        "Please choose a file matching the filter (for PlayStation discs, "
+        "select the .cue sheet).",
+        "ok", "warning", 1);
+    out_path[0] = '\0';
+    return 1;
+}
 
 #if defined(__linux__)
 #include <ctype.h>
@@ -164,6 +222,18 @@ static int linux_pick_open_zenity(const char* title, const char* const* patterns
     else
         snprintf(filter_arg, sizeof(filter_arg), "--file-filter=%s", pats);
 
+    /* When the caller supplies patterns (e.g. PSX *.cue only), do not offer
+     * "All files" — that undoes the filter in the native dialog. */
+    if (patterns && num_patterns > 0) {
+        char* argv[] = {
+            "zenity",
+            "--file-selection",
+            title_arg,
+            filter_arg,
+            NULL
+        };
+        return linux_spawn_capture(argv, out, out_cap);
+    }
     char* argv[] = {
         "zenity",
         "--file-selection",
@@ -215,6 +285,18 @@ static int linux_pick_save_zenity(const char* title, const char* const* patterns
     else
         snprintf(filter_arg, sizeof(filter_arg), "--file-filter=%s", pats);
 
+    if (patterns && num_patterns > 0) {
+        char* argv[] = {
+            "zenity",
+            "--file-selection",
+            "--save",
+            "--confirm-overwrite",
+            title_arg,
+            filter_arg,
+            NULL
+        };
+        return linux_spawn_capture(argv, out, out_cap);
+    }
     char* argv[] = {
         "zenity",
         "--file-selection",
@@ -403,20 +485,23 @@ bool launcher_pick_folder(const char* title, char* out_path, size_t out_cap) {
     return true;
 }
 
-bool launcher_pick_file(const char* title, const char* const* patterns, int num_patterns,
-                        const char* desc, char* out_path, size_t out_cap) {
-    if (!out_path || out_cap == 0) return false;
+int launcher_try_pick_file(const char* title, const char* const* patterns,
+                           int num_patterns, const char* desc,
+                           char* out_path, size_t out_cap) {
+    if (!out_path || out_cap == 0) return -1;
     out_path[0] = '\0';
 
 #if defined(__linux__)
     {
         const int r = linux_pick_open(title, patterns, num_patterns, desc,
                                       out_path, out_cap);
-        if (r >= 0) return r == 1; /* ok or cancel — never fall through to tinyfd */
-        return false;
+        if (r != 1) return r;
+        if (launcher_reject_if_pattern_mismatch(title, patterns, num_patterns,
+                                                out_path))
+            return 0;
+        return 1;
     }
-#endif
-
+#else
     const char* sel = tinyfd_openFileDialog(
         title ? title : "Select file",
         "",
@@ -424,9 +509,20 @@ bool launcher_pick_file(const char* title, const char* const* patterns, int num_
         num_patterns > 0 ? patterns : NULL,
         desc,
         0);
-    if (!sel || !sel[0]) return false;
+    if (!sel || !sel[0]) return 0;
     snprintf(out_path, out_cap, "%s", sel);
-    return true;
+    if (launcher_reject_if_pattern_mismatch(title, patterns, num_patterns,
+                                            out_path))
+        return 0;
+    return 1;
+#endif
+}
+
+bool launcher_pick_file(const char* title, const char* const* patterns, int num_patterns,
+                        const char* desc, char* out_path, size_t out_cap) {
+    const int r = launcher_try_pick_file(title, patterns, num_patterns, desc,
+                                         out_path, out_cap);
+    return r == 1;
 }
 
 bool launcher_pick_save_file(const char* title, const char* const* patterns, int num_patterns,
