@@ -1019,7 +1019,11 @@ void draw_verdict_block(const LauncherModel* m, const LauncherTheme& th, float a
                th, !pending, v.region[0] != '\0');
         kv_row("ISO header", pending ? dash : (v.iso_ok ? "OK" : "Mismatch"),
                th, !pending, v.iso_ok);
-        if (!pending && (v.track_count > 0 || v.netplay_detail[0])) {
+        // TOC fingerprinting is a netplay capability, not part of ordinary
+        // offline disc identification. Never expose it for offline titles,
+        // even if a host accidentally leaves stale netplay fields populated.
+        if (m->netplay_supported && !pending &&
+            (v.track_count > 0 || v.netplay_detail[0])) {
             char tracks_buf[32];
             if (v.track_count > 0)
                 std::snprintf(tracks_buf, sizeof(tracks_buf), "%d", v.track_count);
@@ -1029,7 +1033,8 @@ void draw_verdict_block(const LauncherModel* m, const LauncherTheme& th, float a
         }
         ImGui::EndTable();
     }
-    if (!pending && v.netplay_detail[0] && !v.netplay_ok) {
+    if (m->netplay_supported && !pending &&
+        v.netplay_detail[0] && !v.netplay_ok) {
         ImGui::Dummy(ImVec2(0, px(4)));
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + availw);
         ImGui::TextColored(col(th.warn), "%s", v.netplay_detail);
