@@ -5462,7 +5462,7 @@ static bool draw_mod_integer_option(const RecompLauncherCModOption& option,
     const int64_t step = option.step > 0 ? option.step : 1;
     const bool edited = ImGui::InputScalar(
         "##integer", ImGuiDataType_S64, &edit.value, &step, nullptr, nullptr,
-        ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGuiInputTextFlags_None);
     const bool commit = ImGui::IsItemDeactivatedAfterEdit() ||
                         (edited && !ImGui::IsItemActive());
     if (!commit) return false;
