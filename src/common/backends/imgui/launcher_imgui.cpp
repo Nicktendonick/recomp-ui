@@ -3709,7 +3709,12 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
         } else {
         // Alternate binds per input (N64's input.cfg keeps two; SNES/GBA
         // keep one). 0 in the spec reads as 1 (older positional initializers).
-        const int bpi = spec.binds_per_input < 1 ? 1 : spec.binds_per_input;
+        // Host-owned settings arrays have one keyboard and one controller
+        // value per action, independent of a console bridge's alternate-slot
+        // format (for example N64 input.cfg). Keep that opt-in store on its
+        // own two-chip path instead of accidentally editing the native store.
+        const int bpi = m->settings_bindings
+            ? 1 : (spec.binds_per_input < 1 ? 1 : spec.binds_per_input);
 
         // Stores that follow the input SOURCE (N64: one shared table per device
         // TYPE) must re-read display strings on entry so switching
