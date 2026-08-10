@@ -462,7 +462,7 @@ typedef struct {
     int       capture_btn;       // generic index into the active profile's ControllerSpec.buttons[] (0..button_count-1)
     int       capture_slot;      // alternate-bind slot being captured (0 always;
                                  // 1 only for consoles with two bind slots per
-                                 // input — N64's input.cfg format)
+                                 // input — N64 input.cfg and PSX keybinds.ini)
     // When capturing, whether the GAMEPAD bind (button/axis) is being captured
     // instead of the keyboard scancode — Genesis has_pad_binds, and PSX's
     // Gamepad Bindings panel (per selected GUID).
@@ -475,6 +475,9 @@ typedef struct {
     bool      map_all_active;
     bool      map_all_wait_release;
     int       map_all_step;
+    // A mouse button may be BOUND on stores that keep alternates (PSX). ImGui
+    // opens capture on release, so the next down event is a deliberate bind.
+    bool      capture_mouse_armed;
     bool      camera_capturing;  // capturing an enabled Voxel camera key
     int       capture_camera;    // LNG_CAMERA_* index
     bool      hk_capturing;      // capturing a system hotkey
@@ -784,6 +787,9 @@ void launcher_model_begin_capture(LauncherModel* m, int b);
 // launcher_model_begin_capture() is slot 0. Only consoles whose bind bridge
 // stores two slots per input (N64) show slot-1 chips.
 void launcher_model_begin_capture_slot(LauncherModel* m, int b, int slot);
+// Write one bind slot (0 primary, 1 alternate) for stores that keep two.
+void launcher_binds_set_button_slot(LauncherModel* m, int player, int b,
+                                    int slot, int scancode);
 // Begin capturing the GAMEPAD bind (button or axis) for button `b` instead of
 // a keyboard scancode. Used by Genesis has_pad_binds and the PSX Gamepad
 // Bindings panel. Esc cancels.

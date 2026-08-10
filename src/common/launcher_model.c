@@ -2611,10 +2611,11 @@ void launcher_model_begin_capture_slot(LauncherModel* m, int b, int slot) {
     m->capturing     = true;
     m->capture_btn   = b;
     m->capture_slot  = (slot == 1) ? 1 : 0;
-    m->hk_capturing = false;
-    m->capturing    = true;
+    /* ImGui activates a button on RELEASE, so the click that opened this
+     * capture is already fully consumed by the time capturing is true.
+     * Arm straight away: the next press is a deliberate new click. */
+    m->capture_mouse_armed = true;
     m->capture_pad  = false;
-    m->capture_btn  = b;
 }
 void launcher_model_begin_pad_capture(LauncherModel* m, int b) {
     launcher_model_begin_capture(m, b);

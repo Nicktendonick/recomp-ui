@@ -7539,6 +7539,24 @@ bool try_capture(LauncherModel* m, const SDL_Event& ev) {
         return true;   // swallow all other input (keyboard included) while pad-capturing
     }
 
+    /* Mouse buttons are bindable inputs on stores that keep alternates
+     * (PSX): bind-a-mouse-button is the whole point of the alt slot. ImGui
+     * opens capture on release, so the next down event is deliberate. */
+    if (m->capturing && !m->capture_pad) {
+        const SystemProfile* mprof = (const SystemProfile*)m->profile;
+        const bool alt_store = mprof && mprof->controller.binds_per_input >= 2;
+        if (ev.type == SDL_EVENT_MOUSE_BUTTON_UP) return true;   /* swallow */
+        if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            if (!alt_store || !m->capture_mouse_armed) return true;
+            int btn = (int)ev.button.button;      /* SDL: 1 L, 2 M, 3 R, 4/5 side */
+            if (btn >= 1 && btn <= 5) {
+                launcher_binds_set_button_slot(m, m->cfg_player + 1, m->capture_btn,
+                                               m->capture_slot, 512 + btn);
+                launcher_model_cancel_capture(m);
+            }
+            return true;
+        }
+    }
     if (ev.type != SDL_EVENT_KEY_DOWN) return true;   // swallow non-key input while capturing
     if (m->capturing) {
         // N64's input.cfg keeps two alternate binds per input, so a keyboard
@@ -7546,7 +7564,10 @@ bool try_capture(LauncherModel* m, const SDL_Event& ev) {
         // Single-bind stores (SNES/PSX/GBA) use the legacy scancode setter
         // (capture_slot is always 0 for them).
         const SystemProfile* prof = (const SystemProfile*)m->profile;
-        if (prof && prof->controller.binds_per_input >= 2)
+        if (prof && prof->controller.binds_per_input >= 2 && prof->id && !strcmp(prof->id, "psx"))
+            launcher_binds_set_button_slot(m, m->cfg_player + 1, m->capture_btn,
+                                           m->capture_slot, (int)LNG_EVSCAN(ev));
+        else if (prof && prof->controller.binds_per_input >= 2)
             launcher_binds_set_field(m, m->cfg_player + 1, m->capture_btn, m->capture_slot,
                                      RUI_N64_FIELD_KEY, (int)LNG_EVSCAN(ev));
         else
@@ -7793,6 +7814,22 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
         }
 
         ImGui_ImplOpenGL3_NewFrame();
+        /* Suspend ImGui's GAMEPAD navigation while a bind capture is open.
+         *
+         * The SDL backend POLLS gamepad state in NewFrame (see
+         * ImGui_ImplSDL3_UpdateGamepads) rather than reading the SDL event
+         * queue, so swallowing pad events in try_capture cannot stop the pad
+         * from driving the menu: press a button to bind it and the focus
+         * jumps instead. Clearing the flag for the frame is the only thing
+         * that actually suppresses it. Keyboard nav stays on so Esc, arrows
+         * and Enter still work while listening. */
+        {
+            ImGuiIO& nav_io = ImGui::GetIO();
+            if (m->capturing || m->hk_capturing || m->camera_capturing)
+                nav_io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+            else
+                nav_io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+        }
         LNG_ImplSDL_NewFrame();
         if (force_dpi) {   // Windows has no native point/pixel split — inject it
             ImGuiIO& io = ImGui::GetIO();

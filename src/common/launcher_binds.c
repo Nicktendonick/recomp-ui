@@ -199,6 +199,15 @@ static void copy_str(char* d, size_t cap, const char* s) {
 
 static const char* scancode_label(SDL_Scancode sc) {
     if (sc == SDL_SCANCODE_UNKNOWN) return "(unbound)";
+    /* Mouse buttons are bound as pseudo-scancodes ABOVE SDL keyboard space
+     * (512 + SDL button), so SDL_GetScancodeName knows nothing about them
+     * and every mouse bind rendered as "(unbound)" - the bind had actually
+     * been written and persisted, it was purely a display failure. */
+    if ((int)sc > 512 && (int)sc <= 517) {
+        static const char* const kMouseNames[5] =
+            { "Mouse1", "Mouse2", "Mouse3", "Mouse4", "Mouse5" };
+        return kMouseNames[(int)sc - 513];
+    }
     const char* n = SDL_GetScancodeName(sc);
     return (n && n[0]) ? n : "(unbound)";
 }
@@ -226,8 +235,12 @@ static void reload_player_display(LauncherModel* m, int player) {
         const char* guid = psx_player_guid(m, player);
         for (int b = 0; b < LNG_PSX_PAD_BUTTON_COUNT; ++b) {
             copy_str(m->binds[player - 1][b], sizeof(m->binds[player - 1][b]),
-                     scancode_label((SDL_Scancode)rui_psx_binds_get(
-                         keybinds_file_path(), player - 1, b)));
+                     scancode_label((SDL_Scancode)rui_psx_binds_get_slot(
+                         keybinds_file_path(), player - 1, b, 0)));
+            copy_str(m->binds_alt[player - 1][b],
+                     sizeof(m->binds_alt[player - 1][b]),
+                     scancode_label((SDL_Scancode)rui_psx_binds_get_slot(
+                         keybinds_file_path(), player - 1, b, 1)));
             rui_psx_pad_binds_label(psx_input_ini_path(), guid, b,
                                     m->pad_binds[player - 1][b],
                                     (int)sizeof(m->pad_binds[player - 1][b]));
@@ -521,6 +534,20 @@ void launcher_binds_reset_camera(LauncherModel* m) {
     launcher_binds_refresh_camera(m);
 }
 
+/* Slot-aware setter for stores that keep an alternate bind per input.
+ * PSX keeps two (primary + alt, either may be a mouse pseudo-scancode). */
+void launcher_binds_set_button_slot(LauncherModel* m, int player, int b,
+                                    int slot, int scancode) {
+    if (!m || !is_psx_profile(m)) return;
+    if (player < 1 || player > LNG_MAX_PLAYERS) return;
+    if (b < 0 || b >= LNG_PSX_PAD_BUTTON_COUNT) return;
+    rui_psx_binds_set_slot(keybinds_file_path(), player - 1, b, slot, scancode);
+    char* dst = (slot == 1) ? m->binds_alt[player - 1][b] : m->binds[player - 1][b];
+    size_t cap = (slot == 1) ? sizeof(m->binds_alt[player - 1][b])
+                             : sizeof(m->binds[player - 1][b]);
+    copy_str(dst, cap, scancode_label((SDL_Scancode)scancode));
+}
+
 void launcher_binds_set_button(LauncherModel* m, int player, int b, int scancode) {
     if (is_n64_profile(m)) {
         // Keyboard capture into the N64 store routes through the field API
@@ -529,11 +556,7 @@ void launcher_binds_set_button(LauncherModel* m, int player, int b, int scancode
         return;
     }
     if (is_psx_profile(m)) {
-        if (player < 1 || player > LNG_MAX_PLAYERS) return;
-        if (b < 0 || b >= LNG_PSX_PAD_BUTTON_COUNT) return;
-        rui_psx_binds_set(keybinds_file_path(), player - 1, b, scancode);
-        copy_str(m->binds[player - 1][b], sizeof(m->binds[player - 1][b]),
-                 scancode_label((SDL_Scancode)scancode));
+        launcher_binds_set_button_slot(m, player, b, 0, scancode);
         return;
     }
     if (player < 1 || player > 2) return;
