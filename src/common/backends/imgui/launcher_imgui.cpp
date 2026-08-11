@@ -6667,7 +6667,9 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
         ImGui::IsKeyPressed(ImGuiKey_Backspace, false))
         ImGui::SetKeyboardFocusHere();
     float play_x = origin.x + fullw - play_w;
-    if (m->view == LNG_VIEW_DASHBOARD && m->netplay_supported) {
+    if (m->netplay_supported &&
+        (m->view == LNG_VIEW_DASHBOARD || m->view == LNG_VIEW_SETTINGS ||
+         m->view == LNG_VIEW_CONTROLLER)) {
         const float net_w = px(170.0f);
         ImGui::SetCursorScreenPos(ImVec2(play_x - net_w - px(12.0f), cta_y));
         if (ImGui::Button("NETPLAY", ImVec2(net_w, play_h))) {
