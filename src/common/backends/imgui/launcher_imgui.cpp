@@ -3924,18 +3924,24 @@ void np_connect_and_list(LauncherModel* m) {
     if (!np) return;
     if (np->set_player_name && m->s.netplay_player_name[0])
         np->set_player_name(np->ctx, m->s.netplay_player_name);
-    if (np->connect && (!np->connected || !np->connected(np->ctx)))
+    const bool already = np->connected && np->connected(np->ctx);
+    const bool in_flight = np->connecting && np->connecting(np->ctx);
+    if (np->connect && !already && !in_flight)
         (void)np->connect(np->ctx);
     if (np->request_list)
         np->request_list(np->ctx);
     m->netplay_list_fresh = true;
+    if (!already)
+        std::snprintf(m->netplay_status, sizeof(m->netplay_status),
+                      "Connecting to lobby server…");
 }
 
 /* Reload server lobby table + UDP-browse LAN hosts (BEACON) / file registry. */
 void np_refresh_lobby_list(LauncherModel* m) {
     np_connect_and_list(m);
     m->netplay_selected_lobby = -1;
-    m->netplay_status[0] = '\0';
+    /* Keep Connecting… status from np_connect_and_list; clear only when
+     * the caller is an explicit Refresh after a prior error. */
 }
 
 static void mod_note_error(LauncherModel* m);
@@ -5439,6 +5445,18 @@ void draw_netplay(LauncherModel* m, const LauncherTheme& th) {
     if (np->launch_pending && np->launch_pending(np->ctx))
         np_try_launch(m);
 
+    const bool np_online = np->connected && np->connected(np->ctx);
+    const bool np_connecting = np->connecting && np->connecting(np->ctx);
+    if (np_online && m->netplay_status[0] &&
+        std::strncmp(m->netplay_status, "Connecting", 10) == 0) {
+        m->netplay_status[0] = '\0';
+    } else if (!np_online && !np_connecting && m->netplay_list_fresh &&
+               m->netplay_status[0] &&
+               std::strncmp(m->netplay_status, "Connecting", 10) == 0) {
+        std::snprintf(m->netplay_status, sizeof(m->netplay_status),
+                      "Could not reach lobby server.");
+    }
+
     begin_container("netplay_lobbies", ImVec2(0, 0), ImGuiChildFlags_None);
     ImGui::TextColored(col(th.accent2), "LOBBIES");
     if (m->netplay_status[0])
@@ -6596,7 +6614,11 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
         const float net_w = px(170.0f);
         ImGui::SetCursorScreenPos(ImVec2(play_x - net_w - px(12.0f), cta_y));
         if (ImGui::Button("NETPLAY", ImVec2(net_w, play_h))) {
-            np_connect_and_list(m);
+            /* Open the page immediately; connect/list runs on first draw
+             * (and continues off-thread) so Windows DNS/TCP never freezes UI. */
+            m->netplay_list_fresh = false;
+            std::snprintf(m->netplay_status, sizeof(m->netplay_status),
+                          "Connecting to lobby server…");
             launcher_model_set_view(m, LNG_VIEW_NETPLAY);
         }
     }
