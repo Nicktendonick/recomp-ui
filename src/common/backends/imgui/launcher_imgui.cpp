@@ -4975,6 +4975,13 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                 ImGui::TextColored(col(th.good), "Connected");
             else
                 ImGui::TextColored(col(th.text_muted), "Waiting");
+            if (occupied[slot] && slots[slot].bios_offer_valid &&
+                ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "BIOS: %s%s",
+                    slots[slot].bios_prefer_openbios ? "OpenBIOS" : "SCPH-1001",
+                    slots[slot].bios_can_scph1001 ? "" : " (no SCPH dump)");
+            }
             ImGui::TableSetColumnIndex(4);
             table_row_vcenter(member_row_h, text_h);
             /* RTT to that seat from local peer — never on the local row. */
@@ -5043,6 +5050,55 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
             ImGui::PopID();
         }
         ImGui::EndTable();
+    }
+    /* Session BIOS settle preview (OpenBIOS vs SCPH-1001). Mixed BIOSes desync. */
+    {
+        int any_prefer_open = 0;
+        int any_prefer_scph = 0;
+        int any_cannot_scph = 0;
+        int any_missing_offer = 0;
+        int saw = 0;
+        for (int slot = 0; slot < max_slots; ++slot) {
+            if (!occupied[slot]) continue;
+            ++saw;
+            if (!slots[slot].bios_offer_valid) {
+                any_missing_offer = 1;
+                any_cannot_scph = 1;
+                continue;
+            }
+            if (slots[slot].bios_prefer_openbios)
+                any_prefer_open = 1;
+            else
+                any_prefer_scph = 1;
+            if (!slots[slot].bios_can_scph1001) any_cannot_scph = 1;
+        }
+        if (saw >= 2) {
+            const int session_open =
+                any_prefer_open || any_cannot_scph || any_missing_offer;
+            ImGui::Spacing();
+            if (session_open) {
+                ImGui::TextColored(col(th.warn),
+                    "Match BIOS: OpenBIOS (session only — mixed or missing "
+                    "SCPH-1001 dumps cannot use retail).");
+            } else {
+                ImGui::TextColored(col(th.good),
+                    "Match BIOS: SCPH-1001 (all peers can run it; session only).");
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "OpenBIOS and SCPH-1001 lay out kernel RAM differently. "
+                    "Netplay requires one session BIOS for all peers; it does "
+                    "not change your saved Settings preference.");
+            }
+            if (any_prefer_open && any_prefer_scph) {
+                ImGui::TextColored(col(th.warn),
+                    "Players disagree on BIOS preference — session settles to "
+                    "OpenBIOS so the match stays in sync.");
+            } else if (any_missing_offer) {
+                ImGui::TextColored(col(th.text_muted),
+                    "Waiting for every peer to advertise BIOS capability…");
+            }
+        }
     }
     ImGui::Spacing();
     {
