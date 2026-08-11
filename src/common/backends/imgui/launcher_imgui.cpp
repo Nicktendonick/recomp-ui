@@ -5056,11 +5056,13 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::EndTable();
     }
     /* Session BIOS notice (OpenBIOS vs SCPH1001). Keep copy plain — hosts care
-     * about save-state compatibility, not kernel-RAM details. */
+     * about save-state compatibility, not kernel-RAM details.
+     * Orange OpenBIOS override only when a peer cannot run SCPH; host retail
+     * preference otherwise settles SCPH (even if a guest prefers OpenBIOS). */
     {
         int host_prefer_open = 0;
         int host_found = 0;
-        int peers_agree_scph = 1;
+        int all_can_scph = 1;
         int saw = 0;
         for (int slot = 0; slot < max_slots; ++slot) {
             if (!occupied[slot]) continue;
@@ -5072,7 +5074,7 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                 host_found = 1;
                 host_prefer_open = prefer_open ? 1 : 0;
             }
-            if (prefer_open || !can_scph) peers_agree_scph = 0;
+            if (!can_scph) all_can_scph = 0;
         }
         if (saw >= 1 && host_found) {
             ImGui::Spacing();
@@ -5083,7 +5085,7 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                     "Host has selected OpenBIOS for this session.\n"
                     "Note: Save states are not cross compatible with SCPH1001 "
                     "and OpenBIOS sessions");
-            } else if (peers_agree_scph) {
+            } else if (all_can_scph) {
                 ImGui::TextColored(
                     col(th.good),
                     "All users agree on proprietary BIOS SCPH1001.bin for this "
@@ -7018,40 +7020,67 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
 
     /* ---- Page 1: BIOS / disc / generate -------------------------------- */
     const SetupPlatKind plat = setup_platform_kind(m->platform);
+    const bool media_confirm = launcher_model_setup_media_confirm_only(m);
 
-    ImGui::TextColored(col(th.accent), "Setup required");
-    ImGui::PushTextWrapPos(wrap_x);
-    if (plat == SETUP_PLAT_PSX && m->has_bios) {
-        ImGui::TextColored(col(th.text_muted),
-            "%s needs a playable %s before you can launch. This build includes "
-            "a bundled BIOS (OpenBIOS) by default. Setup also looks for a "
-            "retail SCPH1001.BIN beside the install and uses it when found; "
-            "otherwise OpenBIOS stays selected. Use a Redump-style .cue with "
-            "sibling .bin tracks (.iso is not accepted). Pick your %s below "
-            "(you must legally own these dumps).",
-            game, noun, noun);
-    } else if (plat == SETUP_PLAT_GBA && m->has_bios) {
-        ImGui::TextColored(col(th.text_muted),
-            "%s needs a Game Boy Advance BIOS dump and a playable %s before "
-            "you can launch. Pick both below (you must legally own these dumps).",
-            game, noun);
-    } else if (plat == SETUP_PLAT_SNES) {
-        ImGui::TextColored(col(th.text_muted),
-            "%s needs a playable Super Nintendo %s before you can launch. "
-            "Pick your file below (you must legally own this dump).",
-            game, noun);
-    } else if (m->has_bios) {
-        ImGui::TextColored(col(th.text_muted),
-            "%s needs a BIOS image and a playable %s before you can launch. "
-            "Pick both below (you must legally own these dumps).",
-            game, noun);
+    if (media_confirm) {
+        ImGui::TextColored(col(th.accent),
+                           m->has_bios ? "Confirm BIOS and disc"
+                                       : "Confirm disc");
+        ImGui::PushTextWrapPos(wrap_x);
+        if (plat == SETUP_PLAT_PSX && m->has_bios) {
+            ImGui::TextColored(col(th.text_muted),
+                "This build is already generated. Select a PlayStation BIOS "
+                "(or keep OpenBIOS) and a Redump-style .cue with sibling .bin "
+                "tracks so %s can launch. Your previous disc/BIOS picks were "
+                "cleared from settings.",
+                game);
+        } else if (m->has_bios) {
+            ImGui::TextColored(col(th.text_muted),
+                "This build is already ready. Confirm a BIOS image and a "
+                "playable %s below — previous picks were cleared from settings.",
+                noun);
+        } else {
+            ImGui::TextColored(col(th.text_muted),
+                "This build is already ready. Confirm a playable %s below — "
+                "the previous pick was cleared from settings.",
+                noun);
+        }
+        ImGui::PopTextWrapPos();
     } else {
-        ImGui::TextColored(col(th.text_muted),
-            "%s needs a playable %s before you can launch. Pick your file below "
-            "(you must legally own this dump).",
-            game, noun);
+        ImGui::TextColored(col(th.accent), "Setup required");
+        ImGui::PushTextWrapPos(wrap_x);
+        if (plat == SETUP_PLAT_PSX && m->has_bios) {
+            ImGui::TextColored(col(th.text_muted),
+                "%s needs a playable %s before you can launch. This build includes "
+                "a bundled BIOS (OpenBIOS) by default. Setup also looks for a "
+                "retail SCPH1001.BIN beside the install and uses it when found; "
+                "otherwise OpenBIOS stays selected. Use a Redump-style .cue with "
+                "sibling .bin tracks (.iso is not accepted). Pick your %s below "
+                "(you must legally own these dumps).",
+                game, noun, noun);
+        } else if (plat == SETUP_PLAT_GBA && m->has_bios) {
+            ImGui::TextColored(col(th.text_muted),
+                "%s needs a Game Boy Advance BIOS dump and a playable %s before "
+                "you can launch. Pick both below (you must legally own these dumps).",
+                game, noun);
+        } else if (plat == SETUP_PLAT_SNES) {
+            ImGui::TextColored(col(th.text_muted),
+                "%s needs a playable Super Nintendo %s before you can launch. "
+                "Pick your file below (you must legally own this dump).",
+                game, noun);
+        } else if (m->has_bios) {
+            ImGui::TextColored(col(th.text_muted),
+                "%s needs a BIOS image and a playable %s before you can launch. "
+                "Pick both below (you must legally own these dumps).",
+                game, noun);
+        } else {
+            ImGui::TextColored(col(th.text_muted),
+                "%s needs a playable %s before you can launch. Pick your file below "
+                "(you must legally own this dump).",
+                game, noun);
+        }
+        ImGui::PopTextWrapPos();
     }
-    ImGui::PopTextWrapPos();
     ImGui::Dummy(ImVec2(0, px(10)));
 
     if (m->has_bios) {
@@ -7192,7 +7221,11 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         }
     }
 
-    if (m->prepare_disc_cb || m->prepare_with_progress_cb) {
+    /* Full first-run only: Generate & rebuild. Media-confirm (cleared disc/
+     * BIOS with sources already present) skips this — regenerate stays in
+     * Settings → SYSTEM when the host exposes it. */
+    if (!media_confirm &&
+        (m->prepare_disc_cb || m->prepare_with_progress_cb)) {
         ImGui::Dummy(ImVec2(0, px(12)));
         char section_buf[128];
         const char* section;
@@ -7297,8 +7330,12 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     }
     if (!m->prepare_required_before_continue) {
         const bool ready = launcher_model_can_finish_setup(m);
+        const char* continue_lbl =
+            media_confirm
+                ? (m->has_bios ? "Confirm BIOS and disc" : "Confirm disc")
+                : "Continue to launcher";
         if (!ready) ImGui::BeginDisabled();
-        if (ImGui::Button("Continue to launcher", ImVec2(px(220), px(34)))) {
+        if (ImGui::Button(continue_lbl, ImVec2(px(220), px(34)))) {
             launcher_model_finish_setup(m);
             ImGui::CloseCurrentPopup();
         }
@@ -7311,6 +7348,9 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
                     ImGui::SetTooltip("Wait for the current job to finish");
                 else if (m->has_bios && !m->setup_bios_ok)
                     ImGui::SetTooltip("BIOS check required");
+                else if (m->profile && m->profile->verify.mode == 1 &&
+                         !m->verify.netplay_ok)
+                    ImGui::SetTooltip("Disc mount / track layout not accepted");
             }
         }
         ImGui::SameLine();

@@ -753,6 +753,11 @@ void launcher_model_set_mouse_bind(LauncherModel* m, int which, int button_index
 void launcher_model_set_gyro_sensitivity(LauncherModel* m, float value);
 
 // ---- first-run setup wizard ----
+// True when the wizard should ask only for BIOS/disc confirmation: prepare
+// callbacks exist (codegen host) but prepare_required_before_continue is 0
+// because generated sources / a full build are already present. Cleared
+// disc.cfg / BIOS paths reopen the wizard without the Generate & rebuild page.
+bool launcher_model_setup_media_confirm_only(const LauncherModel* m);
 // True when required BIOS + ROM/disc paths are present (readable), and when
 // prepare_required_before_continue is set, prepare (+ chained rebuild) has
 // succeeded. Fingerprint mismatch is allowed here.

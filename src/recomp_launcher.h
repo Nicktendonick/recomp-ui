@@ -963,7 +963,10 @@ typedef struct RecompLauncherCGameInfo {
 
     /* When 1, the setup modal hides "Continue to launcher" and requires
      * prepare (and rebuild when rebuild_after_prepare is set). Local codegen
-     * first-run: Generate & rebuild, then relaunch — Quit is the only other exit. */
+     * first-run: Generate & rebuild, then relaunch — Quit is the only other exit.
+     * When 0 but prepare_* is still wired (sources already generated), the
+     * wizard opens only for a cleared BIOS/disc pick and shows a media-confirm
+     * prompt instead of the full Generate & rebuild first-run page. */
     int prepare_required_before_continue;
 
     /* ---- portable toolchain step (appended; local codegen hosts) ----------
