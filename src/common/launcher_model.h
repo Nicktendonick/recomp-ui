@@ -213,6 +213,13 @@ typedef struct {
     bool      mod_show_packages;
     char      mod_search[96];
     char      mod_status[256];
+    bool      rom_patch_supported;
+    const char* rom_patch_note;
+    const char* rom_patch_cache_dir;
+    const char* rom_patch_required_sha1;
+    char      rom_patch_status[256];
+    char      rom_patch_prepared_path[512];
+    char      rom_patch_prepared_sha1[41];
     // Game-supplied aspect vocabulary (GameInfo.aspect_labels): when set,
     // the aspect cycle walks these 0..num_aspect_labels-1 instead of the
     // built-in 4:3/16:9/21:9 mask set; aspect_experimental tags the row.
@@ -283,6 +290,7 @@ typedef struct {
 
     bool     rom_present;
     char     rom_full[512];          // absolute path (what we hand to the game)
+    char     rom_sha1_hex[41];       // complete stock-image identity
     char     rom_file[128];          // basename for display, e.g. "mmx.sfc"
     char     rom_size[48];           // "1.50 MB"
     char     rom_header[24];         // "LoROM"
@@ -402,6 +410,18 @@ void launcher_model_set_rom(LauncherModel* m, const char* path);
 
 // Full path of the currently selected ROM ("" when none).
 const char* launcher_model_rom_path(const LauncherModel* m);
+
+// Effective path returned to the host after a patch was prepared; otherwise
+// the selected stock-ROM path.
+const char* launcher_model_effective_rom_path(const LauncherModel* m);
+
+// Patch selection and launch preparation. Selecting a patch enables it;
+// clearing disables it. Preparation verifies the stock image, applies the
+// patch into the host-provided cache, and records the effective SHA-1.
+void launcher_model_set_rom_patch(LauncherModel* m, const char* path);
+void launcher_model_clear_rom_patch(LauncherModel* m);
+void launcher_model_toggle_rom_patch(LauncherModel* m);
+bool launcher_model_prepare_rom_patch(LauncherModel* m);
 
 // True iff a ROM is loaded and every fingerprint the game provides (CRC and/or
 // SHA-256) matches. If the game provides no fingerprint at all, returns false
