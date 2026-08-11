@@ -6858,7 +6858,7 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     /* Prefer content height (AlwaysAutoResize). Clamp to the work area. */
     const float max_h = vp->WorkSize.y * 0.92f;
     ImGui::SetNextWindowSize(
-        ImVec2(px(g_rom_picker.active && g_rom_picker.from_setup ? 720 : 640), 0),
+        ImVec2(px(g_rom_picker.active && g_rom_picker.from_setup ? 720.0f : 640.0f), 0),
         ImGuiCond_Always);
     ImGui::SetNextWindowSizeConstraints(ImVec2(px(520), 0),
                                         ImVec2(FLT_MAX, max_h));

@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.24)
+
 if(NOT RECOMP_UI_ROOT)
     message(FATAL_ERROR "RECOMP_UI_ROOT is required")
 endif()
