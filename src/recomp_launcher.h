@@ -741,6 +741,15 @@ struct RecompLauncherCSettings {
      * zero-initialized host predating this field could not be told apart from
      * "no opinion". Appended additively. */
     int  vsync;
+    // ---- optional source-ROM patch --------------------------------------
+    // The launcher always verifies rom_patch_source_path as the stock image,
+    // then prepares a cached effective image from rom_patch_path. The host
+    // uses rom_patch_sha1 as the effective runtime identity gate.
+    int  rom_patch_enabled;
+    char rom_patch_path[512];
+    char rom_patch_source_path[512];
+    char rom_patch_sha1[41];
+    char rom_patch_crc32[9];
 };
 
 /* Values for RecompLauncherCSettings.vsync (1-based; 0 = unset). */
@@ -1242,6 +1251,15 @@ typedef struct RecompLauncherCGameInfo {
      * rate. Appended for ABI stability. */
     int assist_fast_forward_min;
     int assist_fast_forward_max;
+
+    /* Optional general ROM-patch surface. recomp-ui applies classic IPS,
+     * IPS32, and checksum-verified BPS to a verified stock image. The cache
+     * directory must already exist and should be owned by the host beside its
+     * other mod data. NULL note uses the shared compatibility warning. */
+    int rom_patch_supported;
+    const char* rom_patch_note;
+    const char* rom_patch_cache_dir;
+    const char* rom_patch_required_sha1;
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */
