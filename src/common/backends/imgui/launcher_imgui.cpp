@@ -4772,9 +4772,13 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
 
     ImGui::OpenPopup("LOBBY");
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(px(640), 0), ImGuiCond_Appearing);
-    if (!ImGui::BeginPopupModal("LOBBY", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    /* Always recenter: content height changes as members join/leave, and
+     * ImGuiCond_Appearing left the room modal stuck off-center after join. */
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(px(640), 0), ImGuiCond_Always);
+    const ImGuiWindowFlags lobby_flags =
+        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove;
+    if (!ImGui::BeginPopupModal("LOBBY", nullptr, lobby_flags)) return;
 
     /* Only file-backed LAN/Direct rooms show IP/Port. Server-list joins always
      * show the lobby URL — do not use Host Lobby's LAN checkbox or a stale
