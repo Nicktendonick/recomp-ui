@@ -2506,19 +2506,22 @@ void launcher_model_skip_msu1_patch(LauncherModel* m) {
     update_msu1_patch_available(m);
 }
 
-/* PSX Hybrid/Analog need sticks; keyboard players are forced to D-Pad. */
+/* PSX Hybrid/Analog need sticks; keyboard players are forced to D-Pad.
+ * Gamepads default to Analog — virtually every modern pad has sticks. */
 static int pad_mode_is_psx_legacy(const LauncherModel* m) {
     const SystemProfile* prof = (const SystemProfile*)m->profile;
     const ControllerSpec* spec = prof ? &prof->controller : NULL;
     return !(spec && spec->modes && spec->mode_count > 0);
 }
 
-static void force_digital_if_keyboard(LauncherModel* m, int player) {
+static void apply_default_pad_mode_for_source(LauncherModel* m, int player) {
     if (!m->pad_mode_supported || !m->pad_mode_selectable) return;
     player = clampi(player, 0, LNG_MAX_PLAYERS - 1);
-    if (m->s.player_src[player] != 1) return;
     if (!pad_mode_is_psx_legacy(m)) return;
-    m->s.pad_mode[player] = 2;   // D-Pad / digital
+    if (m->s.player_src[player] == 1)
+        m->s.pad_mode[player] = 2;   // D-Pad / digital (no sticks)
+    else if (m->s.player_src[player] == 2)
+        m->s.pad_mode[player] = 1;   // Analog / DualShock
 }
 
 void launcher_model_set_pad_mode(LauncherModel* m, int player, int mode) {
@@ -2558,7 +2561,7 @@ int launcher_model_active_button_count(const LauncherModel* m, int player) {
 void launcher_model_cycle_player_src(LauncherModel* m, int player) {
     player = clampi(player, 0, LNG_MAX_PLAYERS - 1);
     m->s.player_src[player] = (m->s.player_src[player] + 1) % 3;  // None/Kbd/Pad
-    force_digital_if_keyboard(m, player);
+    apply_default_pad_mode_for_source(m, player);
 }
 
 void launcher_model_deadzone_delta(LauncherModel* m, int player, int delta) {
@@ -2583,7 +2586,7 @@ void launcher_model_set_source(LauncherModel* m, int player, int kind,
         m->player_pad_name[player][0] = '\0';
         m->s.player_gamepad_guid[player][0] = '\0';
     }
-    force_digital_if_keyboard(m, player);
+    apply_default_pad_mode_for_source(m, player);
 }
 
 // ---- mouse controls --------------------------------------------------------
