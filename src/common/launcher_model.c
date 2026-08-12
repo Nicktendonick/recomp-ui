@@ -51,7 +51,7 @@ static const char* kHotkeyNames[LNG_HK_COUNT] = {
     "Window bigger", "Window smaller", "Volume up", "Volume down",
     "FPS readout", "Toggle renderer",
     "Solar level up", "Solar level down", "Resume live solar",
-    "Rewind"
+    "Rewind", "Save states menu"
 };
 static const char* kViewNames[7] = {
     "Dashboard", "Settings", "Controller", "Netplay", "Mods",
@@ -1678,11 +1678,12 @@ bool launcher_model_can_finish_setup(const LauncherModel* m) {
     if (m->has_bios && !m->setup_bios_ok) return false;
     if (m->prepare_required_before_continue && !m->setup_prepare_satisfied)
         return false;
-    /* Disc titles: TOC / require_cue policy (netplay_ok) must pass before
-     * leaving first-run setup — Track-01-only dumps fail generate + netplay. */
+    /* Disc titles: local setup only needs a readable, title-matching mount.
+     * TOC / require_cue policy is a netplay gate; single-player titles can
+     * accept valid dumps whose track layout differs from the online policy. */
     if (m->profile && m->profile->verify.mode == 1) {
         if (m->verify.verdict == 0 || m->verify.verdict == 3) return false;
-        if (!m->verify.netplay_ok) return false;
+        if (m->netplay_supported && !m->verify.netplay_ok) return false;
     }
     return true;
 }

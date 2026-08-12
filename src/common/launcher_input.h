@@ -34,6 +34,10 @@ int launcher_input_poll(LauncherPad* out, int max, int enable_gyro);
 // accepting the next mapping (sticks otherwise re-fire on every axis tick).
 int launcher_input_gamepad_at_rest(uint32_t id);
 
+// Bit mask of currently held standard game-controller buttons on the open pad.
+// Bit N corresponds to SDL button N. Unknown/missing id returns 0.
+uint32_t launcher_input_gamepad_button_mask(uint32_t id);
+
 // Close controller handles retained for live input/sensor polling. Call before
 // the launcher tears down SDL.
 void launcher_input_shutdown(void);

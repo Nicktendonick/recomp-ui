@@ -95,7 +95,8 @@ static const SystemProfile kSystemProfilePsx = {
     // LNG_HK_PAUSE_DIMMED (an SNES-engine-only attract-loop affordance) and
     // the window-resize pair (SNES-only integer-scale window; PSX sizes via
     // window_scale + fullscreen instead) — see requirement in the hotkey
-    // catalog task. LNG_HK_REWIND is PSX-only (local filmstrip; [KeyMap] Rewind).
+    // catalog task. LNG_HK_REWIND / LNG_HK_SAVE_STATE_MENU are PSX-only local
+    // transport overlays.
     /* hotkeys_mask */ (uint32_t)((1u << LNG_HK_FULLSCREEN)     |
                                    (1u << LNG_HK_RESET)          |
                                    (1u << LNG_HK_PAUSE)          |
@@ -104,7 +105,8 @@ static const SystemProfile kSystemProfilePsx = {
                                    (1u << LNG_HK_VOLUME_DOWN)    |
                                    (1u << LNG_HK_DISPLAY_PERF)   |
                                    (1u << LNG_HK_TOGGLE_RENDERER)|
-                                   (1u << LNG_HK_REWIND)),
+                                   (1u << LNG_HK_REWIND)         |
+                                   (1u << LNG_HK_SAVE_STATE_MENU)),
     /* panels_dashboard  */ kPanelsDashboardPsx,
     /* panels_settings   */ kPanelsSettingsPsx,
     /* panels_controller */ kPanelsControllerCommon,

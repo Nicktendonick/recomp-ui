@@ -86,6 +86,27 @@ int launcher_input_gamepad_at_rest(uint32_t id) {
     return 1;
 }
 
+uint32_t launcher_input_gamepad_button_mask(uint32_t id) {
+    OpenPad* pad = find_open(id);
+    uint32_t mask = 0;
+    if (!pad || !pad->handle) return 0;
+#if defined(LNG_SDL3)
+    const int max_buttons = (int)SDL_GAMEPAD_BUTTON_COUNT;
+    for (int b = 0; b < max_buttons && b < 32; ++b) {
+        if (SDL_GetGamepadButton(pad->handle, (SDL_GamepadButton)b))
+            mask |= (uint32_t)1u << b;
+    }
+#else
+    const int max_buttons = (int)SDL_CONTROLLER_BUTTON_MAX;
+    for (int b = 0; b < max_buttons && b < 32; ++b) {
+        if (SDL_GameControllerGetButton(
+                pad->handle, (SDL_GameControllerButton)b))
+            mask |= (uint32_t)1u << b;
+    }
+#endif
+    return mask;
+}
+
 int launcher_input_poll(LauncherPad* out, int max, int enable_gyro) {
     int n = 0;
     if (!out || max <= 0) return 0;
