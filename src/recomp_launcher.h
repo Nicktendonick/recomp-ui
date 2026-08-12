@@ -39,6 +39,8 @@ extern "C" {
 #define RECOMP_LAUNCHER_HAS_MULTITAP_ENABLED 1
 /* Host may #ifdef this when reading multitap_analog (DualShock-on-tap hack). */
 #define RECOMP_LAUNCHER_HAS_MULTITAP_ANALOG 1
+/* Host may #ifdef this when reading Settings.rewind_depth. */
+#define RECOMP_LAUNCHER_HAS_REWIND_DEPTH 1
 #define RECOMP_LAUNCHER_MAX_BINDINGS 24
 #define RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS 8
 
@@ -595,6 +597,10 @@ struct RecompLauncherCSettings {
                        [RECOMP_LAUNCHER_MAX_BINDINGS];
     int assist_key_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
     int assist_pad_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
+
+    /* Local rewind snap-ring capacity (PSX). UI offers 25/50/75/100;
+     * 0 = unset -> model seeds 50. See RECOMP_LAUNCHER_HAS_REWIND_DEPTH. */
+    int  rewind_depth;
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
@@ -991,6 +997,9 @@ typedef struct RecompLauncherCGameInfo {
      * withdrawn from the UI while staying readable from game.toml/settings.toml
      * (psxrecomp ENHANCEMENTS.md G1.8/G1.9). Appended for ABI stability. */
     int  has_geometry_precision;
+
+    /* Local rewind buffer size control (Settings.rewind_depth). PSX only. */
+    int  has_rewind_depth;
 
     /* Master switch for the first-run setup wizard + Generate & rebuild UI.
      * Appended for ABI stability; zero-init keeps every existing host dark. */

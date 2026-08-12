@@ -2196,7 +2196,8 @@ bool any_deep_display(const LauncherModel* m) {
     return m->has_window_size || m->has_renderer || m->has_supersampling ||
            m->has_antialiasing || m->has_texture_filter || m->has_screen_kind ||
            m->has_frame_interp || m->has_skip_fmv ||
-           m->has_geometry_precision;   /* has_turbo_loads draws no row — see below */
+           m->has_geometry_precision ||
+           m->has_rewind_depth;   /* has_turbo_loads draws no row — see below */
 }
 
 // Whether the DISPLAY card should grow to fit its content (AutoResizeY) rather
@@ -2493,6 +2494,17 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         row_label("Skip FMVs", th);
         bool sk = m->s.auto_skip_fmv != 0;
         if (ImGui::Checkbox("##skipfmv", &sk)) launcher_model_toggle_skip_fmv(m);
+    }
+
+    if (m->has_rewind_depth) {
+        row_label("Rewind buffer", th);
+        if (ImGui::Button(launcher_model_rewind_depth_label(m), ImVec2(px(100), px(30))))
+            launcher_model_cycle_rewind_depth(m);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+            ImGui::SetTooltip(
+                "How many local rewind snapshots to keep (25 / 50 / 75 / 100).\n"
+                "Takes effect on the next launch.");
+        }
     }
 
     /* Turbo loads is deliberately NOT a Display row on any console. Load

@@ -337,6 +337,7 @@ typedef struct {
     bool     has_screen_kind;
     bool     has_frame_interp;
     bool     has_spu_hq;
+    bool     has_rewind_depth;
     bool     has_skip_fmv;
     bool     has_turbo_loads;
     // PSX geometry precision: sub-pixel vertices + perspective-correct UVs.
@@ -606,6 +607,8 @@ void launcher_model_toggle_frame_interp(LauncherModel* m);
 void launcher_model_cycle_interp_fps(LauncherModel* m);        // {0,90,120,144,165,240} wrap
 const char* launcher_model_interp_fps_label(const LauncherModel* m);  // "Display refresh"/"90 fps"
 void launcher_model_toggle_spu_hq(LauncherModel* m);
+void launcher_model_cycle_rewind_depth(LauncherModel* m);
+const char* launcher_model_rewind_depth_label(const LauncherModel* m);
 void launcher_model_toggle_skip_fmv(LauncherModel* m);
 void launcher_model_toggle_turbo_loads(LauncherModel* m);
 void launcher_model_cycle_fullscreen(LauncherModel* m);        // Off -> Borderless -> Exclusive, wraps

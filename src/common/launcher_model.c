@@ -126,6 +126,7 @@ void launcher_model_init(LauncherModel* m,
         m->has_screen_kind      = game->has_screen_kind != 0;
         m->has_frame_interp     = game->has_frame_interp != 0;
         m->has_spu_hq           = game->has_spu_hq != 0;
+        m->has_rewind_depth     = game->has_rewind_depth != 0;
         m->has_skip_fmv         = game->has_skip_fmv != 0;
         m->has_turbo_loads      = game->has_turbo_loads != 0;
         m->has_geometry_precision = game->has_geometry_precision != 0;
@@ -240,6 +241,12 @@ void launcher_model_init(LauncherModel* m,
     }
 
     if (io) m->s = *io;
+    /* Rewind buffer: 25/50/75/100; 0/invalid => 50. */
+    {
+        int d = m->s.rewind_depth;
+        if (d != 25 && d != 50 && d != 75 && d != 100)
+            m->s.rewind_depth = 50;
+    }
     if (m->has_sharp_filter) {
         m->s.linear_filter = m->s.linear_filter ? 1 : 0;
         m->s.sharp_filter = m->s.sharp_filter ? 1 : 0;
@@ -783,6 +790,11 @@ void launcher_model_request_restore_defaults(LauncherModel* m) {
 void launcher_model_restore_defaults(LauncherModel* m) {
     if (!launcher_model_can_restore_defaults(m)) return;
     m->s = m->default_settings;
+    {
+        int d = m->s.rewind_depth;
+        if (d != 25 && d != 50 && d != 75 && d != 100)
+            m->s.rewind_depth = 50;
+    }
     m->defaults_modal_open = false;
 }
 
@@ -1128,6 +1140,24 @@ const char* launcher_model_interp_fps_label(const LauncherModel* m) {
 void launcher_model_toggle_spu_hq(LauncherModel* m) {
     m->s.spu_hq = !m->s.spu_hq;
 }
+
+void launcher_model_cycle_rewind_depth(LauncherModel* m) {
+    if (!m || !m->has_rewind_depth) return;
+    static const int opts[4] = {25, 50, 75, 100};
+    int cur = m->s.rewind_depth;
+    int idx = 1; /* default 50 */
+    for (int i = 0; i < 4; ++i) if (opts[i] == cur) { idx = i; break; }
+    m->s.rewind_depth = opts[(idx + 1) % 4];
+}
+
+const char* launcher_model_rewind_depth_label(const LauncherModel* m) {
+    static char buf[16];
+    int d = m && m->s.rewind_depth > 0 ? m->s.rewind_depth : 50;
+    if (d != 25 && d != 50 && d != 75 && d != 100) d = 50;
+    snprintf(buf, sizeof(buf), "%d", d);
+    return buf;
+}
+
 
 void launcher_model_toggle_skip_fmv(LauncherModel* m) {
     m->s.auto_skip_fmv = !m->s.auto_skip_fmv;

@@ -146,6 +146,7 @@ static inline void launcher_profile_apply_psx(RecompLauncherCGameInfo* gi) {
     gi->has_frame_interp = 0; gi->has_spu_hq = 1; gi->has_skip_fmv = 0;
     gi->has_turbo_loads = 1; gi->has_bios = 1;
     gi->has_deadzone_pct = 1;
+    gi->has_rewind_depth = 1;
 }
 
 #ifdef __cplusplus
