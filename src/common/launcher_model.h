@@ -609,6 +609,8 @@ const char* launcher_model_interp_fps_label(const LauncherModel* m);  // "Displa
 void launcher_model_toggle_spu_hq(LauncherModel* m);
 void launcher_model_cycle_rewind_depth(LauncherModel* m);
 const char* launcher_model_rewind_depth_label(const LauncherModel* m);
+void launcher_model_cycle_rewind_interval(LauncherModel* m);
+const char* launcher_model_rewind_interval_label(const LauncherModel* m);
 void launcher_model_toggle_skip_fmv(LauncherModel* m);
 void launcher_model_toggle_turbo_loads(LauncherModel* m);
 void launcher_model_cycle_fullscreen(LauncherModel* m);        // Off -> Borderless -> Exclusive, wraps

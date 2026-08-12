@@ -41,6 +41,8 @@ extern "C" {
 #define RECOMP_LAUNCHER_HAS_MULTITAP_ANALOG 1
 /* Host may #ifdef this when reading Settings.rewind_depth. */
 #define RECOMP_LAUNCHER_HAS_REWIND_DEPTH 1
+/* Host may #ifdef this when reading Settings.rewind_interval. */
+#define RECOMP_LAUNCHER_HAS_REWIND_INTERVAL 1
 #define RECOMP_LAUNCHER_MAX_BINDINGS 24
 #define RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS 8
 
@@ -598,9 +600,11 @@ struct RecompLauncherCSettings {
     int assist_key_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
     int assist_pad_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
 
-    /* Local rewind snap-ring capacity (PSX). UI offers 25/50/75/100;
+    /* Local rewind snap-ring capacity (PSX). UI offers 50/100/150/200;
      * 0 = unset -> model seeds 50. See RECOMP_LAUNCHER_HAS_REWIND_DEPTH. */
     int  rewind_depth;
+    /* Frames between local rewind snaps. UI offers 1/4/8/12/15; 0 => 15. */
+    int  rewind_interval;
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----

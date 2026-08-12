@@ -2502,7 +2502,16 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
             launcher_model_cycle_rewind_depth(m);
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
             ImGui::SetTooltip(
-                "How many local rewind snapshots to keep (25 / 50 / 75 / 100).\n"
+                "How many local rewind snapshots to keep (50 / 100 / 150 / 200).\n"
+                "Takes effect on the next launch.");
+        }
+        row_label("Rewind interval", th);
+        if (ImGui::Button(launcher_model_rewind_interval_label(m), ImVec2(px(100), px(30))))
+            launcher_model_cycle_rewind_interval(m);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+            ImGui::SetTooltip(
+                "Frames between rewind snapshots (1 / 4 / 8 / 12 / 15).\n"
+                "FMV still densifies toward 4 when this is sparser.\n"
                 "Takes effect on the next launch.");
         }
     }

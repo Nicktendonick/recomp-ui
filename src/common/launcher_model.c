@@ -241,11 +241,14 @@ void launcher_model_init(LauncherModel* m,
     }
 
     if (io) m->s = *io;
-    /* Rewind buffer: 25/50/75/100; 0/invalid => 50. */
+    /* Rewind buffer: 50/100/150/200; interval 1/4/8/12/15. */
     {
         int d = m->s.rewind_depth;
-        if (d != 25 && d != 50 && d != 75 && d != 100)
+        if (d != 50 && d != 100 && d != 150 && d != 200)
             m->s.rewind_depth = 50;
+        int iv = m->s.rewind_interval;
+        if (iv != 1 && iv != 4 && iv != 8 && iv != 12 && iv != 15)
+            m->s.rewind_interval = 15;
     }
     if (m->has_sharp_filter) {
         m->s.linear_filter = m->s.linear_filter ? 1 : 0;
@@ -792,8 +795,11 @@ void launcher_model_restore_defaults(LauncherModel* m) {
     m->s = m->default_settings;
     {
         int d = m->s.rewind_depth;
-        if (d != 25 && d != 50 && d != 75 && d != 100)
+        if (d != 50 && d != 100 && d != 150 && d != 200)
             m->s.rewind_depth = 50;
+        int iv = m->s.rewind_interval;
+        if (iv != 1 && iv != 4 && iv != 8 && iv != 12 && iv != 15)
+            m->s.rewind_interval = 15;
     }
     m->defaults_modal_open = false;
 }
@@ -1143,9 +1149,9 @@ void launcher_model_toggle_spu_hq(LauncherModel* m) {
 
 void launcher_model_cycle_rewind_depth(LauncherModel* m) {
     if (!m || !m->has_rewind_depth) return;
-    static const int opts[4] = {25, 50, 75, 100};
+    static const int opts[4] = {50, 100, 150, 200};
     int cur = m->s.rewind_depth;
-    int idx = 1; /* default 50 */
+    int idx = 0; /* default 50 */
     for (int i = 0; i < 4; ++i) if (opts[i] == cur) { idx = i; break; }
     m->s.rewind_depth = opts[(idx + 1) % 4];
 }
@@ -1153,7 +1159,24 @@ void launcher_model_cycle_rewind_depth(LauncherModel* m) {
 const char* launcher_model_rewind_depth_label(const LauncherModel* m) {
     static char buf[16];
     int d = m && m->s.rewind_depth > 0 ? m->s.rewind_depth : 50;
-    if (d != 25 && d != 50 && d != 75 && d != 100) d = 50;
+    if (d != 50 && d != 100 && d != 150 && d != 200) d = 50;
+    snprintf(buf, sizeof(buf), "%d", d);
+    return buf;
+}
+
+void launcher_model_cycle_rewind_interval(LauncherModel* m) {
+    if (!m || !m->has_rewind_depth) return;
+    static const int opts[5] = {1, 4, 8, 12, 15};
+    int cur = m->s.rewind_interval;
+    int idx = 4; /* default 15 */
+    for (int i = 0; i < 5; ++i) if (opts[i] == cur) { idx = i; break; }
+    m->s.rewind_interval = opts[(idx + 1) % 5];
+}
+
+const char* launcher_model_rewind_interval_label(const LauncherModel* m) {
+    static char buf[16];
+    int d = m && m->s.rewind_interval > 0 ? m->s.rewind_interval : 15;
+    if (d != 1 && d != 4 && d != 8 && d != 12 && d != 15) d = 15;
     snprintf(buf, sizeof(buf), "%d", d);
     return buf;
 }
