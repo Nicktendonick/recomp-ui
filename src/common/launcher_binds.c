@@ -179,7 +179,8 @@ static const char* kHotkeyKey[LNG_HK_COUNT] = {
     "Fullscreen", "Reset", "Pause", "PauseDimmed", "Turbo",
     "WindowBigger", "WindowSmaller", "VolumeUp", "VolumeDown",
     "DisplayPerf", "ToggleRenderer",
-    "SolarBrighter", "SolarDimmer", "SolarLive"
+    "SolarBrighter", "SolarDimmer", "SolarLive",
+    "Rewind"
 };
 // Built-in defaults (shown when config.ini has no line; "" = unbound).
 static const char* kHotkeyDef[LNG_HK_COUNT] = {
@@ -187,7 +188,8 @@ static const char* kHotkeyDef[LNG_HK_COUNT] = {
     /* WindowBigger/Smaller unbound; VolumeUp/Down default keypad +/-
      * (psxrecomp host_keymap reads these from [KeyMap]). */
     "", "", "Keypad +", "Keypad -", "F", "R",
-    "", "", ""
+    "", "", "",
+    "F8"
 };
 
 static void copy_str(char* d, size_t cap, const char* s) {

@@ -50,7 +50,8 @@ static const char* kHotkeyNames[LNG_HK_COUNT] = {
     "Fullscreen", "Reset", "Pause", "Pause (dimmed)", "Fast-forward",
     "Window bigger", "Window smaller", "Volume up", "Volume down",
     "FPS readout", "Toggle renderer",
-    "Solar level up", "Solar level down", "Resume live solar"
+    "Solar level up", "Solar level down", "Resume live solar",
+    "Rewind"
 };
 static const char* kViewNames[7] = {
     "Dashboard", "Settings", "Controller", "Netplay", "Mods",
