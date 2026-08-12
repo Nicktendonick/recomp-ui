@@ -488,6 +488,7 @@ void launcher_model_init(LauncherModel* m,
     m->setup_bios_needs_regen = false;
     m->bios_confirm_open = false;
     m->bios_pending_path[0] = '\0';
+    m->setup_wizard_suspended_for_bios = false;
     m->bios_switch_uncommitted = false;
     m->bios_revert_path[0] = '\0';
     m->bios_play_modal_open = false;
@@ -1472,6 +1473,16 @@ static void lm_bios_commit_uncommitted(LauncherModel* m) {
     lm_persist_setup_sidecars(m);
 }
 
+/* Re-open first-run after a BIOS confirm / failed Generate kicked from it. */
+static void lm_restore_setup_wizard_after_bios(LauncherModel* m, int page) {
+    if (!m) return;
+    if (m->setup_wizard_suspended_for_bios || m->prepare_required_before_continue) {
+        m->setup_wizard_open = true;
+        m->setup_page = page;
+    }
+    m->setup_wizard_suspended_for_bios = false;
+}
+
 /* Apply pending/current BIOS and start Generate & rebuild without the full
  * first-run wizard (progress modal only). Falls back to the wizard when the
  * disc or toolchain is missing. */
@@ -1480,6 +1491,7 @@ static void lm_bios_kick_generate(LauncherModel* m) {
     if (m->setup_preparing) return; /* ignore double-clicks / overlapping jobs */
     if (!m->setup_wizard_supported) {
         lm_bios_revert_uncommitted(m);
+        m->setup_wizard_suspended_for_bios = false;
         return;
     }
     m->setup_wizard_open = false;
@@ -1491,22 +1503,25 @@ static void lm_bios_kick_generate(LauncherModel* m) {
             m->setup_tc_ready = true;
         if (!m->setup_tc_ready) {
             lm_bios_revert_uncommitted(m);
-            m->setup_wizard_open = true;
-            m->setup_page = 0;
+            lm_restore_setup_wizard_after_bios(m, 0);
             return;
         }
     }
     if (m->rom_present && m->rom_full[0] &&
         (m->prepare_with_progress_cb || m->prepare_disc_cb)) {
-        /* Stage disc + BIOS sidecars so the host CLI gets --disc/--bios. */
+        /* Stage disc + BIOS sidecars so the host CLI gets --disc/--bios.
+         * Keep setup_wizard_suspended_for_bios so a failed job reopens setup. */
         lm_persist_setup_sidecars(m);
         launcher_model_start_prepare_disc(m, m->rom_full);
         return;
     }
     /* Need a disc pick — open the setup page, not a silent no-op. */
     lm_bios_revert_uncommitted(m);
-    m->setup_wizard_open = true;
-    m->setup_page = 1;
+    lm_restore_setup_wizard_after_bios(m, 1);
+    if (!m->setup_wizard_open) {
+        m->setup_wizard_open = true;
+        m->setup_page = 1;
+    }
 }
 
 void launcher_model_request_bios_path(LauncherModel* m, const char* path) {
@@ -1568,6 +1583,11 @@ void launcher_model_request_bios_path(LauncherModel* m, const char* path) {
         safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
                   "This retail BIOS is not compiled into the current build. "
                   "Generate & rebuild to add it (or Use OpenBIOS).");
+    /* Do not nest Switch BIOS? under First-run setup — ImGui soft-locks. */
+    if (m->setup_wizard_open) {
+        m->setup_wizard_suspended_for_bios = true;
+        m->setup_wizard_open = false;
+    }
     m->bios_confirm_open = true;
 }
 
@@ -1588,6 +1608,10 @@ void launcher_model_bios_confirm_cancel(LauncherModel* m) {
     if (!m) return;
     m->bios_confirm_open = false;
     m->bios_pending_path[0] = '\0';
+    if (m->setup_wizard_suspended_for_bios) {
+        m->setup_wizard_suspended_for_bios = false;
+        m->setup_wizard_open = true;
+    }
     launcher_model_refresh_bios_status(m);
 }
 
@@ -2114,6 +2138,7 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
             safe_copy(m->relaunch_exe, sizeof(m->relaunch_exe), out_path);
             /* BIOS switch sticks only after a successful rebuild. */
             lm_bios_commit_uncommitted(m);
+            m->setup_wizard_suspended_for_bios = false;
             /* Sidecars beside build/<exe> before the host execs it. */
             lm_persist_setup_sidecars(m);
             m->setup_prepare_satisfied = true;
@@ -2154,6 +2179,7 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
                                     : (kind == PREP_JOB_FMV_TIMING
                                            ? "FMV timing apply failed."
                                            : "Rebuild failed.")));
+            lm_restore_setup_wizard_after_bios(m, 1);
         }
         return;
     }
@@ -2171,6 +2197,7 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
             return;
         }
         lm_bios_commit_uncommitted(m);
+        m->setup_wizard_suspended_for_bios = false;
         m->setup_prepare_satisfied = true;
         safe_copy(m->setup_status, sizeof(m->setup_status),
                   (m->prepare_success_status && m->prepare_success_status[0])
@@ -2181,6 +2208,7 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
         m->setup_status[0] = '\0';
         safe_copy(m->setup_error, sizeof(m->setup_error),
                   err[0] ? err : "Disc prepare failed.");
+        lm_restore_setup_wizard_after_bios(m, 1);
     }
 }
 

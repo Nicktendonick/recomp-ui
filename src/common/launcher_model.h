@@ -404,6 +404,10 @@ typedef struct {
     /* Confirm before persisting a BIOS switch that requires Generate & rebuild. */
     bool      bios_confirm_open;
     char      bios_pending_path[512]; // "" = OpenBIOS; absolute otherwise
+    /* First-run wizard was open when Switch BIOS? opened — keep it closed so
+     * ImGui does not nest two PopupModals (soft-lock). Restored on cancel or
+     * after a failed prepare/rebuild kicked from that confirm. */
+    bool      setup_wizard_suspended_for_bios;
     /* Staged BIOS switch: sidecars updated for the generate CLI, but reverted
      * if prepare/rebuild fails so a failed job does not stick the new pick. */
     bool      bios_switch_uncommitted;
