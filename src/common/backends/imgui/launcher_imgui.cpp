@@ -842,27 +842,6 @@ void stepper(const char* id, int value, const char* suffix, int* out_delta) {
     ImGui::PopID();
 }
 
-// ±1 stepper for the Genesis widescreen "extra cells per side" control. Unlike
-// the ±5 `stepper` above it reads its display string from the model
-// (launcher_model_ws_cells_label => "8 cells") so the clamp/format live in one
-// place, and it steps by a single cell.
-void ws_cells_stepper(const char* id, LauncherModel* m, int* out_delta) {
-    ImGui::PushID(id);
-    const float bh = px(30), fw = px(72);
-    if (ImGui::Button("-", ImVec2(px(32), bh))) *out_delta = -1;
-    ImGui::SameLine(0, px(6));
-    const char* buf = launcher_model_ws_cells_label(m);
-    float cx = ImGui::GetCursorPosX();
-    ImVec2 ts = ImGui::CalcTextSize(buf);
-    ImGui::SetCursorPosX(cx + (fw - ts.x) * 0.5f);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(buf);
-    ImGui::SameLine(0, 0);
-    ImGui::SetCursorPosX(cx + fw + px(6));
-    if (ImGui::Button("+", ImVec2(px(32), bh))) *out_delta = +1;
-    ImGui::PopID();
-}
-
 // "Label ......... [control]" row: label baseline-aligned to the control.
 // col_w > 0 reserves a FIXED label column so the control starts at the same x
 // on every row — the caller passes the widest label's width (+gap) to line all
@@ -2196,7 +2175,8 @@ bool any_deep_display(const LauncherModel* m) {
     return m->has_window_size || m->has_renderer || m->has_supersampling ||
            m->has_antialiasing || m->has_texture_filter || m->has_screen_kind ||
            m->has_frame_interp || m->has_skip_fmv ||
-           m->has_geometry_precision;   /* has_turbo_loads draws no row — see below */
+           m->has_geometry_precision ||
+           m->has_rewind_depth;   /* has_turbo_loads draws no row — see below */
 }
 
 // Whether the DISPLAY card should grow to fit its content (AutoResizeY) rather
@@ -2207,25 +2187,12 @@ bool any_deep_display(const LauncherModel* m) {
 // the fixed height (byte-identical to before this console existed).
 bool video_card_grows(const LauncherModel* m) {
     if (any_deep_display(m)) return true;
-    if (m->adaptive_view_supported) return true;
     if (m->has_sharp_filter || m->has_affine_filter) return true;
     if (m->num_display_layouts > 0) return true;
     // NES legacy-surface additions (Integer scaling row, HD texture pack block)
     // add extra rows the fixed no_scroll band wasn't sized for.
     if (m->has_integer_scale || m->hdpack_supported) return true;
-    const SystemProfile* prof = (const SystemProfile*)m->profile;
-    return prof && prof->video.widescreen_cells &&
-           m->widescreen_supported && m->s.widescreen != 0;
-}
-
-// Inline amber "EXPERIMENTAL" tag, drawn on the same row right after a control
-// whose feature is not yet production-ready. Currently every SNES 16:9
-// widescreen path is experimental (per-game rendering still maturing), so the
-// widescreen checkbox always carries this marker. Uses the same th.warn amber
-// as the other cautionary labels (e.g. the MSU-1 notice).
-static void experimental_tag(const LauncherTheme& th) {
-    ImGui::SameLine(0, px(8));
-    ImGui::TextColored(col(th.warn), "EXPERIMENTAL");
+    return false;
 }
 
 void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
@@ -2242,7 +2209,6 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
             float t = ImGui::CalcTextSize("Affine background smoothing").x;
             if (t > cw) cw = t;
         }
-        { float t = ImGui::CalcTextSize("View mode").x; if (t > cw) cw = t; }
         if (m->has_integer_scale) { float t = ImGui::CalcTextSize("Integer scaling").x; if (t > cw) cw = t; }
         cw += px(18.0f);
         row_label("Window scale", th, cw);
@@ -2287,28 +2253,6 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
             bool affine = m->s.affine_filter != 0;
             if (ImGui::Checkbox("##affine_filter", &affine))
                 launcher_model_toggle_affine_filter(m);
-        }
-        if (m->aspect_mask || m->num_aspect_labels > 0 ||
-            m->widescreen_supported || m->adaptive_view_supported) {
-            row_label(m->aspect_setting_label ? m->aspect_setting_label : "View mode",
-                      th, cw);
-            if (ImGui::Button(launcher_model_view_mode_label(m),
-                              ImVec2(px(180), px(30)))) {
-                launcher_model_cycle_view_mode(m);
-            }
-            if (m->aspect_setting_help && ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", m->aspect_setting_help);
-            if (!m->aspect_labels || m->aspect_experimental)
-                experimental_tag(th);
-            // Genesis-style "extra cells per side" stepper: only when the
-            // console opts in (video.widescreen_cells) AND widescreen is on.
-            const SystemProfile* wprof = (const SystemProfile*)m->profile;
-            if (wprof && wprof->video.widescreen_cells &&
-                m->s.widescreen != 0 && !m->s.adaptive_view) {
-                row_label("Extra cells / side", th, cw);
-                int d = 0; ws_cells_stepper("wscells", m, &d);
-                if (d) launcher_model_ws_cells_delta(m, d);
-            }
         }
         // HD texture packs (NES module, Mesen hires.txt format): one line —
         //   [x] HD texture pack   …folder tail   [Browse]
@@ -2399,19 +2343,6 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         ImGui::PopID();
     }
 
-    if (m->aspect_mask || m->num_aspect_labels > 0 ||
-        m->widescreen_supported || m->adaptive_view_supported) {
-        row_label(m->aspect_setting_label ? m->aspect_setting_label : "View mode", th);
-        if (ImGui::Button(launcher_model_view_mode_label(m),
-                          ImVec2(px(180), px(30)))) {
-            launcher_model_cycle_view_mode(m);
-        }
-        if (m->aspect_setting_help && ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", m->aspect_setting_help);
-        if (!m->aspect_labels || m->aspect_experimental)
-            experimental_tag(th);
-    }
-
     if (m->has_sharp_filter) {
         row_label("Scaling filter", th);
         if (ImGui::Button(launcher_model_scaling_filter_label(m),
@@ -2493,6 +2424,26 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         row_label("Skip FMVs", th);
         bool sk = m->s.auto_skip_fmv != 0;
         if (ImGui::Checkbox("##skipfmv", &sk)) launcher_model_toggle_skip_fmv(m);
+    }
+
+    if (m->has_rewind_depth) {
+        row_label("Rewind buffer", th);
+        if (ImGui::Button(launcher_model_rewind_depth_label(m), ImVec2(px(100), px(30))))
+            launcher_model_cycle_rewind_depth(m);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+            ImGui::SetTooltip(
+                "How many local rewind snapshots to keep (50 / 100 / 150 / 200).\n"
+                "Takes effect on the next launch.");
+        }
+        row_label("Rewind interval", th);
+        if (ImGui::Button(launcher_model_rewind_interval_label(m), ImVec2(px(100), px(30))))
+            launcher_model_cycle_rewind_interval(m);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+            ImGui::SetTooltip(
+                "Frames between rewind snapshots (1 / 4 / 8 / 12 / 15).\n"
+                "FMV still densifies toward 4 when this is sparser.\n"
+                "Takes effect on the next launch.");
+        }
     }
 
     /* Turbo loads is deliberately NOT a Display row on any console. Load
@@ -3126,20 +3077,55 @@ const char* settings_key_label(int scancode) {
     return (name && name[0]) ? name : "(unbound)";
 }
 
+static const char* settings_pad_button_label(int code) {
+    const char* name = SDL_GetGamepadStringForButton((LNG_GamepadButton)code);
+    if (!name || !name[0]) return "button";
+    if (!std::strcmp(name, "back")) return "select";
+    if (!std::strcmp(name, "leftstick")) return "l3";
+    if (!std::strcmp(name, "rightstick")) return "r3";
+    if (!std::strcmp(name, "leftshoulder")) return "l1";
+    if (!std::strcmp(name, "rightshoulder")) return "r1";
+    return name;
+}
+
+static bool settings_pad_button_is_select(int code) {
+    return std::strcmp(settings_pad_button_label(code), "select") == 0;
+}
+
+static int button_mask_count(uint32_t mask) {
+    int n = 0;
+    while (mask) {
+        n += (int)(mask & 1u);
+        mask >>= 1;
+    }
+    return n;
+}
+
 void settings_pad_label(int binding, char* out, size_t capacity) {
     if (!out || !capacity) return;
     const char* name = nullptr;
-    char text[48] = {};
+    char text[96] = {};
     if (RECOMP_LAUNCHER_PAD_IS_BUTTON(binding)) {
         int code = RECOMP_LAUNCHER_PAD_BUTTON_CODE(binding);
-        name = SDL_GetGamepadStringForButton((LNG_GamepadButton)code);
-        snprintf(text, sizeof text, "%s", (name && name[0]) ? name : "button");
+        snprintf(text, sizeof text, "%s", settings_pad_button_label(code));
     } else if (RECOMP_LAUNCHER_PAD_IS_AXIS(binding)) {
         int code = RECOMP_LAUNCHER_PAD_AXIS_CODE(binding);
         name = SDL_GetGamepadStringForAxis((LNG_GamepadAxis)code);
         snprintf(text, sizeof text, "%s%c",
                  (name && name[0]) ? name : "axis",
                  RECOMP_LAUNCHER_PAD_AXIS_POSITIVE(binding) ? '+' : '-');
+    } else if (RECOMP_LAUNCHER_PAD_IS_BUTTON_COMBO(binding)) {
+        uint32_t mask = (uint32_t)RECOMP_LAUNCHER_PAD_BUTTON_COMBO_MASK(binding);
+        for (int code = 0; code < 32; ++code) {
+            if ((mask & ((uint32_t)1u << code)) == 0)
+                continue;
+            if (text[0])
+                strncat(text, " + ", sizeof(text) - strlen(text) - 1);
+            strncat(text, settings_pad_button_label(code),
+                    sizeof(text) - strlen(text) - 1);
+        }
+        if (!text[0])
+            snprintf(text, sizeof text, "(unbound)");
     } else {
         snprintf(text, sizeof text, "(unbound)");
     }
@@ -3153,10 +3139,13 @@ void draw_assist_binding_editor(LauncherModel* m, const LauncherTheme& th,
         !m->assist_binding_labels)
         return;
     ImGui::PushStyleColor(ImGuiCol_Text, col(th.accent2));
-    ImGui::TextUnformatted("ASSIST CONTROLS");
+    ImGui::TextUnformatted(m->has_assist_tools ? "ASSIST CONTROLS" : "HOST SHORTCUTS");
     ImGui::PopStyleColor();
-    ImGui::TextColored(col(th.text_muted),
-                       "Global controls; they only operate while Assist Tools is enabled.");
+    ImGui::TextColored(
+        col(th.text_muted),
+        m->has_assist_tools
+            ? "Global controls; they only operate while Assist Tools is enabled."
+            : "Press a controller button or chord.");
     if (ImGui::BeginTable(table_id, 3, ImGuiTableFlags_SizingFixedFit |
                                       ImGuiTableFlags_RowBg)) {
         ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed,
@@ -3195,7 +3184,9 @@ void draw_assist_binding_editor(LauncherModel* m, const LauncherTheme& th,
         }
         ImGui::EndTable();
     }
-    if (show_reset && ImGui::Button("Reset Assist Controls"))
+    if (show_reset && ImGui::Button(m->has_assist_tools
+                                        ? "Reset Assist Controls"
+                                        : "Reset Host Shortcuts"))
         launcher_model_reset_assist_bindings(m);
     if (m->capturing && m->capture_assist)
         ImGui::TextColored(col(th.warn), "Listening... (Esc cancels)");
@@ -3204,11 +3195,13 @@ void draw_assist_binding_editor(LauncherModel* m, const LauncherTheme& th,
 void draw_controller_assist_shortcuts(LauncherModel* m,
                                       const LauncherTheme& th) {
     ImGui::PushStyleColor(ImGuiCol_Text, col(th.accent2));
-    ImGui::TextUnformatted("ASSIST SHORTCUTS");
+    ImGui::TextUnformatted(m->has_assist_tools ? "ASSIST SHORTCUTS" : "HOST SHORTCUTS");
     ImGui::PopStyleColor();
     ImGui::SameLine();
     ImGui::TextColored(col(th.text_muted),
-                       "(global; requires Assist Tools)");
+                       m->has_assist_tools
+                           ? "(global; requires Assist Tools)"
+                           : "(button chords supported)");
     if (ImGui::BeginTable("controller_assist_binds", 2,
                           ImGuiTableFlags_SizingStretchSame)) {
         for (int action = 0;
@@ -3218,20 +3211,22 @@ void draw_controller_assist_shortcuts(LauncherModel* m,
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted(m->assist_binding_labels[action]);
             ImGui::SameLine(0, px(8));
-            bool capture_key = m->capturing && m->capture_assist &&
-                               !m->capture_pad && m->capture_btn == action;
-            if (ImGui::Button(
-                    capture_key ? "[ key... ]" :
-                        settings_key_label(m->s.assist_key_bind[action]),
-                    ImVec2(px(105), 0)))
-                launcher_model_begin_assist_capture(m, action, false);
-            ImGui::SameLine(0, px(5));
+            if (m->has_assist_tools) {
+                bool capture_key = m->capturing && m->capture_assist &&
+                                   !m->capture_pad && m->capture_btn == action;
+                if (ImGui::Button(
+                        capture_key ? "[ key... ]" :
+                            settings_key_label(m->s.assist_key_bind[action]),
+                        ImVec2(px(105), 0)))
+                    launcher_model_begin_assist_capture(m, action, false);
+                ImGui::SameLine(0, px(5));
+            }
             bool capture_pad = m->capturing && m->capture_assist &&
                                m->capture_pad && m->capture_btn == action;
             char pad[48];
             settings_pad_label(m->s.assist_pad_bind[action], pad, sizeof pad);
             if (ImGui::Button(capture_pad ? "[ button... ]" : pad,
-                              ImVec2(px(135), 0)))
+                              ImVec2(px(m->has_assist_tools ? 135 : 170), 0)))
                 launcher_model_begin_assist_capture(m, action, true);
             ImGui::PopID();
         }
@@ -3718,7 +3713,8 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
         // value per action, independent of a console bridge's alternate-slot
         // format (for example N64 input.cfg). Keep that opt-in store on its
         // own two-chip path instead of accidentally editing the native store.
-        const int bpi = m->settings_bindings
+        const bool settings_player_binds = m->settings_bindings && !cfg_psx;
+        const int bpi = settings_player_binds
             ? 1 : (spec.binds_per_input < 1 ? 1 : spec.binds_per_input);
 
         // Stores that follow the input SOURCE (N64: one shared table per device
@@ -3731,7 +3727,7 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
         // A pad-bind console (Genesis) offers a KEY chip AND a GAMEPAD chip per
         // row — the legacy launcher's "Set key" / "Set pad" pair. Otherwise the
         // grid is keyboard-only, exactly as before.
-        const bool has_pad = spec.has_pad_binds != 0 || m->settings_bindings;
+        const bool has_pad = spec.has_pad_binds != 0 || settings_player_binds;
 
         // When the player's source is a gamepad the N64 store captures pad
         // fields, not keys — reflect that in the card title and the capture
@@ -3807,7 +3803,7 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
                     // KEY chip
                     const bool cap_key = m->capturing && !m->capture_pad && m->capture_btn == b;
                     if (cap_key) ImGui::PushStyleColor(ImGuiCol_Button, col(th.accent));
-                    const char* key_text = m->settings_bindings
+                    const char* key_text = settings_player_binds
                         ? settings_key_label(m->s.player_key_bind[p][b])
                         : m->binds[p][b];
                     if (ImGui::Button(cap_key ? "[ press a key... ]" : key_text, ImVec2(chip_w, 0)))
@@ -3821,7 +3817,7 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
                         char settings_pad[48];
                         settings_pad_label(m->s.player_pad_bind[p][b],
                                            settings_pad, sizeof settings_pad);
-                        const char* pl = m->settings_bindings
+                        const char* pl = settings_player_binds
                             ? settings_pad
                             : (m->pad_binds[p][b][0]
                                 ? m->pad_binds[p][b] : "(unbound)");
@@ -3838,7 +3834,7 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
         }
         ImGui::Spacing();
         if (ImGui::Button("Reset to Defaults")) {
-            if (m->settings_bindings)
+            if (settings_player_binds)
                 launcher_model_reset_player_bindings(m, m->cfg_player);
             else
                 launcher_binds_reset_player(m, m->cfg_player + 1);
@@ -3868,7 +3864,7 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
         } end_panel();
     }
 
-    if (m->settings_bindings && m->has_assist_tools) {
+    if (m->settings_bindings) {
         if (begin_panel("cfg_assist_binds", 0)) {
             draw_controller_assist_shortcuts(m, th);
         } end_panel();
@@ -7348,7 +7344,8 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
                     ImGui::SetTooltip("Wait for the current job to finish");
                 else if (m->has_bios && !m->setup_bios_ok)
                     ImGui::SetTooltip("BIOS check required");
-                else if (m->profile && m->profile->verify.mode == 1 &&
+                else if (m->netplay_supported &&
+                         m->profile && m->profile->verify.mode == 1 &&
                          !m->verify.netplay_ok)
                     ImGui::SetTooltip("Disc mount / track layout not accepted");
             }
@@ -7813,10 +7810,23 @@ bool try_capture(LauncherModel* m, const SDL_Event& ev) {
     // axis push (past a dead threshold) commits. PSX only accepts events from
     // the player's selected Input source device.
     if (m->capturing && m->capture_pad) {
-        if (m->settings_bindings) {
+        if (m->settings_bindings && m->capture_assist) {
             if (ev.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+                const int button = (int)LNG_EVGBTN(ev);
+                uint32_t mask = launcher_input_gamepad_button_mask(
+                    (uint32_t)LNG_EVGBTNWHICH(ev));
+                if (button >= 0 && button < 32)
+                    mask |= (uint32_t)1u << button;
+                if (button_mask_count(mask) >= 2) {
+                    launcher_model_set_captured_pad(
+                        m, RECOMP_LAUNCHER_PAD_BUTTON_COMBO((int)mask));
+                    launcher_model_cancel_capture(m);
+                    return true;
+                }
+                if (settings_pad_button_is_select(button))
+                    return true;
                 launcher_model_set_captured_pad(
-                    m, RECOMP_LAUNCHER_PAD_BUTTON((int)LNG_EVGBTN(ev)));
+                    m, RECOMP_LAUNCHER_PAD_BUTTON(button));
                 launcher_model_cancel_capture(m);
                 return true;
             }
@@ -7973,7 +7983,7 @@ bool try_capture(LauncherModel* m, const SDL_Event& ev) {
         // Single-bind stores (SNES/PSX/GBA) use the legacy scancode setter
         // (capture_slot is always 0 for them).
         const SystemProfile* prof = (const SystemProfile*)m->profile;
-        if (m->settings_bindings)
+        if (m->settings_bindings && m->capture_assist)
             launcher_model_set_captured_key(m, (int)LNG_EVSCAN(ev));
         else if (prof && prof->controller.binds_per_input >= 2 && prof->id && !strcmp(prof->id, "psx"))
             launcher_binds_set_button_slot(m, m->cfg_player + 1, m->capture_btn,

@@ -89,6 +89,8 @@ typedef enum {
     LNG_HK_TURBO, LNG_HK_WINDOW_BIGGER, LNG_HK_WINDOW_SMALLER,
     LNG_HK_VOLUME_UP, LNG_HK_VOLUME_DOWN, LNG_HK_DISPLAY_PERF, LNG_HK_TOGGLE_RENDERER,
     LNG_HK_SOLAR_BRIGHTER, LNG_HK_SOLAR_DIMMER, LNG_HK_SOLAR_LIVE,
+    LNG_HK_REWIND, /* PSX local rewind filmstrip → [KeyMap] Rewind */
+    LNG_HK_SAVE_STATE_MENU, /* PSX save-state slot menu → [KeyMap] SaveStateMenu */
     LNG_HK_COUNT
 } LngHotkey;
 
@@ -336,6 +338,7 @@ typedef struct {
     bool     has_screen_kind;
     bool     has_frame_interp;
     bool     has_spu_hq;
+    bool     has_rewind_depth;
     bool     has_skip_fmv;
     bool     has_turbo_loads;
     // PSX geometry precision: sub-pixel vertices + perspective-correct UVs.
@@ -402,6 +405,10 @@ typedef struct {
     /* Confirm before persisting a BIOS switch that requires Generate & rebuild. */
     bool      bios_confirm_open;
     char      bios_pending_path[512]; // "" = OpenBIOS; absolute otherwise
+    /* First-run wizard was open when Switch BIOS? opened — keep it closed so
+     * ImGui does not nest two PopupModals (soft-lock). Restored on cancel or
+     * after a failed prepare/rebuild kicked from that confirm. */
+    bool      setup_wizard_suspended_for_bios;
     /* Staged BIOS switch: sidecars updated for the generate CLI, but reverted
      * if prepare/rebuild fails so a failed job does not stick the new pick. */
     bool      bios_switch_uncommitted;
@@ -605,6 +612,10 @@ void launcher_model_toggle_frame_interp(LauncherModel* m);
 void launcher_model_cycle_interp_fps(LauncherModel* m);        // {0,90,120,144,165,240} wrap
 const char* launcher_model_interp_fps_label(const LauncherModel* m);  // "Display refresh"/"90 fps"
 void launcher_model_toggle_spu_hq(LauncherModel* m);
+void launcher_model_cycle_rewind_depth(LauncherModel* m);
+const char* launcher_model_rewind_depth_label(const LauncherModel* m);
+void launcher_model_cycle_rewind_interval(LauncherModel* m);
+const char* launcher_model_rewind_interval_label(const LauncherModel* m);
 void launcher_model_toggle_skip_fmv(LauncherModel* m);
 void launcher_model_toggle_turbo_loads(LauncherModel* m);
 void launcher_model_cycle_fullscreen(LauncherModel* m);        // Off -> Borderless -> Exclusive, wraps

@@ -39,6 +39,10 @@ extern "C" {
 #define RECOMP_LAUNCHER_HAS_MULTITAP_ENABLED 1
 /* Host may #ifdef this when reading multitap_analog (DualShock-on-tap hack). */
 #define RECOMP_LAUNCHER_HAS_MULTITAP_ANALOG 1
+/* Host may #ifdef this when reading Settings.rewind_depth. */
+#define RECOMP_LAUNCHER_HAS_REWIND_DEPTH 1
+/* Host may #ifdef this when reading Settings.rewind_interval. */
+#define RECOMP_LAUNCHER_HAS_REWIND_INTERVAL 1
 #define RECOMP_LAUNCHER_MAX_BINDINGS 24
 #define RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS 8
 
@@ -47,11 +51,14 @@ extern "C" {
 #define RECOMP_LAUNCHER_PAD_BUTTON(code) (1 + (code))
 #define RECOMP_LAUNCHER_PAD_AXIS(code, positive) \
     (100 + ((code) * 2) + ((positive) ? 1 : 0))
+#define RECOMP_LAUNCHER_PAD_BUTTON_COMBO(mask) (1000 + (mask))
 #define RECOMP_LAUNCHER_PAD_IS_BUTTON(value) ((value) > 0 && (value) < 100)
-#define RECOMP_LAUNCHER_PAD_IS_AXIS(value) ((value) >= 100)
+#define RECOMP_LAUNCHER_PAD_IS_AXIS(value) ((value) >= 100 && (value) < 1000)
+#define RECOMP_LAUNCHER_PAD_IS_BUTTON_COMBO(value) ((value) >= 1000)
 #define RECOMP_LAUNCHER_PAD_BUTTON_CODE(value) ((value) - 1)
 #define RECOMP_LAUNCHER_PAD_AXIS_CODE(value) (((value) - 100) / 2)
 #define RECOMP_LAUNCHER_PAD_AXIS_POSITIVE(value) (((value) - 100) & 1)
+#define RECOMP_LAUNCHER_PAD_BUTTON_COMBO_MASK(value) ((value) - 1000)
 
 // N64 Transfer Pak slots — one per controller port.
 #define RECOMP_LAUNCHER_MAX_TPAKS 4
@@ -595,6 +602,12 @@ struct RecompLauncherCSettings {
                        [RECOMP_LAUNCHER_MAX_BINDINGS];
     int assist_key_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
     int assist_pad_bind[RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS];
+
+    /* Local rewind snap-ring capacity (PSX). UI offers 50/100/150/200;
+     * 0 = unset -> model seeds 50. See RECOMP_LAUNCHER_HAS_REWIND_DEPTH. */
+    int  rewind_depth;
+    /* Frames between local rewind snaps. UI offers 1/4/8/12/15; 0 => 15. */
+    int  rewind_interval;
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
@@ -991,6 +1004,9 @@ typedef struct RecompLauncherCGameInfo {
      * withdrawn from the UI while staying readable from game.toml/settings.toml
      * (psxrecomp ENHANCEMENTS.md G1.8/G1.9). Appended for ABI stability. */
     int  has_geometry_precision;
+
+    /* Local rewind buffer size control (Settings.rewind_depth). PSX only. */
+    int  has_rewind_depth;
 
     /* Master switch for the first-run setup wizard + Generate & rebuild UI.
      * Appended for ABI stability; zero-init keeps every existing host dark. */

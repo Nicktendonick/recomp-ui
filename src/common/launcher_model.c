@@ -50,7 +50,8 @@ static const char* kHotkeyNames[LNG_HK_COUNT] = {
     "Fullscreen", "Reset", "Pause", "Pause (dimmed)", "Fast-forward",
     "Window bigger", "Window smaller", "Volume up", "Volume down",
     "FPS readout", "Toggle renderer",
-    "Solar level up", "Solar level down", "Resume live solar"
+    "Solar level up", "Solar level down", "Resume live solar",
+    "Rewind", "Save states menu"
 };
 static const char* kViewNames[7] = {
     "Dashboard", "Settings", "Controller", "Netplay", "Mods",
@@ -125,6 +126,7 @@ void launcher_model_init(LauncherModel* m,
         m->has_screen_kind      = game->has_screen_kind != 0;
         m->has_frame_interp     = game->has_frame_interp != 0;
         m->has_spu_hq           = game->has_spu_hq != 0;
+        m->has_rewind_depth     = game->has_rewind_depth != 0;
         m->has_skip_fmv         = game->has_skip_fmv != 0;
         m->has_turbo_loads      = game->has_turbo_loads != 0;
         m->has_geometry_precision = game->has_geometry_precision != 0;
@@ -239,6 +241,15 @@ void launcher_model_init(LauncherModel* m,
     }
 
     if (io) m->s = *io;
+    /* Rewind buffer: 50/100/150/200; interval 1/4/8/12/15. */
+    {
+        int d = m->s.rewind_depth;
+        if (d != 50 && d != 100 && d != 150 && d != 200)
+            m->s.rewind_depth = 50;
+        int iv = m->s.rewind_interval;
+        if (iv != 1 && iv != 4 && iv != 8 && iv != 12 && iv != 15)
+            m->s.rewind_interval = 15;
+    }
     if (m->has_sharp_filter) {
         m->s.linear_filter = m->s.linear_filter ? 1 : 0;
         m->s.sharp_filter = m->s.sharp_filter ? 1 : 0;
@@ -477,6 +488,7 @@ void launcher_model_init(LauncherModel* m,
     m->setup_bios_needs_regen = false;
     m->bios_confirm_open = false;
     m->bios_pending_path[0] = '\0';
+    m->setup_wizard_suspended_for_bios = false;
     m->bios_switch_uncommitted = false;
     m->bios_revert_path[0] = '\0';
     m->bios_play_modal_open = false;
@@ -782,6 +794,14 @@ void launcher_model_request_restore_defaults(LauncherModel* m) {
 void launcher_model_restore_defaults(LauncherModel* m) {
     if (!launcher_model_can_restore_defaults(m)) return;
     m->s = m->default_settings;
+    {
+        int d = m->s.rewind_depth;
+        if (d != 50 && d != 100 && d != 150 && d != 200)
+            m->s.rewind_depth = 50;
+        int iv = m->s.rewind_interval;
+        if (iv != 1 && iv != 4 && iv != 8 && iv != 12 && iv != 15)
+            m->s.rewind_interval = 15;
+    }
     m->defaults_modal_open = false;
 }
 
@@ -1128,6 +1148,41 @@ void launcher_model_toggle_spu_hq(LauncherModel* m) {
     m->s.spu_hq = !m->s.spu_hq;
 }
 
+void launcher_model_cycle_rewind_depth(LauncherModel* m) {
+    if (!m || !m->has_rewind_depth) return;
+    static const int opts[4] = {50, 100, 150, 200};
+    int cur = m->s.rewind_depth;
+    int idx = 0; /* default 50 */
+    for (int i = 0; i < 4; ++i) if (opts[i] == cur) { idx = i; break; }
+    m->s.rewind_depth = opts[(idx + 1) % 4];
+}
+
+const char* launcher_model_rewind_depth_label(const LauncherModel* m) {
+    static char buf[16];
+    int d = m && m->s.rewind_depth > 0 ? m->s.rewind_depth : 50;
+    if (d != 50 && d != 100 && d != 150 && d != 200) d = 50;
+    snprintf(buf, sizeof(buf), "%d", d);
+    return buf;
+}
+
+void launcher_model_cycle_rewind_interval(LauncherModel* m) {
+    if (!m || !m->has_rewind_depth) return;
+    static const int opts[5] = {1, 4, 8, 12, 15};
+    int cur = m->s.rewind_interval;
+    int idx = 4; /* default 15 */
+    for (int i = 0; i < 5; ++i) if (opts[i] == cur) { idx = i; break; }
+    m->s.rewind_interval = opts[(idx + 1) % 5];
+}
+
+const char* launcher_model_rewind_interval_label(const LauncherModel* m) {
+    static char buf[16];
+    int d = m && m->s.rewind_interval > 0 ? m->s.rewind_interval : 15;
+    if (d != 1 && d != 4 && d != 8 && d != 12 && d != 15) d = 15;
+    snprintf(buf, sizeof(buf), "%d", d);
+    return buf;
+}
+
+
 void launcher_model_toggle_skip_fmv(LauncherModel* m) {
     m->s.auto_skip_fmv = !m->s.auto_skip_fmv;
 }
@@ -1418,6 +1473,16 @@ static void lm_bios_commit_uncommitted(LauncherModel* m) {
     lm_persist_setup_sidecars(m);
 }
 
+/* Re-open first-run after a BIOS confirm / failed Generate kicked from it. */
+static void lm_restore_setup_wizard_after_bios(LauncherModel* m, int page) {
+    if (!m) return;
+    if (m->setup_wizard_suspended_for_bios || m->prepare_required_before_continue) {
+        m->setup_wizard_open = true;
+        m->setup_page = page;
+    }
+    m->setup_wizard_suspended_for_bios = false;
+}
+
 /* Apply pending/current BIOS and start Generate & rebuild without the full
  * first-run wizard (progress modal only). Falls back to the wizard when the
  * disc or toolchain is missing. */
@@ -1426,6 +1491,7 @@ static void lm_bios_kick_generate(LauncherModel* m) {
     if (m->setup_preparing) return; /* ignore double-clicks / overlapping jobs */
     if (!m->setup_wizard_supported) {
         lm_bios_revert_uncommitted(m);
+        m->setup_wizard_suspended_for_bios = false;
         return;
     }
     m->setup_wizard_open = false;
@@ -1437,22 +1503,25 @@ static void lm_bios_kick_generate(LauncherModel* m) {
             m->setup_tc_ready = true;
         if (!m->setup_tc_ready) {
             lm_bios_revert_uncommitted(m);
-            m->setup_wizard_open = true;
-            m->setup_page = 0;
+            lm_restore_setup_wizard_after_bios(m, 0);
             return;
         }
     }
     if (m->rom_present && m->rom_full[0] &&
         (m->prepare_with_progress_cb || m->prepare_disc_cb)) {
-        /* Stage disc + BIOS sidecars so the host CLI gets --disc/--bios. */
+        /* Stage disc + BIOS sidecars so the host CLI gets --disc/--bios.
+         * Keep setup_wizard_suspended_for_bios so a failed job reopens setup. */
         lm_persist_setup_sidecars(m);
         launcher_model_start_prepare_disc(m, m->rom_full);
         return;
     }
     /* Need a disc pick — open the setup page, not a silent no-op. */
     lm_bios_revert_uncommitted(m);
-    m->setup_wizard_open = true;
-    m->setup_page = 1;
+    lm_restore_setup_wizard_after_bios(m, 1);
+    if (!m->setup_wizard_open) {
+        m->setup_wizard_open = true;
+        m->setup_page = 1;
+    }
 }
 
 void launcher_model_request_bios_path(LauncherModel* m, const char* path) {
@@ -1514,6 +1583,11 @@ void launcher_model_request_bios_path(LauncherModel* m, const char* path) {
         safe_copy(m->setup_bios_detail, sizeof(m->setup_bios_detail),
                   "This retail BIOS is not compiled into the current build. "
                   "Generate & rebuild to add it (or Use OpenBIOS).");
+    /* Do not nest Switch BIOS? under First-run setup — ImGui soft-locks. */
+    if (m->setup_wizard_open) {
+        m->setup_wizard_suspended_for_bios = true;
+        m->setup_wizard_open = false;
+    }
     m->bios_confirm_open = true;
 }
 
@@ -1534,6 +1608,10 @@ void launcher_model_bios_confirm_cancel(LauncherModel* m) {
     if (!m) return;
     m->bios_confirm_open = false;
     m->bios_pending_path[0] = '\0';
+    if (m->setup_wizard_suspended_for_bios) {
+        m->setup_wizard_suspended_for_bios = false;
+        m->setup_wizard_open = true;
+    }
     launcher_model_refresh_bios_status(m);
 }
 
@@ -1600,11 +1678,12 @@ bool launcher_model_can_finish_setup(const LauncherModel* m) {
     if (m->has_bios && !m->setup_bios_ok) return false;
     if (m->prepare_required_before_continue && !m->setup_prepare_satisfied)
         return false;
-    /* Disc titles: TOC / require_cue policy (netplay_ok) must pass before
-     * leaving first-run setup — Track-01-only dumps fail generate + netplay. */
+    /* Disc titles: local setup only needs a readable, title-matching mount.
+     * TOC / require_cue policy is a netplay gate; single-player titles can
+     * accept valid dumps whose track layout differs from the online policy. */
     if (m->profile && m->profile->verify.mode == 1) {
         if (m->verify.verdict == 0 || m->verify.verdict == 3) return false;
-        if (!m->verify.netplay_ok) return false;
+        if (m->netplay_supported && !m->verify.netplay_ok) return false;
     }
     return true;
 }
@@ -2060,6 +2139,7 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
             safe_copy(m->relaunch_exe, sizeof(m->relaunch_exe), out_path);
             /* BIOS switch sticks only after a successful rebuild. */
             lm_bios_commit_uncommitted(m);
+            m->setup_wizard_suspended_for_bios = false;
             /* Sidecars beside build/<exe> before the host execs it. */
             lm_persist_setup_sidecars(m);
             m->setup_prepare_satisfied = true;
@@ -2100,6 +2180,7 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
                                     : (kind == PREP_JOB_FMV_TIMING
                                            ? "FMV timing apply failed."
                                            : "Rebuild failed.")));
+            lm_restore_setup_wizard_after_bios(m, 1);
         }
         return;
     }
@@ -2117,6 +2198,7 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
             return;
         }
         lm_bios_commit_uncommitted(m);
+        m->setup_wizard_suspended_for_bios = false;
         m->setup_prepare_satisfied = true;
         safe_copy(m->setup_status, sizeof(m->setup_status),
                   (m->prepare_success_status && m->prepare_success_status[0])
@@ -2127,6 +2209,7 @@ void launcher_model_poll_prepare_disc(LauncherModel* m) {
         m->setup_status[0] = '\0';
         safe_copy(m->setup_error, sizeof(m->setup_error),
                   err[0] ? err : "Disc prepare failed.");
+        lm_restore_setup_wizard_after_bios(m, 1);
     }
 }
 
