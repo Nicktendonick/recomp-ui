@@ -348,6 +348,8 @@ typedef struct RecompLauncherCModResource {
     char file_description[128];
     int required;
     int verified;
+    /* "file" (default) or "directory". Appended for source compatibility. */
+    char format[64];
 } RecompLauncherCModResource;
 
 typedef struct RecompLauncherCModProvider {

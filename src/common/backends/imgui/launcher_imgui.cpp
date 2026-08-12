@@ -6407,8 +6407,15 @@ static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
                             if (ImGui::IsItemHovered())
                                 ImGui::SetTooltip("%s", resource.path);
                         }
-                        if (ImGui::Button(resource.path[0] ? "Change file"
-                                                           : "Select file")) {
+                        const bool directory_resource =
+                            std::strcmp(resource.format, "directory") == 0 ||
+                            std::strcmp(resource.format, "folder") == 0;
+                        if (ImGui::Button(
+                                resource.path[0]
+                                    ? (directory_resource ? "Change folder"
+                                                          : "Change file")
+                                    : (directory_resource ? "Select folder"
+                                                          : "Select file"))) {
                             std::vector<std::string> owned_patterns;
                             std::vector<const char*> patterns;
                             std::string remaining = resource.file_patterns;
@@ -6427,13 +6434,17 @@ static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
                             for (const std::string& pattern : owned_patterns)
                                 patterns.push_back(pattern.c_str());
                             char path[RECOMP_LAUNCHER_MOD_PATH_MAX] = {};
-                            if (launcher_pick_file(
-                                    resource.label,
-                                    patterns.empty() ? nullptr : patterns.data(),
-                                    (int)patterns.size(),
-                                    resource.file_description[0]
-                                        ? resource.file_description : nullptr,
-                                    path, sizeof(path))) {
+                            const bool picked = directory_resource
+                                ? launcher_pick_folder(resource.label, path,
+                                                       sizeof(path))
+                                : launcher_pick_file(
+                                      resource.label,
+                                      patterns.empty() ? nullptr : patterns.data(),
+                                      (int)patterns.size(),
+                                      resource.file_description[0]
+                                          ? resource.file_description : nullptr,
+                                      path, sizeof(path));
+                            if (picked) {
                                 if (!mods->feature_resource_set_path(
                                         mods->ctx, feature.package_id,
                                         feature.id, resource.id, path)) {
