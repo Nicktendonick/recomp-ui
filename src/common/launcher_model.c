@@ -1580,6 +1580,16 @@ void launcher_model_bios_play_cancel(LauncherModel* m) {
     m->bios_play_modal_open = false;
 }
 
+bool launcher_model_setup_media_confirm_only(const LauncherModel* m) {
+    if (!m || !m->setup_wizard_supported) return false;
+    if (m->prepare_required_before_continue) return false;
+    /* Codegen hosts keep prepare_* wired after the first Generate & rebuild.
+     * Missing that wiring means a cart / non-codegen first-run — keep the
+     * normal media picker copy, not the "confirm cleared paths" prompt. */
+    if (!m->prepare_with_progress_cb && !m->prepare_disc_cb) return false;
+    return true;
+}
+
 bool launcher_model_can_finish_setup(const LauncherModel* m) {
     if (!m) return false;
     if (m->setup_preparing) return false;

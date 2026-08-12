@@ -3924,18 +3924,24 @@ void np_connect_and_list(LauncherModel* m) {
     if (!np) return;
     if (np->set_player_name && m->s.netplay_player_name[0])
         np->set_player_name(np->ctx, m->s.netplay_player_name);
-    if (np->connect && (!np->connected || !np->connected(np->ctx)))
+    const bool already = np->connected && np->connected(np->ctx);
+    const bool in_flight = np->connecting && np->connecting(np->ctx);
+    if (np->connect && !already && !in_flight)
         (void)np->connect(np->ctx);
     if (np->request_list)
         np->request_list(np->ctx);
     m->netplay_list_fresh = true;
+    if (!already)
+        std::snprintf(m->netplay_status, sizeof(m->netplay_status),
+                      "Connecting to lobby server…");
 }
 
 /* Reload server lobby table + UDP-browse LAN hosts (BEACON) / file registry. */
 void np_refresh_lobby_list(LauncherModel* m) {
     np_connect_and_list(m);
     m->netplay_selected_lobby = -1;
-    m->netplay_status[0] = '\0';
+    /* Keep Connecting… status from np_connect_and_list; clear only when
+     * the caller is an explicit Refresh after a prior error. */
 }
 
 static void mod_note_error(LauncherModel* m);
@@ -4766,9 +4772,13 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
 
     ImGui::OpenPopup("LOBBY");
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(px(640), 0), ImGuiCond_Appearing);
-    if (!ImGui::BeginPopupModal("LOBBY", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    /* Always recenter: content height changes as members join/leave, and
+     * ImGuiCond_Appearing left the room modal stuck off-center after join. */
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(px(640), 0), ImGuiCond_Always);
+    const ImGuiWindowFlags lobby_flags =
+        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove;
+    if (!ImGui::BeginPopupModal("LOBBY", nullptr, lobby_flags)) return;
 
     /* Only file-backed LAN/Direct rooms show IP/Port. Server-list joins always
      * show the lobby URL — do not use Host Lobby's LAN checkbox or a stale
@@ -4969,6 +4979,13 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                 ImGui::TextColored(col(th.good), "Connected");
             else
                 ImGui::TextColored(col(th.text_muted), "Waiting");
+            if (occupied[slot] && slots[slot].bios_offer_valid &&
+                ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "BIOS: %s%s",
+                    slots[slot].bios_prefer_openbios ? "OpenBIOS" : "SCPH-1001",
+                    slots[slot].bios_can_scph1001 ? "" : " (no SCPH dump)");
+            }
             ImGui::TableSetColumnIndex(4);
             table_row_vcenter(member_row_h, text_h);
             /* RTT to that seat from local peer — never on the local row. */
@@ -5037,6 +5054,54 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
             ImGui::PopID();
         }
         ImGui::EndTable();
+    }
+    /* Session BIOS notice (OpenBIOS vs SCPH1001). Keep copy plain — hosts care
+     * about save-state compatibility, not kernel-RAM details.
+     * Orange OpenBIOS override only when a peer cannot run SCPH; host retail
+     * preference otherwise settles SCPH (even if a guest prefers OpenBIOS). */
+    {
+        int host_prefer_open = 0;
+        int host_found = 0;
+        int all_can_scph = 1;
+        int saw = 0;
+        for (int slot = 0; slot < max_slots; ++slot) {
+            if (!occupied[slot]) continue;
+            ++saw;
+            const int offer_ok = slots[slot].bios_offer_valid;
+            const int prefer_open = !offer_ok || slots[slot].bios_prefer_openbios;
+            const int can_scph = offer_ok && slots[slot].bios_can_scph1001;
+            if (slots[slot].is_host) {
+                host_found = 1;
+                host_prefer_open = prefer_open ? 1 : 0;
+            }
+            if (!can_scph) all_can_scph = 0;
+        }
+        if (saw >= 1 && host_found) {
+            ImGui::Spacing();
+            ImGui::PushTextWrapPos(0.0f);
+            if (host_prefer_open) {
+                ImGui::TextColored(
+                    col(th.good),
+                    "Host has selected OpenBIOS for this session.\n"
+                    "Note: Save states are not cross compatible with SCPH1001 "
+                    "and OpenBIOS sessions");
+            } else if (all_can_scph) {
+                ImGui::TextColored(
+                    col(th.good),
+                    "All users agree on proprietary BIOS SCPH1001.bin for this "
+                    "session.\n"
+                    "Note: Save states are not cross compatible with SCPH1001 "
+                    "and OpenBIOS sessions");
+            } else {
+                ImGui::TextColored(
+                    col(th.warn),
+                    "1 or more users lacks proprietary BIOS, using OpenBIOS for "
+                    "this session instead.\n"
+                    "Note: Save states are not cross compatible with SCPH1001 "
+                    "and OpenBIOS sessions");
+            }
+            ImGui::PopTextWrapPos();
+        }
     }
     ImGui::Spacing();
     {
@@ -5438,6 +5503,18 @@ void draw_netplay(LauncherModel* m, const LauncherTheme& th) {
     np_ingest_last_error(m, np);
     if (np->launch_pending && np->launch_pending(np->ctx))
         np_try_launch(m);
+
+    const bool np_online = np->connected && np->connected(np->ctx);
+    const bool np_connecting = np->connecting && np->connecting(np->ctx);
+    if (np_online && m->netplay_status[0] &&
+        std::strncmp(m->netplay_status, "Connecting", 10) == 0) {
+        m->netplay_status[0] = '\0';
+    } else if (!np_online && !np_connecting && m->netplay_list_fresh &&
+               m->netplay_status[0] &&
+               std::strncmp(m->netplay_status, "Connecting", 10) == 0) {
+        std::snprintf(m->netplay_status, sizeof(m->netplay_status),
+                      "Could not reach lobby server.");
+    }
 
     begin_container("netplay_lobbies", ImVec2(0, 0), ImGuiChildFlags_None);
     ImGui::TextColored(col(th.accent2), "LOBBIES");
@@ -6592,11 +6669,17 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
         ImGui::IsKeyPressed(ImGuiKey_Backspace, false))
         ImGui::SetKeyboardFocusHere();
     float play_x = origin.x + fullw - play_w;
-    if (m->view == LNG_VIEW_DASHBOARD && m->netplay_supported) {
+    if (m->netplay_supported &&
+        (m->view == LNG_VIEW_DASHBOARD || m->view == LNG_VIEW_SETTINGS ||
+         m->view == LNG_VIEW_CONTROLLER)) {
         const float net_w = px(170.0f);
         ImGui::SetCursorScreenPos(ImVec2(play_x - net_w - px(12.0f), cta_y));
         if (ImGui::Button("NETPLAY", ImVec2(net_w, play_h))) {
-            np_connect_and_list(m);
+            /* Open the page immediately; connect/list runs on first draw
+             * (and continues off-thread) so Windows DNS/TCP never freezes UI. */
+            m->netplay_list_fresh = false;
+            std::snprintf(m->netplay_status, sizeof(m->netplay_status),
+                          "Connecting to lobby server…");
             launcher_model_set_view(m, LNG_VIEW_NETPLAY);
         }
     }
@@ -6937,40 +7020,67 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
 
     /* ---- Page 1: BIOS / disc / generate -------------------------------- */
     const SetupPlatKind plat = setup_platform_kind(m->platform);
+    const bool media_confirm = launcher_model_setup_media_confirm_only(m);
 
-    ImGui::TextColored(col(th.accent), "Setup required");
-    ImGui::PushTextWrapPos(wrap_x);
-    if (plat == SETUP_PLAT_PSX && m->has_bios) {
-        ImGui::TextColored(col(th.text_muted),
-            "%s needs a playable %s before you can launch. This build includes "
-            "a bundled BIOS (OpenBIOS) by default. Setup also looks for a "
-            "retail SCPH1001.BIN beside the install and uses it when found; "
-            "otherwise OpenBIOS stays selected. Use a Redump-style .cue with "
-            "sibling .bin tracks (.iso is not accepted). Pick your %s below "
-            "(you must legally own these dumps).",
-            game, noun, noun);
-    } else if (plat == SETUP_PLAT_GBA && m->has_bios) {
-        ImGui::TextColored(col(th.text_muted),
-            "%s needs a Game Boy Advance BIOS dump and a playable %s before "
-            "you can launch. Pick both below (you must legally own these dumps).",
-            game, noun);
-    } else if (plat == SETUP_PLAT_SNES) {
-        ImGui::TextColored(col(th.text_muted),
-            "%s needs a playable Super Nintendo %s before you can launch. "
-            "Pick your file below (you must legally own this dump).",
-            game, noun);
-    } else if (m->has_bios) {
-        ImGui::TextColored(col(th.text_muted),
-            "%s needs a BIOS image and a playable %s before you can launch. "
-            "Pick both below (you must legally own these dumps).",
-            game, noun);
+    if (media_confirm) {
+        ImGui::TextColored(col(th.accent),
+                           m->has_bios ? "Confirm BIOS and disc"
+                                       : "Confirm disc");
+        ImGui::PushTextWrapPos(wrap_x);
+        if (plat == SETUP_PLAT_PSX && m->has_bios) {
+            ImGui::TextColored(col(th.text_muted),
+                "This build is already generated. Select a PlayStation BIOS "
+                "(or keep OpenBIOS) and a Redump-style .cue with sibling .bin "
+                "tracks so %s can launch. Your previous disc/BIOS picks were "
+                "cleared from settings.",
+                game);
+        } else if (m->has_bios) {
+            ImGui::TextColored(col(th.text_muted),
+                "This build is already ready. Confirm a BIOS image and a "
+                "playable %s below — previous picks were cleared from settings.",
+                noun);
+        } else {
+            ImGui::TextColored(col(th.text_muted),
+                "This build is already ready. Confirm a playable %s below — "
+                "the previous pick was cleared from settings.",
+                noun);
+        }
+        ImGui::PopTextWrapPos();
     } else {
-        ImGui::TextColored(col(th.text_muted),
-            "%s needs a playable %s before you can launch. Pick your file below "
-            "(you must legally own this dump).",
-            game, noun);
+        ImGui::TextColored(col(th.accent), "Setup required");
+        ImGui::PushTextWrapPos(wrap_x);
+        if (plat == SETUP_PLAT_PSX && m->has_bios) {
+            ImGui::TextColored(col(th.text_muted),
+                "%s needs a playable %s before you can launch. This build includes "
+                "a bundled BIOS (OpenBIOS) by default. Setup also looks for a "
+                "retail SCPH1001.BIN beside the install and uses it when found; "
+                "otherwise OpenBIOS stays selected. Use a Redump-style .cue with "
+                "sibling .bin tracks (.iso is not accepted). Pick your %s below "
+                "(you must legally own these dumps).",
+                game, noun, noun);
+        } else if (plat == SETUP_PLAT_GBA && m->has_bios) {
+            ImGui::TextColored(col(th.text_muted),
+                "%s needs a Game Boy Advance BIOS dump and a playable %s before "
+                "you can launch. Pick both below (you must legally own these dumps).",
+                game, noun);
+        } else if (plat == SETUP_PLAT_SNES) {
+            ImGui::TextColored(col(th.text_muted),
+                "%s needs a playable Super Nintendo %s before you can launch. "
+                "Pick your file below (you must legally own this dump).",
+                game, noun);
+        } else if (m->has_bios) {
+            ImGui::TextColored(col(th.text_muted),
+                "%s needs a BIOS image and a playable %s before you can launch. "
+                "Pick both below (you must legally own these dumps).",
+                game, noun);
+        } else {
+            ImGui::TextColored(col(th.text_muted),
+                "%s needs a playable %s before you can launch. Pick your file below "
+                "(you must legally own this dump).",
+                game, noun);
+        }
+        ImGui::PopTextWrapPos();
     }
-    ImGui::PopTextWrapPos();
     ImGui::Dummy(ImVec2(0, px(10)));
 
     if (m->has_bios) {
@@ -7111,7 +7221,11 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
         }
     }
 
-    if (m->prepare_disc_cb || m->prepare_with_progress_cb) {
+    /* Full first-run only: Generate & rebuild. Media-confirm (cleared disc/
+     * BIOS with sources already present) skips this — regenerate stays in
+     * Settings → SYSTEM when the host exposes it. */
+    if (!media_confirm &&
+        (m->prepare_disc_cb || m->prepare_with_progress_cb)) {
         ImGui::Dummy(ImVec2(0, px(12)));
         char section_buf[128];
         const char* section;
@@ -7216,8 +7330,12 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     }
     if (!m->prepare_required_before_continue) {
         const bool ready = launcher_model_can_finish_setup(m);
+        const char* continue_lbl =
+            media_confirm
+                ? (m->has_bios ? "Confirm BIOS and disc" : "Confirm disc")
+                : "Continue to launcher";
         if (!ready) ImGui::BeginDisabled();
-        if (ImGui::Button("Continue to launcher", ImVec2(px(220), px(34)))) {
+        if (ImGui::Button(continue_lbl, ImVec2(px(220), px(34)))) {
             launcher_model_finish_setup(m);
             ImGui::CloseCurrentPopup();
         }
@@ -7230,6 +7348,9 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
                     ImGui::SetTooltip("Wait for the current job to finish");
                 else if (m->has_bios && !m->setup_bios_ok)
                     ImGui::SetTooltip("BIOS check required");
+                else if (m->profile && m->profile->verify.mode == 1 &&
+                         !m->verify.netplay_ok)
+                    ImGui::SetTooltip("Disc mount / track layout not accepted");
             }
         }
         ImGui::SameLine();
@@ -7244,6 +7365,21 @@ void draw_setup_wizard_modal(LauncherModel* m, const LauncherTheme& th) {
     if (m->setup_wizard_open && !ImGui::IsPopupOpen("First-run setup"))
         ImGui::OpenPopup("First-run setup");
     ImGui::EndPopup();
+}
+
+
+static const char* generate_disabled_reason(const LauncherModel* m) {
+    if (!m) return "Generate is unavailable.";
+    const bool has_prep =
+        m->prepare_with_progress_cb != nullptr || m->prepare_disc_cb != nullptr;
+    if (!has_prep) {
+        return "Generate is unavailable (project/SDK not found).\n"
+               "Launch from RetComM, or run the game from its source tree "
+               "(src/current).";
+    }
+    if (!m->rom_present || !m->rom_full[0])
+        return "Select a disc image first";
+    return "Generate is unavailable.";
 }
 
 void draw_bios_confirm_modal(LauncherModel* m, const LauncherTheme& th) {
@@ -7281,7 +7417,7 @@ void draw_bios_confirm_modal(LauncherModel* m, const LauncherTheme& th) {
     if (!can_gen) {
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Select a disc image first");
+            ImGui::SetTooltip("%s", generate_disabled_reason(m));
     }
     ImGui::SameLine();
     if (ImGui::Button("Use OpenBIOS", ImVec2(px(130), px(32)))) {
@@ -7329,7 +7465,7 @@ void draw_bios_play_modal(LauncherModel* m, const LauncherTheme& th) {
     if (!can_gen) {
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Select a disc image first");
+            ImGui::SetTooltip("%s", generate_disabled_reason(m));
     }
     ImGui::SameLine();
     if (ImGui::Button("Use OpenBIOS", ImVec2(px(130), px(32))))

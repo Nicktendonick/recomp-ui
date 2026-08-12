@@ -82,6 +82,10 @@ typedef struct RecompLauncherCNetplayMember {
     int  latency_ms;
     /* 1 when this row is the local client's seat (never show self-RTT). */
     int  is_local;
+    /* Peer BIOS offer from set_ready (0 if legacy / missing). */
+    int  bios_offer_valid;
+    int  bios_can_scph1001;
+    int  bios_prefer_openbios;
 } RecompLauncherCNetplayMember;
 
 typedef struct RecompLauncherCNetplayLaunch {
@@ -210,6 +214,8 @@ typedef struct RecompLauncherCNetplayCallbacks {
      * match_caps.multitap_analog; peers apply at match start. */
     int  (*multitap_analog_get)(void* ctx);
     int  (*multitap_analog_set)(void* ctx, int enable);
+    /* Optional: 1 while lobby DNS/TCP/WS upgrade runs off-thread. */
+    int  (*connecting)(void* ctx);
 } RecompLauncherCNetplayCallbacks;
 
 /* ---- schema-driven mods --------------------------------------------------
@@ -957,7 +963,10 @@ typedef struct RecompLauncherCGameInfo {
 
     /* When 1, the setup modal hides "Continue to launcher" and requires
      * prepare (and rebuild when rebuild_after_prepare is set). Local codegen
-     * first-run: Generate & rebuild, then relaunch — Quit is the only other exit. */
+     * first-run: Generate & rebuild, then relaunch — Quit is the only other exit.
+     * When 0 but prepare_* is still wired (sources already generated), the
+     * wizard opens only for a cleared BIOS/disc pick and shows a media-confirm
+     * prompt instead of the full Generate & rebuild first-run page. */
     int prepare_required_before_continue;
 
     /* ---- portable toolchain step (appended; local codegen hosts) ----------
