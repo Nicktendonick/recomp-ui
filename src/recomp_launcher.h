@@ -110,6 +110,10 @@ typedef struct RecompLauncherCNetplayLaunch {
     int      max_slots; /* lobby seat ceiling (2..RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS) */
     /* Seated players at launch — delay-sync slot_count. 0 = unknown / use max_slots. */
     int      player_count;
+    /* Bit i = lobby seat i occupied at launch. 0 = treat all seats occupied.
+     * Sparse rooms (moved seats) must set holes clear so netplay does not
+     * wait on empty remotes. */
+    uint32_t occupied_mask;
     /* Host match_caps: lobby UDP SFU star (0/1). Online WS start always
      * opens the SFU; this flag stays for launch/diagnostics. LAN/direct
      * keeps host-as-relay / P2P when unset. */
