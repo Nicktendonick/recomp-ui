@@ -11,6 +11,16 @@
 
 #include "launcher_system_types.h"
 
+#ifndef RECOMP_UI_PSX_HAS_REWIND
+#define RECOMP_UI_PSX_HAS_REWIND 1
+#endif
+
+#if RECOMP_UI_PSX_HAS_REWIND
+#define RUI_PSX_REWIND_HOTKEY_MASK ((uint32_t)(1u << LNG_HK_REWIND))
+#else
+#define RUI_PSX_REWIND_HOTKEY_MASK 0u
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -98,14 +108,11 @@ static const SystemProfile kSystemProfilePsx = {
     // catalog task. LNG_HK_REWIND / LNG_HK_SAVE_STATE_MENU are PSX-only local
     // transport overlays.
     /* hotkeys_mask */ (uint32_t)((1u << LNG_HK_FULLSCREEN)     |
-                                   (1u << LNG_HK_RESET)          |
-                                   (1u << LNG_HK_PAUSE)          |
                                    (1u << LNG_HK_TURBO)          |
                                    (1u << LNG_HK_VOLUME_UP)      |
                                    (1u << LNG_HK_VOLUME_DOWN)    |
                                    (1u << LNG_HK_DISPLAY_PERF)   |
-                                   (1u << LNG_HK_TOGGLE_RENDERER)|
-                                   (1u << LNG_HK_REWIND)         |
+                                   RUI_PSX_REWIND_HOTKEY_MASK    |
                                    (1u << LNG_HK_SAVE_STATE_MENU)),
     /* panels_dashboard  */ kPanelsDashboardPsx,
     /* panels_settings   */ kPanelsSettingsPsx,
@@ -148,7 +155,7 @@ static inline void launcher_profile_apply_psx(RecompLauncherCGameInfo* gi) {
     gi->has_frame_interp = 0; gi->has_spu_hq = 1; gi->has_skip_fmv = 0;
     gi->has_turbo_loads = 1; gi->has_bios = 1;
     gi->has_deadzone_pct = 1;
-    gi->has_rewind_depth = 1;
+    gi->has_rewind_depth = RECOMP_UI_PSX_HAS_REWIND ? 1 : 0;
 }
 
 #ifdef __cplusplus
