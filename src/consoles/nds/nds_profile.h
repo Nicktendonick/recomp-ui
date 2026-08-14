@@ -44,7 +44,7 @@ static const SystemProfile kSystemProfileNds = {
         /*widescreen*/0, /*renderer*/0, /*supersampling*/1,
         /*screen_kind*/0, /*frame_interp*/0, /*aspect*/0,
         /*texture_filter*/0, /*antialiasing*/1, /*spu_hq*/0,
-        /*skip_fmv*/0, /*turbo_loads*/0, /*bios*/0, /*deadzone*/0,
+        /*skip_fmv*/0, /*turbo_loads*/0, /*bios*/1, /*deadzone*/0,
     },
     /* verify */ { 0, NULL },
     /* hotkeys_mask */ 0,
@@ -76,6 +76,11 @@ static inline void launcher_profile_apply_nds(RecompLauncherCGameInfo* gi) {
     gi->num_players = 1;
     gi->has_supersampling = 1;
     gi->has_antialiasing = 1;
+    // BIOS is a persisted setting, psxrecomp-style: pick any one of the
+    // three retail dump files (its folder is used), or leave it unset for
+    // the built-in FreeBIOS + generated firmware. The host's bios_verify
+    // explains which mode a given selection produces.
+    gi->has_bios = 1;
 }
 
 #ifdef __cplusplus
