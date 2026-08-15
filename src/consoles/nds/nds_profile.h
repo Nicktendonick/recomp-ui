@@ -28,6 +28,13 @@ static const char* const kNdsRomPatterns[] = { "*.nds", "*.srl" };
 #define LNG_NDS_ROM_PATTERN_COUNT \
     ((int)(sizeof(kNdsRomPatterns) / sizeof(kNdsRomPatterns[0])))
 
+// NDS composes the dashboard ONLINE identity card (player name + console
+// identity detail) under the controller card. Availability still gates on
+// GameInfo.has_player_name, so only titles with online play show it.
+static const char* const kPanelsDashboardNds[] = {
+    "game", "controller", "identity", NULL
+};
+
 static const SystemProfile kSystemProfileNds = {
     /* id       */ "nds",
     /* platform */ "NINTENDO DS",
@@ -48,7 +55,7 @@ static const SystemProfile kSystemProfileNds = {
     },
     /* verify */ { 0, NULL },
     /* hotkeys_mask */ 0,
-    /* panels_dashboard  */ kPanelsDashboardCommon,
+    /* panels_dashboard  */ kPanelsDashboardNds,
     /* panels_settings   */ kPanelsSettingsNds,
     /* panels_controller */ kPanelsControllerCommon,
     /* screen_kind_names */ NULL,

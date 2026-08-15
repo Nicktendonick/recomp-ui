@@ -349,6 +349,11 @@ typedef struct {
     // console draws it; the ABI flag of that name is deprecated/ignored.)
     bool     has_bios;
     bool     has_deadzone_pct;
+    // Online identity (opt-in; see GameInfo.has_player_name): dashboard
+    // IDENTITY card with the persistent display name + optional host-owned
+    // read-only detail line (borrowed string, e.g. a console MAC).
+    bool     has_player_name;
+    const char* identity_detail;
     const char* rom_noun;             // "ROM" default; e.g. "Disc" for PSX
     const char* const* language_labels;  // borrowed; NULL/num_languages==0 => no Localization menu
     int      num_languages;
