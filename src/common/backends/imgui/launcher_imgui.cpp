@@ -2987,6 +2987,7 @@ void draw_settings(LauncherModel* m, const LauncherTheme& th) {
     const LauncherPanel* video_p   = find_composed(prof->panels_settings, "video", m);
     const LauncherPanel* audio_p   = find_composed(prof->panels_settings, "audio", m);
     const LauncherPanel* hotkeys_p = find_composed(prof->panels_settings, "hotkeys", m);
+    const bool psx_settings = prof && prof->id && std::strcmp(prof->id, "psx") == 0;
 
     // Left content edge in SCREEN space — where DISPLAY starts and where any
     // full-width content (HOTKEYS) below both columns must resume.
@@ -3020,16 +3021,21 @@ void draw_settings(LauncherModel* m, const LauncherTheme& th) {
     // composes them without "audio".
     float stack_bottom = audio_bottom;
     bool stacked_side = false;
+    bool stacked_hotkeys = false;
     if (prof->panels_settings) {
         for (int i = 0; prof->panels_settings[i]; ++i) {
             const char* id = prof->panels_settings[i];
             if (!id || !id[0]) continue;
             if (strcmp(id, "video") == 0 || strcmp(id, "audio") == 0 ||
-                strcmp(id, "hotkeys") == 0)
+                (!psx_settings && strcmp(id, "hotkeys") == 0))
                 continue;
             const LauncherPanel* side_p =
                 find_composed(prof->panels_settings, id, m);
-            if (!side_p || side_p->slot != LNG_SLOT_SIDE) continue;
+            const bool force_side_hotkeys =
+                psx_settings && strcmp(id, "hotkeys") == 0;
+            if (!side_p ||
+                (side_p->slot != LNG_SLOT_SIDE && !force_side_hotkeys))
+                continue;
             if (audio_p) {
                 ImGui::SetCursorScreenPos(
                     ImVec2(right_x, stack_bottom + gap));
@@ -3041,10 +3047,14 @@ void draw_settings(LauncherModel* m, const LauncherTheme& th) {
                 end_container();
                 stack_bottom = ImGui::GetItemRectMax().y;
                 stacked_side = true;
+                if (force_side_hotkeys)
+                    stacked_hotkeys = true;
             } else {
                 side_p->draw(m, &th);
                 stack_bottom = ImGui::GetItemRectMax().y;
                 stacked_side = true;
+                if (force_side_hotkeys)
+                    stacked_hotkeys = true;
             }
         }
     }
@@ -3055,7 +3065,7 @@ void draw_settings(LauncherModel* m, const LauncherTheme& th) {
             (left_bottom > stack_bottom) ? left_bottom : stack_bottom;
         ImGui::SetCursorScreenPos(ImVec2(content_left_x, below_y + gap));
     }
-    if (hotkeys_p) hotkeys_p->draw(m, &th);
+    if (hotkeys_p && !stacked_hotkeys) hotkeys_p->draw(m, &th);
 }
 
 static bool enabled_camera_controls(const LauncherModel* m) {
