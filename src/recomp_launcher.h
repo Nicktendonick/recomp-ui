@@ -248,6 +248,12 @@ typedef enum RecompLauncherCModOptionType {
     RECOMP_MOD_OPTION_BOOLEAN = 0,
     RECOMP_MOD_OPTION_CHOICE = 1,
     RECOMP_MOD_OPTION_INTEGER = 2,
+    /* Free-text row (single line). The host's set_option is the validator:
+     * the edited value is committed when the field loses focus after an
+     * edit, and a rejected commit reverts the row to the model's value (the
+     * host should surface why via last_error). Appended additively; only
+     * games whose providers supply a TEXT option ever render one. */
+    RECOMP_MOD_OPTION_TEXT = 3,
 } RecompLauncherCModOptionType;
 
 typedef struct RecompLauncherCModPackage {

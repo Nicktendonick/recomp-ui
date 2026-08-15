@@ -5705,6 +5705,34 @@ static void draw_linkified_mod_author(
     }
 }
 
+/* Free-text option row shared by the package and feature option paths.
+ * Immediate-mode text editing with external state uses ONE shared edit
+ * buffer: every inactive row re-mirrors its model value before drawing
+ * (so it always displays truth), while the row that owns the keyboard
+ * keeps its typing state. Commit happens when the field deactivates after
+ * an edit; the caller pushes the committed text through set_option, whose
+ * rejection reverts the row to the model value on the next frame. */
+static bool draw_mod_text_option(const RecompLauncherCModOption& option,
+                                 char* next, size_t next_size) {
+    ImGui::TextUnformatted(option.label);
+    ImGui::SameLine(px(260));
+    ImGui::SetNextItemWidth(px(230));
+    static char edit[RECOMP_LAUNCHER_MOD_VALUE_MAX];
+    static ImGuiID owner = 0;
+    const ImGuiID id = ImGui::GetID("##text");
+    if (owner != id)
+        std::snprintf(edit, sizeof(edit), "%s", option.value);
+    ImGui::InputText("##text", edit, sizeof(edit));
+    if (ImGui::IsItemActivated()) owner = id;
+    bool changed = false;
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        std::snprintf(next, next_size, "%s", edit);
+        changed = true;
+    }
+    if (ImGui::IsItemDeactivated() && owner == id) owner = 0;
+    return changed;
+}
+
 static bool draw_mod_integer_option(const RecompLauncherCModOption& option,
                                     char* next, size_t next_size) {
     ImGui::TextUnformatted(option.label);
@@ -5965,6 +5993,9 @@ static void draw_mod_packages(LauncherModel* m, const LauncherTheme& th) {
                         }
                         ImGui::EndCombo();
                     }
+                } else if (option.type == RECOMP_MOD_OPTION_TEXT) {
+                    changed = draw_mod_text_option(
+                        option, next, sizeof(next));
                 } else {
                     changed = draw_mod_integer_option(
                         option, next, sizeof(next));
@@ -6061,6 +6092,8 @@ static void draw_mod_feature_option(LauncherModel* m,
             }
             ImGui::EndCombo();
         }
+    } else if (option.type == RECOMP_MOD_OPTION_TEXT) {
+        changed = draw_mod_text_option(option, next, sizeof(next));
     } else {
         changed = draw_mod_integer_option(option, next, sizeof(next));
     }
