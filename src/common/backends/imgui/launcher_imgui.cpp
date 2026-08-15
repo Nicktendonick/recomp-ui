@@ -2043,6 +2043,10 @@ void draw_dashboard(LauncherModel* m, const LauncherTheme& th, int logical_w) {
     const LauncherPanel* ctrl_p = find_composed(prof->panels_dashboard, "controller", m);
     const LauncherPanel* save_p = find_composed(prof->panels_dashboard, "save", m);
     const LauncherPanel* tpak_p = find_composed(prof->panels_dashboard, "tpak", m);
+    // Online identity: stacks directly under the controller card in the
+    // right column (double opt-in — see avail_identity).
+    const LauncherPanel* ident_p =
+        find_composed(prof->panels_dashboard, "identity", m);
 
     if (logical_w >= 820) {
         const float gap = px(th.spacing_md);
@@ -2085,6 +2089,10 @@ void draw_dashboard(LauncherModel* m, const LauncherTheme& th, int logical_w) {
                     begin_container("dash_ctrl", ImVec2(0, ctrl_h));
                         ctrl_p->draw(m, &th);
                     end_container();
+                    if (ident_p) {
+                        ImGui::Dummy(ImVec2(0, gap));
+                        ident_p->draw(m, &th);
+                    }
                     if (save_p) {
                         ImGui::Dummy(ImVec2(0, gap));
                         g_save_fill_h = true;
@@ -2095,6 +2103,10 @@ void draw_dashboard(LauncherModel* m, const LauncherTheme& th, int logical_w) {
                 } else {
                     begin_container("dash_r", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY);
                     ctrl_p->draw(m, &th);
+                    if (ident_p) {
+                        ImGui::Dummy(ImVec2(0, gap));
+                        ident_p->draw(m, &th);
+                    }
                     if (save_p) {
                         ImGui::Dummy(ImVec2(0, gap));
                         save_p->draw(m, &th);
@@ -2117,6 +2129,10 @@ void draw_dashboard(LauncherModel* m, const LauncherTheme& th, int logical_w) {
             if (ctrl_p) {
                 begin_container("dash_r", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY);
                     ctrl_p->draw(m, &th);
+                    if (ident_p) {
+                        ImGui::Dummy(ImVec2(0, gap));
+                        ident_p->draw(m, &th);
+                    }
                 end_container();
             }
         } else {
@@ -2132,6 +2148,10 @@ void draw_dashboard(LauncherModel* m, const LauncherTheme& th, int logical_w) {
             if (ctrl_p) {
                 begin_container("dash_r", ImVec2(0, 0), ImGuiChildFlags_None);
                     ctrl_p->draw(m, &th);
+                    if (ident_p) {
+                        ImGui::Dummy(ImVec2(0, gap));
+                        ident_p->draw(m, &th);
+                    }
                 end_container();
             }
         }
@@ -2145,7 +2165,9 @@ void draw_dashboard(LauncherModel* m, const LauncherTheme& th, int logical_w) {
         if (game_p) { g_game_fill_h = false; game_p->draw(m, &th); }
         if (game_p && ctrl_p) ImGui::Spacing();
         if (ctrl_p) ctrl_p->draw(m, &th);
-        // Narrow single-column layout: memcards stack under the controller.
+        // Narrow single-column layout: identity and memcards stack under
+        // the controller.
+        if (ident_p) { ImGui::Spacing(); ident_p->draw(m, &th); }
         if (save_p) { ImGui::Spacing(); save_p->draw(m, &th); }
         if (tpak_p) { ImGui::Spacing(); tpak_p->draw(m, &th); }
     }
@@ -6561,9 +6583,37 @@ void draw_mods(LauncherModel* m, const LauncherTheme& th) {
 // (launcher_system.h) list which of these ids compose into each view, in
 // slot order; draw_dashboard/draw_settings/draw_controller above look each id
 // up here via find_composed() and draw whatever's both listed and available().
+// Online identity card (dashboard, under the controller card). Double
+// opt-in like the BIOS row: the console profile must LIST "identity" in
+// panels_dashboard AND the game must set GameInfo.has_player_name — most
+// titles have no online play and never see this card (owner directive:
+// shared launcher features are per-game opt-in).
+int avail_identity(const LauncherModel* m) { return m->has_player_name; }
+void panel_identity_draw(LauncherModel* m, const LauncherTheme* th) {
+    if (!begin_panel("identity")) { end_panel(); return; }
+    eyebrow("ONLINE");
+    const float cw = ImGui::GetContentRegionAvail().x;
+    ImGui::TextUnformatted("Player name");
+    ImGui::SetNextItemWidth(cw);
+    ImGui::InputTextWithHint("##identity_name", "console default",
+                             m->s.player_name, sizeof(m->s.player_name));
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip(
+            "The name other players see online (the console nickname). "
+            "Leave empty for the default.");
+    if (m->identity_detail && m->identity_detail[0]) {
+        ImGui::Dummy(ImVec2(0, px(4)));
+        ImGui::PushStyleColor(ImGuiCol_Text, col(th->text_muted));
+        ImGui::TextWrapped("%s", m->identity_detail);
+        ImGui::PopStyleColor();
+    }
+    end_panel();
+}
+
 const LauncherPanel kPanelRegistry[] = {
     { "game",              LNG_VIEW_DASHBOARD,  LNG_SLOT_MAIN, nullptr,      panel_game_draw },
     { "controller",        LNG_VIEW_DASHBOARD,  LNG_SLOT_SIDE, nullptr,      panel_controller_draw },
+    { "identity",          LNG_VIEW_DASHBOARD,  LNG_SLOT_SIDE, avail_identity, panel_identity_draw },
     { "save",              LNG_VIEW_DASHBOARD,  LNG_SLOT_WIDE, avail_save,   panel_save_draw },
     { "tpak",              LNG_VIEW_DASHBOARD,  LNG_SLOT_WIDE, avail_tpak,   panel_tpak_draw },
     { "video",             LNG_VIEW_SETTINGS,   LNG_SLOT_MAIN, nullptr,      panel_video_draw },

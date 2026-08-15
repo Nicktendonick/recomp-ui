@@ -134,6 +134,8 @@ void launcher_model_init(LauncherModel* m,
         // row is universal (drawn for every console) — see recomp_launcher.h.
         m->has_bios             = game->has_bios != 0;
         m->has_deadzone_pct     = game->has_deadzone_pct != 0;
+        m->has_player_name      = game->has_player_name != 0;
+        m->identity_detail      = game->identity_detail;
         m->rom_noun             = game->rom_noun ? game->rom_noun : "ROM";
         m->language_labels      = game->language_labels;
         m->num_languages        = game->num_languages;
