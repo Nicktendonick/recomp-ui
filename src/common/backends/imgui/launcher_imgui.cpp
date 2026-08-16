@@ -83,6 +83,73 @@
 
 extern "C" const char* launcher_backend_name(void) { return "Dear ImGui"; }
 
+struct ShaderPresetEntry {
+    std::string label;
+    std::string path;
+};
+
+static std::vector<ShaderPresetEntry> g_shader_presets;
+
+static bool shader_path_has_supported_ext(const std::filesystem::path& p) {
+    std::string ext = p.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    return ext == ".glsl" || ext == ".glslp";
+}
+
+static std::string shader_label_from_relative_path(std::filesystem::path rel) {
+    rel.replace_extension();
+    std::string label = rel.generic_string();
+    for (char& c : label)
+        if (c == '/' || c == '_' || c == '-') c = ' ';
+    bool cap = true;
+    for (char& c : label) {
+        if (std::isspace((unsigned char)c)) {
+            cap = true;
+        } else if (cap) {
+            c = (char)std::toupper((unsigned char)c);
+            cap = false;
+        }
+    }
+    return label;
+}
+
+static bool shader_relative_path_is_private(const std::filesystem::path& rel) {
+    for (const std::filesystem::path& part : rel) {
+        std::string s = part.string();
+        if (!s.empty() && (s[0] == '_' || s[0] == '.'))
+            return true;
+    }
+    return false;
+}
+
+static void refresh_shader_presets() {
+    g_shader_presets.clear();
+    const std::filesystem::path root = std::filesystem::path("assets") / "shaders";
+    std::error_code ec;
+    if (!std::filesystem::exists(root, ec))
+        return;
+    for (std::filesystem::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file(ec) || !shader_path_has_supported_ext(it->path()))
+            continue;
+        std::filesystem::path rel = std::filesystem::relative(it->path(), root, ec);
+        if (ec) {
+            ec.clear();
+            continue;
+        }
+        if (shader_relative_path_is_private(rel))
+            continue;
+        g_shader_presets.push_back({
+            shader_label_from_relative_path(rel),
+            it->path().generic_string()
+        });
+    }
+    std::sort(g_shader_presets.begin(), g_shader_presets.end(),
+              [](const ShaderPresetEntry& a, const ShaderPresetEntry& b) {
+                  return a.label < b.label;
+              });
+}
+
 // `volatile` on purpose. Under a host build with -Os -ffunction-sections
 // -fdata-sections + -Wl,--gc-sections (gb-recompiled's generated projects),
 // GCC 15.2 miscompiled the plain global: a store to g_th did not stick (read
@@ -2203,21 +2270,41 @@ void draw_shader_row(LauncherModel* m, const LauncherTheme& th, float col_w = 0.
     row_label("Shader", th, col_w);
 
     const float browse_w = px(78);
+    const float folder_w = px(72);
     const float clear_w = px(64);
     const float gap = px(th.spacing_sm);
-    float text_w = ImGui::GetContentRegionAvail().x - browse_w - clear_w - gap * 2.0f;
-    if (text_w < px(80)) text_w = px(80);
+    float combo_w = ImGui::GetContentRegionAvail().x - browse_w - folder_w - clear_w - gap * 3.0f;
+    if (combo_w < px(120)) combo_w = px(120);
 
-    const char* path = m->s.shader_path[0] ? m->s.shader_path : "(none)";
-    char elided[192];
-    elide_left(path, text_w, elided, sizeof(elided));
-    const float text_x = ImGui::GetCursorPosX();
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextColored(col(th.text_muted), "%s", elided);
+    refresh_shader_presets();
+    std::string current_label = m->s.shader_path[0] ? "Custom" : "None";
+    for (const ShaderPresetEntry& preset : g_shader_presets) {
+        if (preset.path == m->s.shader_path) {
+            current_label = preset.label;
+            break;
+        }
+    }
+
+    ImGui::SetNextItemWidth(combo_w);
+    if (ImGui::BeginCombo("##shader_preset", current_label.c_str())) {
+        refresh_shader_presets();
+        if (ImGui::Selectable("None", !m->s.shader_path[0]))
+            launcher_model_clear_shader_path(m);
+        for (const ShaderPresetEntry& preset : g_shader_presets) {
+            bool selected = preset.path == m->s.shader_path;
+            if (ImGui::Selectable(preset.label.c_str(), selected))
+                launcher_model_set_shader_path(m, preset.path.c_str());
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                ImGui::SetTooltip("%s", preset.path.c_str());
+        }
+        if (m->s.shader_path[0] && current_label == "Custom")
+            ImGui::Selectable("Custom", true, ImGuiSelectableFlags_Disabled);
+        ImGui::EndCombo();
+    }
     if (m->s.shader_path[0] && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
         ImGui::SetTooltip("%s", m->s.shader_path);
 
-    ImGui::SameLine(text_x + text_w + gap);
+    ImGui::SameLine(0, gap);
     static const char* kShaderPatterns[] = { "*.glsl", "*.glslp" };
     if (ImGui::Button("Browse", ImVec2(browse_w, px(30)))) {
         char buf[512];
@@ -2225,6 +2312,17 @@ void draw_shader_row(LauncherModel* m, const LauncherTheme& th, float col_w = 0.
                                "GLSL shader (.glsl .glslp)", buf, sizeof(buf)))
             launcher_model_set_shader_path(m, buf);
     }
+    ImGui::SameLine(0, gap);
+    if (ImGui::Button("Folder", ImVec2(folder_w, px(30)))) {
+        std::filesystem::path shader_dir = std::filesystem::path("assets") / "shaders";
+        std::error_code ec;
+        std::filesystem::create_directories(shader_dir, ec);
+        if (ImGui::GetPlatformIO().Platform_OpenInShellFn)
+            ImGui::GetPlatformIO().Platform_OpenInShellFn(ImGui::GetCurrentContext(),
+                                                          shader_dir.string().c_str());
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        ImGui::SetTooltip("Open assets/shaders to add presets.");
     ImGui::SameLine(0, gap);
     ImGui::BeginDisabled(!m->s.shader_path[0]);
     if (ImGui::Button("Clear", ImVec2(clear_w, px(30))))
