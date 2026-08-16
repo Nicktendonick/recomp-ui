@@ -610,6 +610,10 @@ struct RecompLauncherCSettings {
     int  rewind_depth;
     /* Frames between local rewind snaps. UI offers 1/4/8/12/15; 0 => 15. */
     int  rewind_interval;
+
+    /* GLSL .glsl/.glslp path selected from Display settings. Empty = disabled.
+     * Appended for ABI stability; see GameInfo.has_shader. */
+    char shader_path[512];
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
@@ -1058,6 +1062,9 @@ typedef struct RecompLauncherCGameInfo {
     int settings_bindings;
     const char* const* assist_binding_labels;
     int assist_binding_count;
+
+    /* Display row for Settings.shader_path. Appended for ABI stability. */
+    int has_shader;
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */

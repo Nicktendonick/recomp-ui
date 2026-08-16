@@ -299,6 +299,7 @@ void launcher_model_init(LauncherModel* m,
         m->has_gyro_controls    = game->has_gyro_controls != 0;
         m->has_sharp_filter     = game->has_sharp_filter != 0;
         m->has_affine_filter    = game->has_affine_filter != 0;
+        m->has_shader           = game->has_shader != 0;
         m->netplay_supported    = game->netplay_supported != 0 && game->netplay != NULL;
         m->netplay              = game->netplay;
 #if RECOMP_UI_ENABLE_MODS
@@ -1162,6 +1163,19 @@ void launcher_model_toggle_texture_filter(LauncherModel* m) {
 
 const char* launcher_model_texture_filter_label(const LauncherModel* m) {
     return m->s.texture_filter ? "Bilinear" : "Nearest";
+}
+
+void launcher_model_set_shader_path(LauncherModel* m, const char* path) {
+    if (!m || !m->has_shader) return;
+    safe_copy(m->s.shader_path, sizeof(m->s.shader_path), path ? path : "");
+    if (m->s.shader_path[0]) {
+        m->s.output_method = 2;
+        m->s.renderer = 1;
+    }
+}
+
+void launcher_model_clear_shader_path(LauncherModel* m) {
+    launcher_model_set_shader_path(m, "");
 }
 
 void launcher_model_toggle_geometry_correction(LauncherModel* m) {

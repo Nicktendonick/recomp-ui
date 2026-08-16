@@ -2189,12 +2189,47 @@ bool any_deep_display(const LauncherModel* m) {
 // the fixed height (byte-identical to before this console existed).
 bool video_card_grows(const LauncherModel* m) {
     if (any_deep_display(m)) return true;
+    if (m->has_shader) return true;
     if (m->has_sharp_filter || m->has_affine_filter) return true;
     if (m->num_display_layouts > 0) return true;
     // NES legacy-surface additions (Integer scaling row, HD texture pack block)
     // add extra rows the fixed no_scroll band wasn't sized for.
     if (m->has_integer_scale || m->hdpack_supported) return true;
     return false;
+}
+
+void draw_shader_row(LauncherModel* m, const LauncherTheme& th, float col_w = 0.0f) {
+    if (!m || !m->has_shader) return;
+    row_label("Shader", th, col_w);
+
+    const float browse_w = px(78);
+    const float clear_w = px(64);
+    const float gap = px(th.spacing_sm);
+    float text_w = ImGui::GetContentRegionAvail().x - browse_w - clear_w - gap * 2.0f;
+    if (text_w < px(80)) text_w = px(80);
+
+    const char* path = m->s.shader_path[0] ? m->s.shader_path : "(none)";
+    char elided[192];
+    elide_left(path, text_w, elided, sizeof(elided));
+    const float text_x = ImGui::GetCursorPosX();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(col(th.text_muted), "%s", elided);
+    if (m->s.shader_path[0] && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        ImGui::SetTooltip("%s", m->s.shader_path);
+
+    ImGui::SameLine(text_x + text_w + gap);
+    static const char* kShaderPatterns[] = { "*.glsl", "*.glslp" };
+    if (ImGui::Button("Browse", ImVec2(browse_w, px(30)))) {
+        char buf[512];
+        if (launcher_pick_file("Select GLSL shader", kShaderPatterns, 2,
+                               "GLSL shader (.glsl .glslp)", buf, sizeof(buf)))
+            launcher_model_set_shader_path(m, buf);
+    }
+    ImGui::SameLine(0, gap);
+    ImGui::BeginDisabled(!m->s.shader_path[0]);
+    if (ImGui::Button("Clear", ImVec2(clear_w, px(30))))
+        launcher_model_clear_shader_path(m);
+    ImGui::EndDisabled();
 }
 
 void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
@@ -2209,6 +2244,10 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         }
         if (m->has_affine_filter) {
             float t = ImGui::CalcTextSize("Affine background smoothing").x;
+            if (t > cw) cw = t;
+        }
+        if (m->has_shader) {
+            float t = ImGui::CalcTextSize("Shader").x;
             if (t > cw) cw = t;
         }
         if (m->has_integer_scale) { float t = ImGui::CalcTextSize("Integer scaling").x; if (t > cw) cw = t; }
@@ -2256,6 +2295,7 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
             if (ImGui::Checkbox("##affine_filter", &affine))
                 launcher_model_toggle_affine_filter(m);
         }
+        draw_shader_row(m, th, cw);
         // HD texture packs (NES module, Mesen hires.txt format): one line —
         //   [x] HD texture pack   …folder tail   [Browse]
         // Mirrors the MSU-1 row in Audio (same enable + folder pattern).
@@ -2374,6 +2414,8 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         if (ImGui::Checkbox("##affine_filter", &affine))
             launcher_model_toggle_affine_filter(m);
     }
+
+    draw_shader_row(m, th);
 
     if (m->has_geometry_precision) {
         // Geometry correction deliberately draws NO row. It moves vertices, and
