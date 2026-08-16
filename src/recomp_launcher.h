@@ -95,6 +95,14 @@ typedef struct RecompLauncherCNetplayMember {
     int  bios_prefer_openbios;
 } RecompLauncherCNetplayMember;
 
+typedef struct RecompLauncherCNetplayNeedMod {
+    char id[96];
+    char version[32];
+    char name[64];
+    int  builtin;
+    uint32_t size;
+} RecompLauncherCNetplayNeedMod;
+
 typedef struct RecompLauncherCNetplayLaunch {
     int      enabled;
     int      local_slot;
@@ -227,6 +235,16 @@ typedef struct RecompLauncherCNetplayCallbacks {
     int  (*multitap_analog_set)(void* ctx, int enable);
     /* Optional: 1 while lobby DNS/TCP/WS upgrade runs off-thread. */
     int  (*connecting)(void* ctx);
+    /* Optional pre-join missing-mod handshake. Join returns last_error
+     * "need_mods" without seating; the peer is prompted to download. */
+    int  (*need_mods_count)(void* ctx);
+    int  (*need_mods_get)(void* ctx, int index, RecompLauncherCNetplayNeedMod* out);
+    int  (*need_mods_can_transfer)(void* ctx);
+    int  (*mod_xfer_start)(void* ctx);
+    void (*mod_xfer_cancel)(void* ctx);
+    /* -1 idle, -2 fail, 0..100 in flight. */
+    int  (*mod_xfer_progress)(void* ctx);
+    int  (*mod_xfer_failed)(void* ctx, char* err, size_t err_cap);
 } RecompLauncherCNetplayCallbacks;
 
 /* ---- schema-driven mods --------------------------------------------------
