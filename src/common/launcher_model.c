@@ -68,6 +68,78 @@ static void safe_copy(char* dst, size_t cap, const char* src) {
     dst[n] = '\0';
 }
 
+enum { LM_MMXPASS_DIGITS = 12, LM_MMXPASS_MIN_SIZE = 2048 };
+
+typedef struct LmMmxPassRecord {
+    char magic[8];
+    unsigned char version;
+    unsigned char digits[LM_MMXPASS_DIGITS];
+    unsigned char checksum;
+} LmMmxPassRecord;
+
+static const char kLmMmxPassMagic[8] = { 'M', 'M', 'X', 'P', 'A', 'S', 'S', 0 };
+
+static unsigned char lm_mmxpass_checksum(const unsigned char digits[LM_MMXPASS_DIGITS]) {
+    unsigned char checksum = 0x5a;
+    for (int i = 0; i < LM_MMXPASS_DIGITS; i++)
+        checksum = (unsigned char)((checksum * 33u) ^ digits[i]);
+    return checksum;
+}
+
+static int lm_mmxpass_valid(const LmMmxPassRecord* r) {
+    if (!r || memcmp(r->magic, kLmMmxPassMagic, sizeof(r->magic)) != 0 ||
+        r->version != 1)
+        return 0;
+    for (int i = 0; i < LM_MMXPASS_DIGITS; i++) {
+        if (r->digits[i] < 1 || r->digits[i] > 8)
+            return 0;
+    }
+    return r->checksum == lm_mmxpass_checksum(r->digits);
+}
+
+static int lm_mmxpass_parse_text(const char* text,
+                                 unsigned char digits[LM_MMXPASS_DIGITS]) {
+    int count = 0;
+    for (const char* p = text ? text : ""; *p; p++) {
+        if (*p == '-' || *p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+            continue;
+        if (*p < '1' || *p > '8' || count >= LM_MMXPASS_DIGITS)
+            return 0;
+        digits[count++] = (unsigned char)(*p - '0');
+    }
+    return count == LM_MMXPASS_DIGITS;
+}
+
+static void lm_mmxpass_format_text(const unsigned char digits[LM_MMXPASS_DIGITS],
+                                   char* out, size_t cap) {
+    if (!out || cap == 0) return;
+    snprintf(out, cap, "%u%u%u%u-%u%u%u%u-%u%u%u%u",
+             (unsigned)digits[0], (unsigned)digits[1],
+             (unsigned)digits[2], (unsigned)digits[3],
+             (unsigned)digits[4], (unsigned)digits[5],
+             (unsigned)digits[6], (unsigned)digits[7],
+             (unsigned)digits[8], (unsigned)digits[9],
+             (unsigned)digits[10], (unsigned)digits[11]);
+}
+
+static long lm_file_size(FILE* f) {
+    long cur = ftell(f);
+    if (cur < 0) cur = 0;
+    if (fseek(f, 0, SEEK_END) != 0) return 0;
+    long size = ftell(f);
+    fseek(f, cur, SEEK_SET);
+    return size < 0 ? 0 : size;
+}
+
+static void lm_write_zero_padding(FILE* f, long count) {
+    static const unsigned char zeros[256] = {0};
+    while (count > 0) {
+        size_t n = (size_t)(count > (long)sizeof(zeros) ? sizeof(zeros) : count);
+        fwrite(zeros, 1, n, f);
+        count -= (long)n;
+    }
+}
+
 static int clampi(int v, int lo, int hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
@@ -102,6 +174,10 @@ void launcher_model_init(LauncherModel* m,
         m->hdpack_supported     = game->hdpack_supported != 0;
         m->password_save_path   = game->password_save_path;
         m->password_save_label  = game->password_save_label;
+        m->password_sram_path   = game->password_sram_path;
+        m->password_sram_label  = game->password_sram_label;
+        m->password_sram_size   = game->password_sram_size;
+        m->password_sram_offset = game->password_sram_offset;
         m->zapper               = game->zapper != 0;
         /* 0 = unset (caller predates the field) -> assume 2 players. */
         m->player_count         = game->num_players ? clampi(game->num_players, 1, LNG_MAX_PLAYERS) : 2;
@@ -2466,10 +2542,23 @@ void launcher_model_set_hdpack_dir(LauncherModel* m, const char* dir) {
     safe_copy(m->s.hdpack_dir, sizeof(m->s.hdpack_dir), dir ? dir : "");
 }
 
-// Password/mantra save: the file is one line of text (e.g. Faxanadu's mantra),
-// read/rewritten whole. Mirrors the legacy NES launcher's SAVES-panel variant.
+// Password/mantra save: either a one-line text file (legacy NES titles) or a
+// small MMXPASS record inside the SRAM file (Mega Man X synthetic SRAM).
 void launcher_model_password_reload(LauncherModel* m) {
     m->password_text[0] = '\0';
+    if (m->password_sram_path && m->password_sram_path[0]) {
+        FILE* f = fopen(m->password_sram_path, "rb");
+        if (!f) return;
+        LmMmxPassRecord rec;
+        if (m->password_sram_offset > 0)
+            fseek(f, m->password_sram_offset, SEEK_SET);
+        int ok = fread(&rec, 1, sizeof(rec), f) == sizeof(rec);
+        fclose(f);
+        if (ok && lm_mmxpass_valid(&rec))
+            lm_mmxpass_format_text(rec.digits, m->password_text, sizeof(m->password_text));
+        return;
+    }
+
     if (!m->password_save_path || !m->password_save_path[0]) return;
     FILE* f = fopen(m->password_save_path, "r");
     if (!f) return;
@@ -2484,6 +2573,41 @@ void launcher_model_password_reload(LauncherModel* m) {
 }
 
 void launcher_model_password_commit(LauncherModel* m, const char* text) {
+    if (m->password_sram_path && m->password_sram_path[0]) {
+        unsigned char digits[LM_MMXPASS_DIGITS];
+        if (!lm_mmxpass_parse_text(text, digits))
+            return;
+
+        int min_size = m->password_sram_size > 0
+                           ? m->password_sram_size
+                           : LM_MMXPASS_MIN_SIZE;
+        int offset = m->password_sram_offset > 0 ? m->password_sram_offset : 0;
+        if (min_size < offset + (int)sizeof(LmMmxPassRecord))
+            min_size = offset + (int)sizeof(LmMmxPassRecord);
+        FILE* f = fopen(m->password_sram_path, "r+b");
+        if (!f)
+            f = fopen(m->password_sram_path, "w+b");
+        if (!f)
+            return;
+
+        long size = lm_file_size(f);
+        if (size < min_size) {
+            fseek(f, 0, SEEK_END);
+            lm_write_zero_padding(f, (long)min_size - size);
+        }
+
+        LmMmxPassRecord rec;
+        memcpy(rec.magic, kLmMmxPassMagic, sizeof(rec.magic));
+        rec.version = 1;
+        memcpy(rec.digits, digits, sizeof(rec.digits));
+        rec.checksum = lm_mmxpass_checksum(rec.digits);
+        fseek(f, offset, SEEK_SET);
+        fwrite(&rec, 1, sizeof(rec), f);
+        fclose(f);
+        launcher_model_password_reload(m);
+        return;
+    }
+
     if (!m->password_save_path || !m->password_save_path[0]) return;
     FILE* f = fopen(m->password_save_path, "w");
     if (!f) return;

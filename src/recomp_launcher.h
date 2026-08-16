@@ -831,6 +831,13 @@ typedef struct RecompLauncherCGameInfo {
     // The file is a single line of text. Independent of sram_path.
     const char* password_save_path;   // abs path to the 1-line password file
     const char* password_save_label;  // row label, e.g. "Password" / "Mantra"
+    // Binary SRAM-backed password record. When password_sram_path is non-NULL
+    // the same SAVES row reads/edits a MMXPASS v1 record inside the SRAM file.
+    // password_sram_size is the minimum file size to create/maintain.
+    const char* password_sram_path;
+    const char* password_sram_label;
+    int         password_sram_size;
+    int         password_sram_offset;
     // Light-gun (NES Zapper) game: the controller config page shows a Zapper
     // block (mouse-as-gun + crosshair toggles, persisted to the engine's
     // keybinds.ini [zapper] section) alongside the pad UI.

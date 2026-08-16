@@ -1145,7 +1145,7 @@ void draw_game_panel(LauncherModel* m, const LauncherTheme& th, bool fill_h = fa
     // Content lives in draw_save_row() (the Save module's shared row-drawer,
     // also used standalone by panel_save's own card — see below); folding it
     // in here, uncarded, is what preserves today's exact GAME-card layout.
-    if (m->saves_supported || m->password_save_path) {
+    if (m->saves_supported || m->password_save_path || m->password_sram_path) {
         ImGui::Dummy(ImVec2(0, px(8)));
         ImGui::PushStyleColor(ImGuiCol_Separator, col(th.border));
         ImGui::Separator();
@@ -1163,11 +1163,13 @@ void draw_save_row(LauncherModel* m, const LauncherTheme& th) {
     // Password/mantra save variant (e.g. Faxanadu): the row shows the current
     // password text instead of a binary save file. Editable behind an Edit ->
     // type -> Save confirm step, mirroring the legacy NES launcher's flow.
-    if (m->password_save_path) {
+    if (m->password_save_path || m->password_sram_path) {
         static bool s_pw_editing = false;
         static char s_pw_buf[128];
-        const char* label = (m->password_save_label && m->password_save_label[0])
-                              ? m->password_save_label : "Password";
+        const char* label = (m->password_sram_label && m->password_sram_label[0])
+                              ? m->password_sram_label
+                              : ((m->password_save_label && m->password_save_label[0])
+                                     ? m->password_save_label : "Password");
         ImGui::PushStyleColor(ImGuiCol_Text, col(th.text_muted));
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted(label);

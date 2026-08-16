@@ -156,6 +156,10 @@ typedef struct {
     // for a password-text UI (read + edit-with-confirm of a 1-line file).
     const char* password_save_path;
     const char* password_save_label; // e.g. "Password" / "Mantra"; NULL => "Password"
+    const char* password_sram_path;
+    const char* password_sram_label; // e.g. "Last Password"; NULL => password_save_label/"Password"
+    int         password_sram_size;
+    int         password_sram_offset;
     char        password_text[128];  // current file contents (reloaded on init/commit)
     // Light-gun (NES Zapper) game: controller pages add a Zapper block whose
     // two switches persist to the engine's keybinds.ini [zapper] section via
