@@ -156,6 +156,10 @@ typedef struct {
     // for a password-text UI (read + edit-with-confirm of a 1-line file).
     const char* password_save_path;
     const char* password_save_label; // e.g. "Password" / "Mantra"; NULL => "Password"
+    const char* password_sram_path;
+    const char* password_sram_label; // e.g. "Last Password"; NULL => password_save_label/"Password"
+    int         password_sram_size;
+    int         password_sram_offset;
     char        password_text[128];  // current file contents (reloaded on init/commit)
     // Light-gun (NES Zapper) game: controller pages add a Zapper block whose
     // two switches persist to the engine's keybinds.ini [zapper] section via
@@ -274,6 +278,7 @@ typedef struct {
     bool has_gyro_controls;
     bool has_sharp_filter;
     bool has_affine_filter;
+    bool has_shader;
     bool netplay_supported;
     /* Host opted into first-run wizard + Generate & rebuild (GameInfo). */
     bool setup_wizard_supported;
@@ -605,6 +610,8 @@ void launcher_model_cycle_aa(LauncherModel* m);            // Off/2x/4x/8x (MSAA
 const char* launcher_model_aa_label(const LauncherModel* m);
 void launcher_model_toggle_texture_filter(LauncherModel* m);   // Nearest/Bilinear
 const char* launcher_model_texture_filter_label(const LauncherModel* m);
+void launcher_model_set_shader_path(LauncherModel* m, const char* path);
+void launcher_model_clear_shader_path(LauncherModel* m);
 // PSX geometry precision (gated on has_geometry_precision).
 void launcher_model_toggle_geometry_correction(LauncherModel* m);
 void launcher_model_toggle_perspective_texturing(LauncherModel* m);

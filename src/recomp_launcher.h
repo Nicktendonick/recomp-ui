@@ -627,6 +627,10 @@ struct RecompLauncherCSettings {
     // the host validates on use and persists it like bios_path. Appended
     // additively, same ABI convention as every block above.
     char player_name[64];
+
+    /* GLSL .glsl/.glslp path selected from Display settings. Empty = disabled.
+     * Appended for ABI stability; see GameInfo.has_shader. */
+    char shader_path[512];
 };
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
@@ -848,6 +852,13 @@ typedef struct RecompLauncherCGameInfo {
     // The file is a single line of text. Independent of sram_path.
     const char* password_save_path;   // abs path to the 1-line password file
     const char* password_save_label;  // row label, e.g. "Password" / "Mantra"
+    // Binary SRAM-backed password record. When password_sram_path is non-NULL
+    // the same SAVES row reads/edits a MMXPASS v1 record inside the SRAM file.
+    // password_sram_size is the minimum file size to create/maintain.
+    const char* password_sram_path;
+    const char* password_sram_label;
+    int         password_sram_size;
+    int         password_sram_offset;
     // Light-gun (NES Zapper) game: the controller config page shows a Zapper
     // block (mouse-as-gun + crosshair toggles, persisted to the engine's
     // keybinds.ini [zapper] section) alongside the pad UI.
@@ -1080,6 +1091,9 @@ typedef struct RecompLauncherCGameInfo {
      * name field (e.g. "Console MAC: 00:09:BF:xx:xx:xx"). NULL hides it. */
     int has_player_name;
     const char* identity_detail;
+
+    /* Display row for Settings.shader_path. Appended for ABI stability. */
+    int has_shader;
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */
