@@ -1259,17 +1259,17 @@ const char* launcher_model_rewind_depth_label(const LauncherModel* m) {
 
 void launcher_model_cycle_rewind_interval(LauncherModel* m) {
     if (!m || !m->has_rewind_depth) return;
-    static const int opts[5] = {1, 4, 8, 12, 15};
+    static const int opts[6] = {1, 4, 8, 12, 15, 30};
     int cur = m->s.rewind_interval;
     int idx = 4; /* default 15 */
-    for (int i = 0; i < 5; ++i) if (opts[i] == cur) { idx = i; break; }
-    m->s.rewind_interval = opts[(idx + 1) % 5];
+    for (int i = 0; i < 6; ++i) if (opts[i] == cur) { idx = i; break; }
+    m->s.rewind_interval = opts[(idx + 1) % 6];
 }
 
 const char* launcher_model_rewind_interval_label(const LauncherModel* m) {
     static char buf[16];
     int d = m && m->s.rewind_interval > 0 ? m->s.rewind_interval : 15;
-    if (d != 1 && d != 4 && d != 8 && d != 12 && d != 15) d = 15;
+    if (d != 1 && d != 4 && d != 8 && d != 12 && d != 15 && d != 30) d = 15;
     snprintf(buf, sizeof(buf), "%d", d);
     return buf;
 }
