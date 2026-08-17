@@ -649,7 +649,28 @@ struct RecompLauncherCSettings {
     /* GLSL .glsl/.glslp path selected from Display settings. Empty = disabled.
      * Appended for ABI stability; see GameInfo.has_shader. */
     char shader_path[512];
+
+    /* How a low-res FMV is reconstructed when it is scaled up to the window.
+     * Separate from texture_filter: that one is about the 3D rasterizer's
+     * texture sampling, this one is about a decoded video frame, and the right
+     * answer differs (a movie wants reconstruction, a PSX texture usually wants
+     * the native look). Only consulted while antialiasing is on.
+     *   0 = unset -> the model seeds RECOMP_LAUNCHER_FMV_FILTER_BICUBIC
+     *   1 nearest, 2 bilinear, 3 sharp-bilinear, 4 bicubic
+     * Stored 1-based so a zero-initialized host predating the field gets the
+     * default rather than silently pinning "nearest". See GameInfo.has_fmv_filter.
+     * Appended additively. */
+    int  fmv_filter;
 };
+
+/* Values for RecompLauncherSettings.fmv_filter (1-based; 0 = unset). */
+#define RECOMP_LAUNCHER_FMV_FILTER_NEAREST  1
+#define RECOMP_LAUNCHER_FMV_FILTER_BILINEAR 2
+#define RECOMP_LAUNCHER_FMV_FILTER_SHARP    3
+#define RECOMP_LAUNCHER_FMV_FILTER_BICUBIC  4
+#define RECOMP_LAUNCHER_FMV_FILTER_COUNT    4
+/* Hosts can #ifdef on this to stay source-compatible with older recomp-ui. */
+#define RECOMP_LAUNCHER_HAS_FMV_FILTER 1
 
 // ---- host verification/inspection results (filled by the callbacks below) ----
 // Plain-C structs so a host can implement the callbacks with zero launcher
@@ -1112,6 +1133,12 @@ typedef struct RecompLauncherCGameInfo {
 
     /* Display row for Settings.shader_path. Appended for ABI stability. */
     int has_shader;
+
+    /* Display row for Settings.fmv_filter. Only meaningful for a console whose
+     * runtime decodes full-motion video into a low-res buffer it then scales
+     * (PSX and friends); everything else leaves this 0 and the row is absent.
+     * Appended for ABI stability. */
+    int has_fmv_filter;
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */

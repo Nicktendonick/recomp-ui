@@ -199,6 +199,7 @@ void launcher_model_init(LauncherModel* m,
         m->has_supersampling    = game->has_supersampling != 0;
         m->has_antialiasing     = game->has_antialiasing != 0;
         m->has_texture_filter   = game->has_texture_filter != 0;
+        m->has_fmv_filter       = game->has_fmv_filter != 0;
         m->has_screen_kind      = game->has_screen_kind != 0;
         m->has_frame_interp     = game->has_frame_interp != 0;
         m->has_spu_hq           = game->has_spu_hq != 0;
@@ -473,6 +474,12 @@ void launcher_model_init(LauncherModel* m,
         m->s.screen_kind = clampi(m->s.screen_kind, 0, sk_n - 1);
     }
     if (m->has_texture_filter) m->s.texture_filter = m->s.texture_filter ? 1 : 0;
+    /* 0 = unset (a host predating the field): seed the default rather than
+     * letting a memset pin the least useful value. */
+    if (m->has_fmv_filter) {
+        if (m->s.fmv_filter < 1 || m->s.fmv_filter > RECOMP_LAUNCHER_FMV_FILTER_COUNT)
+            m->s.fmv_filter = RECOMP_LAUNCHER_FMV_FILTER_BICUBIC;
+    }
     if (m->has_renderer) {
         if (m->renderer_labels && m->num_renderers > 0) {
             /* Multi-label cycle (Software / OpenGL / Vulkan). Prefer OpenGL
@@ -1165,6 +1172,23 @@ void launcher_model_toggle_texture_filter(LauncherModel* m) {
 
 const char* launcher_model_texture_filter_label(const LauncherModel* m) {
     return m->s.texture_filter ? "Bilinear" : "Nearest";
+}
+
+void launcher_model_cycle_fmv_filter(LauncherModel* m) {
+    if (!m || !m->has_fmv_filter) return;
+    int v = m->s.fmv_filter;
+    if (v < 1 || v > RECOMP_LAUNCHER_FMV_FILTER_COUNT)
+        v = RECOMP_LAUNCHER_FMV_FILTER_BICUBIC;
+    m->s.fmv_filter = (v % RECOMP_LAUNCHER_FMV_FILTER_COUNT) + 1;
+}
+
+const char* launcher_model_fmv_filter_label(const LauncherModel* m) {
+    switch (m ? m->s.fmv_filter : 0) {
+        case RECOMP_LAUNCHER_FMV_FILTER_NEAREST:  return "Nearest";
+        case RECOMP_LAUNCHER_FMV_FILTER_BILINEAR: return "Bilinear";
+        case RECOMP_LAUNCHER_FMV_FILTER_SHARP:    return "Sharp";
+        default:                                  return "Bicubic";
+    }
 }
 
 void launcher_model_set_shader_path(LauncherModel* m, const char* path) {

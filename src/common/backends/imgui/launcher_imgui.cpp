@@ -2265,6 +2265,7 @@ static const char* elide_left(const char* s, float max_w, char* out, size_t cap)
 bool any_deep_display(const LauncherModel* m) {
     return m->has_window_size || m->has_renderer || m->has_supersampling ||
            m->has_antialiasing || m->has_texture_filter || m->has_screen_kind ||
+           m->has_fmv_filter ||
            m->has_frame_interp || m->has_skip_fmv ||
            m->has_geometry_precision ||
            m->has_rewind_depth;   /* has_turbo_loads draws no row — see below */
@@ -2525,6 +2526,28 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         ImGui::PushID("antialiasing");
         if (ImGui::Button(launcher_model_aa_label(m), ImVec2(px(90), px(30))))
             launcher_model_cycle_aa(m);
+        ImGui::PopID();
+    }
+
+    /* FMV reconstruction. Distinct from Texture filtering above: that samples
+     * the rasterizer's textures, this scales a decoded video frame up to the
+     * window, and the good answer differs between the two. Antialiasing off
+     * means nearest everywhere, so the row has nothing to say then. */
+    if (m->has_fmv_filter) {
+        row_label("FMV filtering", th);
+        ImGui::PushID("fmv_filter");
+        const bool aa_off = m->has_antialiasing && m->s.antialiasing == 0;
+        if (aa_off) ImGui::BeginDisabled();
+        if (ImGui::Button(aa_off ? "Nearest"
+                                 : launcher_model_fmv_filter_label(m),
+                          ImVec2(px(120), px(30))))
+            launcher_model_cycle_fmv_filter(m);
+        if (aa_off) {
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("Antialiasing is off, so video is presented "
+                                  "with hard pixels.");
+        }
         ImGui::PopID();
     }
 

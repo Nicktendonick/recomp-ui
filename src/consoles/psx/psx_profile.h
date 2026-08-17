@@ -99,6 +99,7 @@ static const SystemProfile kSystemProfilePsx = {
         /*renderer*/1, /*supersampling*/1, /*screen_kind*/1, /*frame_interp*/1, /*aspect*/1,
         /*texture_filter*/1, /*antialiasing*/1, /*spu_hq*/1, /*skip_fmv*/1, /*turbo_loads*/1,
         /*bios*/1, /*deadzone*/1,
+        /*widescreen_cells*/0, /*fmv_filter*/1,
     },
     /* verify */  { 1, NULL },    // disc-verdict mode; probe==NULL -> synthesized verdict (see launcher_model.c)
     // PSX's real hotkey catalog: the everyday transport controls only. Omits
@@ -152,6 +153,8 @@ static inline void launcher_profile_apply_psx(RecompLauncherCGameInfo* gi) {
     // Full PS1 settings surface.
     gi->has_window_size = 1; gi->has_renderer = 1; gi->has_supersampling = 1;
     gi->has_antialiasing = 1; gi->has_texture_filter = 1; gi->has_screen_kind = 1;
+    gi->has_fmv_filter = 1;    /* MDEC decodes video at native res; how it is
+                                * scaled to the window is a player choice. */
     gi->has_frame_interp = 0; gi->has_spu_hq = 1; gi->has_skip_fmv = 0;
     gi->has_turbo_loads = 1; gi->has_bios = 1;
     gi->has_deadzone_pct = 1;

@@ -340,6 +340,7 @@ typedef struct {
     bool     has_supersampling;
     bool     has_antialiasing;
     bool     has_texture_filter;
+    bool     has_fmv_filter;
     bool     has_screen_kind;
     bool     has_frame_interp;
     bool     has_spu_hq;
@@ -610,6 +611,9 @@ void launcher_model_cycle_aa(LauncherModel* m);            // Off/2x/4x/8x (MSAA
 const char* launcher_model_aa_label(const LauncherModel* m);
 void launcher_model_toggle_texture_filter(LauncherModel* m);   // Nearest/Bilinear
 const char* launcher_model_texture_filter_label(const LauncherModel* m);
+// FMV reconstruction: Nearest/Bilinear/Sharp/Bicubic (wraps).
+void launcher_model_cycle_fmv_filter(LauncherModel* m);
+const char* launcher_model_fmv_filter_label(const LauncherModel* m);
 void launcher_model_set_shader_path(LauncherModel* m, const char* path);
 void launcher_model_clear_shader_path(LauncherModel* m);
 // PSX geometry precision (gated on has_geometry_precision).
