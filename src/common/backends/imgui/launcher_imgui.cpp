@@ -2642,26 +2642,32 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
      * Settings.turbo_loads remain in the ABI for hosts that still persist the
      * value; they simply no longer draw a control. */
 
-    // HD texture packs (NES module) — same enable + folder row as the legacy
-    // branch renders; kept last, below the console-shape rows.
+    // HD texture packs — toggle plus the ACTIVE pack's name, read-only.
+    //
+    // Unlike the legacy NES row above, there is no folder picker here: which
+    // pack is active is a per-title decision owned by the host's pack manager
+    // (RetComM's Texture Packs modal), which can list installed packs and show
+    // per-pack coverage. A second, blinder picker in this panel could only
+    // fight it — so this panel does the one thing it is better placed to do,
+    // which is flip the pack off and on without leaving the game.
     if (m->hdpack_supported) {
         bool on = m->s.hdpack_enabled != 0;
-        if (ImGui::Checkbox("HD texture pack", &on))
+        if (ImGui::Checkbox("HD textures", &on))
             launcher_model_toggle_hdpack(m);
-        const float bw = px(78);
         ImGui::SameLine(0, px(14));
-        float avail = ImGui::GetContentRegionAvail().x - bw - px(th.spacing_sm);
-        if (avail < px(50)) avail = px(50);
-        const char* dir = m->s.hdpack_dir[0] ? m->s.hdpack_dir : "(not set)";
-        char elided[192]; elide_left(dir, avail, elided, sizeof(elided));
+
+        // Show the pack's folder NAME, not its path: the path is a launcher
+        // data-dir location the player never typed and cannot act on.
+        const char* dir = m->s.hdpack_dir;
+        const char* name = dir;
+        for (const char* c = dir; *c; ++c)
+            if ((*c == '/' || *c == '\\') && c[1]) name = c + 1;
+        const float avail = ImGui::GetContentRegionAvail().x;
+        char elided[192];
+        elide_left(name[0] ? name : "(none selected)", avail, elided, sizeof(elided));
         ImGui::AlignTextToFramePadding();
         ImGui::TextColored(col(th.text_muted), "%s", elided);
-        ImGui::SameLine(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - bw);
-        if (ImGui::Button("Browse", ImVec2(bw, px(30)))) {
-            char buf[512];
-            if (launcher_pick_folder("Select HD pack folder (contains hires.txt)", buf, sizeof(buf)))
-                launcher_model_set_hdpack_dir(m, buf);
-        }
+        if (ImGui::IsItemHovered() && dir[0]) ImGui::SetTooltip("%s", dir);
     }
 }
 
