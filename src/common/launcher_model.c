@@ -204,6 +204,7 @@ void launcher_model_init(LauncherModel* m,
         m->has_frame_interp     = game->has_frame_interp != 0;
         m->has_spu_hq           = game->has_spu_hq != 0;
         m->has_rewind_depth     = game->has_rewind_depth != 0;
+        m->has_vsync            = game->has_vsync != 0;
         m->has_skip_fmv         = game->has_skip_fmv != 0;
         m->has_turbo_loads      = game->has_turbo_loads != 0;
         m->has_geometry_precision = game->has_geometry_precision != 0;
@@ -502,6 +503,12 @@ void launcher_model_init(LauncherModel* m,
         for (int i = 0; i < kInterpFpsCount; ++i)
             if (kInterpFpsTable[i] == m->s.frame_interp_fps) { ok = 1; break; }
         if (!ok) m->s.frame_interp_fps = 0;
+    }
+    if (m->has_vsync &&
+        (m->s.vsync < 1 || m->s.vsync > RECOMP_LAUNCHER_VSYNC_COUNT)) {
+        // 0 = a host that predates the field, or a fresh config. Tear-free is
+        // the safe default; a player who wants the latency picks Off.
+        m->s.vsync = RECOMP_LAUNCHER_VSYNC_ON;
     }
     if (m->num_languages > 0)
         m->s.language_index = clampi(m->s.language_index, 0, m->num_languages - 1);
@@ -1298,6 +1305,25 @@ const char* launcher_model_rewind_interval_label(const LauncherModel* m) {
     return buf;
 }
 
+
+// Driver vsync: On -> Off -> Adaptive, wrapping. Adaptive stays in the cycle
+// rather than being folded into a checkbox so a player who picked it (or whose
+// settings file carries it) cannot lose it just by opening this panel.
+void launcher_model_cycle_vsync(LauncherModel* m) {
+    if (!m || !m->has_vsync) return;
+    int cur = m->s.vsync;
+    if (cur < 1 || cur > RECOMP_LAUNCHER_VSYNC_COUNT)
+        cur = RECOMP_LAUNCHER_VSYNC_ON;
+    m->s.vsync = (cur % RECOMP_LAUNCHER_VSYNC_COUNT) + 1;
+}
+
+const char* launcher_model_vsync_label(const LauncherModel* m) {
+    switch (m ? m->s.vsync : RECOMP_LAUNCHER_VSYNC_ON) {
+        case RECOMP_LAUNCHER_VSYNC_OFF:      return "Off";
+        case RECOMP_LAUNCHER_VSYNC_ADAPTIVE: return "Adaptive";
+        default:                             return "On";
+    }
+}
 
 void launcher_model_toggle_skip_fmv(LauncherModel* m) {
     m->s.auto_skip_fmv = !m->s.auto_skip_fmv;

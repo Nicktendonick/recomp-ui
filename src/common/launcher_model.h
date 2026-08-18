@@ -345,6 +345,7 @@ typedef struct {
     bool     has_frame_interp;
     bool     has_spu_hq;
     bool     has_rewind_depth;
+    bool     has_vsync;
     bool     has_skip_fmv;
     bool     has_turbo_loads;
     // PSX geometry precision: sub-pixel vertices + perspective-correct UVs.
@@ -632,6 +633,10 @@ void launcher_model_cycle_rewind_depth(LauncherModel* m);
 const char* launcher_model_rewind_depth_label(const LauncherModel* m);
 void launcher_model_cycle_rewind_interval(LauncherModel* m);
 const char* launcher_model_rewind_interval_label(const LauncherModel* m);
+// Driver vsync at present time (gated on has_vsync): On -> Off -> Adaptive,
+// wraps. Stored in Settings.vsync as RECOMP_LAUNCHER_VSYNC_*.
+void launcher_model_cycle_vsync(LauncherModel* m);
+const char* launcher_model_vsync_label(const LauncherModel* m);  // "On"/"Off"/"Adaptive"
 void launcher_model_toggle_skip_fmv(LauncherModel* m);
 void launcher_model_toggle_turbo_loads(LauncherModel* m);
 void launcher_model_cycle_fullscreen(LauncherModel* m);        // Off -> Borderless -> Exclusive, wraps

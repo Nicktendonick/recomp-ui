@@ -43,6 +43,8 @@ extern "C" {
 #define RECOMP_LAUNCHER_HAS_REWIND_DEPTH 1
 /* Host may #ifdef this when reading Settings.rewind_interval. */
 #define RECOMP_LAUNCHER_HAS_REWIND_INTERVAL 1
+/* Host may #ifdef this when reading Settings.vsync. */
+#define RECOMP_LAUNCHER_HAS_VSYNC 1
 #define RECOMP_LAUNCHER_MAX_BINDINGS 24
 #define RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS 8
 
@@ -661,7 +663,23 @@ struct RecompLauncherCSettings {
      * default rather than silently pinning "nearest". See GameInfo.has_fmv_filter.
      * Appended additively. */
     int  fmv_filter;
+
+    /* Driver vsync at present time (GameInfo.has_vsync consoles).
+     *   RECOMP_LAUNCHER_VSYNC_ON (1)        tear-free, swap waits on the panel
+     *   RECOMP_LAUNCHER_VSYNC_OFF (2)       immediate swap, lowest display latency
+     *   RECOMP_LAUNCHER_VSYNC_ADAPTIVE (3)  vsync above the refresh, immediate below
+     * 0 = unset -> the model seeds ON. Deliberately NOT stored as the host's
+     * own 1/0/-1 encoding: 0 is a meaningful value there ("off"), which a
+     * zero-initialized host predating this field could not be told apart from
+     * "no opinion". Appended additively. */
+    int  vsync;
 };
+
+/* Values for RecompLauncherCSettings.vsync (1-based; 0 = unset). */
+#define RECOMP_LAUNCHER_VSYNC_ON       1
+#define RECOMP_LAUNCHER_VSYNC_OFF      2
+#define RECOMP_LAUNCHER_VSYNC_ADAPTIVE 3
+#define RECOMP_LAUNCHER_VSYNC_COUNT    3
 
 /* Values for RecompLauncherSettings.fmv_filter (1-based; 0 = unset). */
 #define RECOMP_LAUNCHER_FMV_FILTER_NEAREST  1
@@ -1076,6 +1094,11 @@ typedef struct RecompLauncherCGameInfo {
 
     /* Local rewind buffer size control (Settings.rewind_depth). PSX only. */
     int  has_rewind_depth;
+
+    /* Driver-vsync control (Settings.vsync). 0 => no row drawn, so a console
+     * that leaves this unset keeps exactly today's settings surface. Appended
+     * for ABI stability. */
+    int  has_vsync;
 
     /* Master switch for the first-run setup wizard + Generate & rebuild UI.
      * Appended for ABI stability; zero-init keeps every existing host dark. */

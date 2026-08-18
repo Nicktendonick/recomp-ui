@@ -159,6 +159,8 @@ static inline void launcher_profile_apply_psx(RecompLauncherCGameInfo* gi) {
     gi->has_turbo_loads = 1; gi->has_bios = 1;
     gi->has_deadzone_pct = 1;
     gi->has_rewind_depth = RECOMP_UI_PSX_HAS_REWIND ? 1 : 0;
+    gi->has_vsync = 1;         /* psxrecomp paces frames itself, so driver
+                                * vsync is a latency-vs-tearing choice. */
 }
 
 #ifdef __cplusplus

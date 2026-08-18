@@ -2268,7 +2268,8 @@ bool any_deep_display(const LauncherModel* m) {
            m->has_fmv_filter ||
            m->has_frame_interp || m->has_skip_fmv ||
            m->has_geometry_precision ||
-           m->has_rewind_depth;   /* has_turbo_loads draws no row — see below */
+           m->has_rewind_depth || m->has_vsync;
+           /* has_turbo_loads is intentionally absent: it draws no row (below). */
 }
 
 // Whether the DISPLAY card should grow to fit its content (AutoResizeY) rather
@@ -2604,6 +2605,23 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
             row_label("Presentation target", th);
             if (ImGui::Button(launcher_model_interp_fps_label(m), ImVec2(px(150), px(30))))
                 launcher_model_cycle_interp_fps(m);
+        }
+    }
+
+    // VSync sits with frame interpolation because both decide how a finished
+    // frame reaches the panel, not how it is drawn.
+    if (m->has_vsync) {
+        row_label("VSync", th);
+        if (ImGui::Button(launcher_model_vsync_label(m), ImVec2(px(120), px(30))))
+            launcher_model_cycle_vsync(m);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+            ImGui::SetTooltip(
+                "On: the swap waits for the panel — no tearing.\n"
+                "Off: swap immediately — lowest display latency, may tear.\n"
+                "Adaptive: vsync while the game keeps up, immediate when it "
+                "drops below the refresh rate.\n\n"
+                "The runtime still paces frames to the console's own rate "
+                "either way, so Off does not run the game fast.");
         }
     }
 
