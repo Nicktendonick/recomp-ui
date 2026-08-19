@@ -4612,11 +4612,52 @@ void draw_netplay_host_modal(LauncherModel* m, const LauncherTheme& th) {
         ImGui::InputText("##host_lobby_name", m->netplay_host_name,
                          sizeof(m->netplay_host_name));
         ImGui::Spacing();
+        const RecompLauncherCNetplayCallbacks* np_cb_host = np_cb(m);
+        const bool link_supported =
+            np_cb_host && np_cb_host->link_lobby_supported &&
+            np_cb_host->link_lobby_supported(np_cb_host->ctx);
+        int lobby_kind = (link_supported && np_cb_host->lobby_kind_get)
+                             ? np_cb_host->lobby_kind_get(np_cb_host->ctx)
+                             : 0;
+        if (link_supported) {
+            ImGui::TextColored(col(th.text_muted), "Lobby Type");
+            ImGui::SetNextItemWidth(px(220));
+            /* A link-capable title has no multitap mode: one console seats
+             * 2 players, four players means two linked consoles. So the type
+             * IS the seat count — offering a 4-seat "Standard" room would put
+             * P3/P4 on console A with a multitap the game cannot use. */
+            const char* kind_label = lobby_kind == 1
+                                         ? "PSX-Link — 2 consoles, 4 players"
+                                         : "Standard — 1 console, 2 players";
+            if (ImGui::BeginCombo("##host_lobby_kind", kind_label)) {
+                if (ImGui::Selectable("Standard — 1 console, 2 players",
+                                      lobby_kind == 0) &&
+                    np_cb_host->lobby_kind_set)
+                    np_cb_host->lobby_kind_set(np_cb_host->ctx, 0);
+                if (ImGui::Selectable("PSX-Link — 2 consoles, 4 players",
+                                      lobby_kind == 1) &&
+                    np_cb_host->lobby_kind_set)
+                    np_cb_host->lobby_kind_set(np_cb_host->ctx, 1);
+                ImGui::EndCombo();
+                lobby_kind = np_cb_host->lobby_kind_get
+                                 ? np_cb_host->lobby_kind_get(np_cb_host->ctx)
+                                 : lobby_kind;
+            }
+            if (lobby_kind == 1) {
+                ImGui::SameLine();
+                ImGui::TextColored(col(th.text_muted),
+                                   "P1/P2 on console A, P3/P4 on console B");
+                m->netplay_host_max_players = 4;
+            } else {
+                m->netplay_host_max_players = 2;
+            }
+            ImGui::Spacing();
+        }
         {
             const int game_max = np_game_max_players(m);
             const int sync_max = game_max < RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS
                                      ? game_max : RECOMP_LAUNCHER_NETPLAY_MAX_MEMBERS;
-            const bool game_locked = sync_max <= 2;
+            const bool game_locked = sync_max <= 2 || link_supported;
             const int max_players = np_clamp_host_max_players(m);
             ImGui::TextColored(col(th.text_muted), "Max Players");
             ImGui::SetNextItemWidth(px(140));
@@ -4637,7 +4678,12 @@ void draw_netplay_host_modal(LauncherModel* m, const LauncherTheme& th) {
             ImGui::EndDisabled();
             if (game_locked) {
                 ImGui::SameLine();
-                ImGui::TextColored(col(th.text_muted), "(this game is 2-player)");
+                ImGui::TextColored(col(th.text_muted),
+                                   link_supported
+                                       ? (lobby_kind == 1
+                                              ? "(set by lobby type)"
+                                              : "(one console seats 2)")
+                                       : "(this game is 2-player)");
             }
         }
         ImGui::Spacing();
@@ -4966,6 +5012,157 @@ static void np_ingest_last_error(LauncherModel* m, const RecompLauncherCNetplayC
     if (np->clear_last_error) np->clear_last_error(np->ctx);
 }
 
+/* One seat row of the lobby player table. Shared by the standard single
+ * table and the PSX-Link two-console tables (identical columns; the caller
+ * owns BeginTable/EndTable and the header rows). */
+static void draw_lobby_seat_row(const LauncherTheme& th,
+                                const RecompLauncherCNetplayCallbacks* np,
+                                int slot,
+                                RecompLauncherCNetplayMember* slots,
+                                bool* occupied, bool is_host, float text_h) {
+    const float member_row_h = px(42);
+    ImGui::PushID(slot);
+
+        ImGui::TableNextRow(ImGuiTableRowFlags_None, member_row_h);
+        ImGui::TableSetColumnIndex(0);
+        ImVec2 row_pos = ImGui::GetCursorScreenPos();
+        ImGui::Selectable("##member_row_drop", false,
+                          ImGuiSelectableFlags_SpanAllColumns |
+                          ImGuiSelectableFlags_AllowOverlap,
+                          ImVec2(0, member_row_h));
+        /* Slot 0 = session host / sim authority — guests rearrange only. */
+        if (is_host && np->move_member && slot != 0 &&
+            ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload =
+                    ImGui::AcceptDragDropPayload("NETPLAY_MEMBER_SLOT")) {
+                const int from_slot = *(const int*)payload->Data;
+                if (from_slot != slot && from_slot != 0)
+                    (void)np->move_member(np->ctx, from_slot, slot);
+            }
+            ImGui::EndDragDropTarget();
+        }
+        ImGui::SetCursorScreenPos(row_pos);
+        ImGui::InvisibleButton("##member_drag_handle", ImVec2(px(28), member_row_h));
+        ImVec2 grip_min = ImGui::GetItemRectMin();
+        ImVec2 grip_max = ImGui::GetItemRectMax();
+        const float grip_cx = (grip_min.x + grip_max.x) * 0.5f;
+        const float grip_cy = (grip_min.y + grip_max.y) * 0.5f;
+        const int can_drag =
+            is_host && occupied[slot] && slot != 0 && np->move_member;
+        ImU32 grip_col = imcol(can_drag ? th.text_muted : th.border);
+        ImDrawList* grip_dl = ImGui::GetWindowDrawList();
+        for (int line = -1; line <= 1; ++line) {
+            const float y = grip_cy + px(4) * line;
+            grip_dl->AddLine(ImVec2(grip_cx - px(7), y),
+                             ImVec2(grip_cx + px(7), y), grip_col, px(1.5f));
+        }
+        if (can_drag) {
+            if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                ImGui::SetDragDropPayload("NETPLAY_MEMBER_SLOT", &slot, sizeof(slot));
+                ImGui::BeginGroup();
+                ImGui::Text("P%d", slot + 1);
+                ImGui::SameLine(0, px(28));
+                ImGui::TextUnformatted(slots[slot].display_name);
+                ImGui::SameLine(0, px(28));
+                ImGui::TextColored(col(th.good), "%s",
+                                   slots[slot].is_host ? "Host" : "Connected");
+                ImGui::EndGroup();
+                ImGui::EndDragDropSource();
+            }
+        }
+        ImGui::TableSetColumnIndex(1);
+        table_row_vcenter(member_row_h, text_h);
+        ImGui::Text("P%d", slot + 1);
+        ImGui::TableSetColumnIndex(2);
+        table_row_vcenter(member_row_h, text_h);
+        if (!occupied[slot]) ImGui::PushStyleColor(ImGuiCol_Text, col(th.text_muted));
+        ImGui::TextUnformatted(occupied[slot] ? slots[slot].display_name : "Open slot");
+        if (!occupied[slot]) ImGui::PopStyleColor();
+        ImGui::TableSetColumnIndex(3);
+        table_row_vcenter(member_row_h, text_h);
+        if (occupied[slot] && slots[slot].is_host)
+            ImGui::TextColored(col(th.good), "Host");
+        else if (occupied[slot])
+            ImGui::TextColored(col(th.good), "Connected");
+        else
+            ImGui::TextColored(col(th.text_muted), "Waiting");
+        if (occupied[slot] && slots[slot].bios_offer_valid &&
+            ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "BIOS: %s%s",
+                slots[slot].bios_prefer_openbios ? "OpenBIOS" : "SCPH-1001",
+                slots[slot].bios_can_scph1001 ? "" : " (no SCPH dump)");
+        }
+        ImGui::TableSetColumnIndex(4);
+        table_row_vcenter(member_row_h, text_h);
+        /* RTT to that seat from local peer — never on the local row. */
+        if (occupied[slot] && !slots[slot].is_local &&
+            slots[slot].latency_ms >= 0) {
+            ImGui::Text("%d ms", slots[slot].latency_ms);
+        } else {
+            ImGui::TextColored(col(th.text_muted), "—");
+        }
+        ImGui::TableSetColumnIndex(5);
+        {
+            const float kick_btn = px(34);
+            const bool can_kick = is_host && occupied[slot] &&
+                                  !slots[slot].is_host && np->kick_member;
+            ImVec2 cell = ImGui::GetCursorScreenPos();
+            const float avail_x = ImGui::GetContentRegionAvail().x;
+            ImGui::SetCursorScreenPos(ImVec2(
+                cell.x + (avail_x - kick_btn) * 0.5f,
+                cell.y + (member_row_h - kick_btn) * 0.5f));
+            if (can_kick) {
+                /* Empty label + manual glyph draw: emoji fonts have uneven
+                 * metrics so ButtonTextAlign alone leaves the boot off-center. */
+                const bool pressed =
+                    ImGui::Button("##kick", ImVec2(kick_btn, kick_btn));
+                {
+                    const char* boot = u8"\U0001F97E";
+                    const ImVec2 rmin = ImGui::GetItemRectMin();
+                    const ImVec2 rmax = ImGui::GetItemRectMax();
+                    const ImVec2 ts = ImGui::CalcTextSize(boot);
+                    const ImVec2 tp((rmin.x + rmax.x - ts.x) * 0.5f,
+                                    (rmin.y + rmax.y - ts.y) * 0.5f);
+                    ImGui::GetWindowDrawList()->AddText(
+                        tp, ImGui::GetColorU32(ImGuiCol_Text), boot);
+                }
+                if (pressed)
+                    (void)np->kick_member(np->ctx, slot);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Kick player");
+            } else {
+                /* Non-interactive placeholder — BeginDisabled still animates. */
+                ImGui::Dummy(ImVec2(kick_btn, kick_btn));
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                const ImVec2 rmin = ImGui::GetItemRectMin();
+                const ImVec2 rmax = ImGui::GetItemRectMax();
+                dl->AddRect(rmin, rmax, ImGui::GetColorU32(ImGuiCol_Border),
+                            ImGui::GetStyle().FrameRounding);
+                const char* boot = u8"\U0001F97E";
+                const ImVec2 ts = ImGui::CalcTextSize(boot);
+                dl->AddText(ImVec2((rmin.x + rmax.x - ts.x) * 0.5f,
+                                   (rmin.y + rmax.y - ts.y) * 0.5f),
+                            ImGui::GetColorU32(ImGuiCol_TextDisabled), boot);
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    if (!is_host)
+                        ImGui::SetTooltip("Only the host can kick");
+                    else if (!occupied[slot])
+                        ImGui::SetTooltip("Open slot");
+                    else if (slots[slot].is_host)
+                        ImGui::SetTooltip("Cannot kick the host");
+                    else if (!np->kick_member)
+                        ImGui::SetTooltip("Kick unavailable");
+                    else
+                        ImGui::SetTooltip("Open slot");
+                }
+            }
+        }
+
+    ImGui::PopID();
+}
+
 void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
     const auto* np = np_cb(m);
     if (!np) return;
@@ -5121,159 +5318,51 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
     int seated_players = 0;
     for (int slot = 0; slot < max_slots; ++slot)
         if (occupied[slot]) ++seated_players;
-    if (ImGui::BeginTable("lobby_players", 6,
-                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
-                          ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("##move", ImGuiTableColumnFlags_WidthFixed, px(32));
-        ImGui::TableSetupColumn("Slot", ImGuiTableColumnFlags_WidthFixed, px(40));
-        ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, px(100));
-        ImGui::TableSetupColumn("Latency", ImGuiTableColumnFlags_WidthFixed, px(72));
-        ImGui::TableSetupColumn("Kick", ImGuiTableColumnFlags_WidthFixed, px(56));
-        ImGui::TableHeadersRow();
-        const float text_h = ImGui::GetTextLineHeight();
-        for (int slot = 0; slot < max_slots; ++slot) {
-            const float member_row_h = px(42);
-            ImGui::PushID(slot);
-            ImGui::TableNextRow(ImGuiTableRowFlags_None, member_row_h);
-            ImGui::TableSetColumnIndex(0);
-            ImVec2 row_pos = ImGui::GetCursorScreenPos();
-            ImGui::Selectable("##member_row_drop", false,
-                              ImGuiSelectableFlags_SpanAllColumns |
-                              ImGuiSelectableFlags_AllowOverlap,
-                              ImVec2(0, member_row_h));
-            /* Slot 0 = session host / sim authority — guests rearrange only. */
-            if (is_host && np->move_member && slot != 0 &&
-                ImGui::BeginDragDropTarget()) {
-                if (const ImGuiPayload* payload =
-                        ImGui::AcceptDragDropPayload("NETPLAY_MEMBER_SLOT")) {
-                    const int from_slot = *(const int*)payload->Data;
-                    if (from_slot != slot && from_slot != 0)
-                        (void)np->move_member(np->ctx, from_slot, slot);
-                }
-                ImGui::EndDragDropTarget();
-            }
-            ImGui::SetCursorScreenPos(row_pos);
-            ImGui::InvisibleButton("##member_drag_handle", ImVec2(px(28), member_row_h));
-            ImVec2 grip_min = ImGui::GetItemRectMin();
-            ImVec2 grip_max = ImGui::GetItemRectMax();
-            const float grip_cx = (grip_min.x + grip_max.x) * 0.5f;
-            const float grip_cy = (grip_min.y + grip_max.y) * 0.5f;
-            const int can_drag =
-                is_host && occupied[slot] && slot != 0 && np->move_member;
-            ImU32 grip_col = imcol(can_drag ? th.text_muted : th.border);
-            ImDrawList* grip_dl = ImGui::GetWindowDrawList();
-            for (int line = -1; line <= 1; ++line) {
-                const float y = grip_cy + px(4) * line;
-                grip_dl->AddLine(ImVec2(grip_cx - px(7), y),
-                                 ImVec2(grip_cx + px(7), y), grip_col, px(1.5f));
-            }
-            if (can_drag) {
-                if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
-                    ImGui::SetDragDropPayload("NETPLAY_MEMBER_SLOT", &slot, sizeof(slot));
-                    ImGui::BeginGroup();
-                    ImGui::Text("P%d", slot + 1);
-                    ImGui::SameLine(0, px(28));
-                    ImGui::TextUnformatted(slots[slot].display_name);
-                    ImGui::SameLine(0, px(28));
-                    ImGui::TextColored(col(th.good), "%s",
-                                       slots[slot].is_host ? "Host" : "Connected");
-                    ImGui::EndGroup();
-                    ImGui::EndDragDropSource();
-                }
-            }
-            ImGui::TableSetColumnIndex(1);
-            table_row_vcenter(member_row_h, text_h);
-            ImGui::Text("P%d", slot + 1);
-            ImGui::TableSetColumnIndex(2);
-            table_row_vcenter(member_row_h, text_h);
-            if (!occupied[slot]) ImGui::PushStyleColor(ImGuiCol_Text, col(th.text_muted));
-            ImGui::TextUnformatted(occupied[slot] ? slots[slot].display_name : "Open slot");
-            if (!occupied[slot]) ImGui::PopStyleColor();
-            ImGui::TableSetColumnIndex(3);
-            table_row_vcenter(member_row_h, text_h);
-            if (occupied[slot] && slots[slot].is_host)
-                ImGui::TextColored(col(th.good), "Host");
-            else if (occupied[slot])
-                ImGui::TextColored(col(th.good), "Connected");
-            else
-                ImGui::TextColored(col(th.text_muted), "Waiting");
-            if (occupied[slot] && slots[slot].bios_offer_valid &&
-                ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "BIOS: %s%s",
-                    slots[slot].bios_prefer_openbios ? "OpenBIOS" : "SCPH-1001",
-                    slots[slot].bios_can_scph1001 ? "" : " (no SCPH dump)");
-            }
-            ImGui::TableSetColumnIndex(4);
-            table_row_vcenter(member_row_h, text_h);
-            /* RTT to that seat from local peer — never on the local row. */
-            if (occupied[slot] && !slots[slot].is_local &&
-                slots[slot].latency_ms >= 0) {
-                ImGui::Text("%d ms", slots[slot].latency_ms);
-            } else {
-                ImGui::TextColored(col(th.text_muted), "—");
-            }
-            ImGui::TableSetColumnIndex(5);
-            {
-                const float kick_btn = px(34);
-                const bool can_kick = is_host && occupied[slot] &&
-                                      !slots[slot].is_host && np->kick_member;
-                ImVec2 cell = ImGui::GetCursorScreenPos();
-                const float avail_x = ImGui::GetContentRegionAvail().x;
-                ImGui::SetCursorScreenPos(ImVec2(
-                    cell.x + (avail_x - kick_btn) * 0.5f,
-                    cell.y + (member_row_h - kick_btn) * 0.5f));
-                if (can_kick) {
-                    /* Empty label + manual glyph draw: emoji fonts have uneven
-                     * metrics so ButtonTextAlign alone leaves the boot off-center. */
-                    const bool pressed =
-                        ImGui::Button("##kick", ImVec2(kick_btn, kick_btn));
-                    {
-                        const char* boot = u8"\U0001F97E";
-                        const ImVec2 rmin = ImGui::GetItemRectMin();
-                        const ImVec2 rmax = ImGui::GetItemRectMax();
-                        const ImVec2 ts = ImGui::CalcTextSize(boot);
-                        const ImVec2 tp((rmin.x + rmax.x - ts.x) * 0.5f,
-                                        (rmin.y + rmax.y - ts.y) * 0.5f);
-                        ImGui::GetWindowDrawList()->AddText(
-                            tp, ImGui::GetColorU32(ImGuiCol_Text), boot);
-                    }
-                    if (pressed)
-                        (void)np->kick_member(np->ctx, slot);
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Kick player");
-                } else {
-                    /* Non-interactive placeholder — BeginDisabled still animates. */
-                    ImGui::Dummy(ImVec2(kick_btn, kick_btn));
-                    ImDrawList* dl = ImGui::GetWindowDrawList();
-                    const ImVec2 rmin = ImGui::GetItemRectMin();
-                    const ImVec2 rmax = ImGui::GetItemRectMax();
-                    dl->AddRect(rmin, rmax, ImGui::GetColorU32(ImGuiCol_Border),
-                                ImGui::GetStyle().FrameRounding);
-                    const char* boot = u8"\U0001F97E";
-                    const ImVec2 ts = ImGui::CalcTextSize(boot);
-                    dl->AddText(ImVec2((rmin.x + rmax.x - ts.x) * 0.5f,
-                                       (rmin.y + rmax.y - ts.y) * 0.5f),
-                                ImGui::GetColorU32(ImGuiCol_TextDisabled), boot);
-                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                        if (!is_host)
-                            ImGui::SetTooltip("Only the host can kick");
-                        else if (!occupied[slot])
-                            ImGui::SetTooltip("Open slot");
-                        else if (slots[slot].is_host)
-                            ImGui::SetTooltip("Cannot kick the host");
-                        else if (!np->kick_member)
-                            ImGui::SetTooltip("Kick unavailable");
-                        else
-                            ImGui::SetTooltip("Open slot");
-                    }
-                }
-            }
-            ImGui::PopID();
+    const bool link_kind =
+        max_slots >= 4 &&
+        (((np->lobby_kind_get && np->lobby_kind_get(np->ctx) == 1)) ||
+         (np->link_lobby_supported && np->link_lobby_supported(np->ctx)));
+    const float text_h = ImGui::GetTextLineHeight();
+    auto seat_table = [&](const char* id, const char* title, int lo, int hi) {
+        if (title) ImGui::TextColored(col(th.text_muted), "%s", title);
+        if (ImGui::BeginTable(id, 6,
+                              ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                              ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("##move", ImGuiTableColumnFlags_WidthFixed, px(32));
+            ImGui::TableSetupColumn("Slot", ImGuiTableColumnFlags_WidthFixed, px(40));
+            ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, px(100));
+            ImGui::TableSetupColumn("Latency", ImGuiTableColumnFlags_WidthFixed, px(72));
+            ImGui::TableSetupColumn("Kick", ImGuiTableColumnFlags_WidthFixed, px(56));
+            ImGui::TableHeadersRow();
+            for (int slot = lo; slot < hi; ++slot)
+                draw_lobby_seat_row(th, np, slot, slots, occupied, is_host, text_h);
+            ImGui::EndTable();
         }
-        ImGui::EndTable();
+    };
+    if (link_kind) {
+        /* PSX-Link: two consoles over the serial cable. The host can drag
+         * players between the tables; seats 0/1 race on console A, 2/3 on
+         * console B. Slot 0 (host / sim authority) stays on console A. */
+        ImGui::TextColored(col(th.accent), "PSX-Link lobby");
+        ImGui::SameLine();
+        ImGui::TextColored(col(th.text_muted),
+                           " — two linked consoles, 2 players each");
+        seat_table("lobby_players_a", "Console A — Players 1 & 2", 0, 2);
+        ImGui::Spacing();
+        seat_table("lobby_players_b", "Console B — Players 3 & 4", 2,
+                   max_slots < 4 ? max_slots : 4);
+        {
+            bool b_occupied = false;
+            for (int i = 2; i < 4 && i < max_slots; ++i)
+                if (occupied[i]) b_occupied = true;
+            if (!b_occupied)
+                ImGui::TextColored(col(th.text_muted),
+                    "Console B is empty — the match will start as a standard "
+                    "2-player race.");
+        }
+    } else {
+        seat_table("lobby_players", nullptr, 0, max_slots);
     }
     /* Session BIOS notice (OpenBIOS vs SCPH1001). Keep copy plain — hosts care
      * about save-state compatibility, not kernel-RAM details.
@@ -5797,7 +5886,10 @@ void draw_netplay(LauncherModel* m, const LauncherTheme& th) {
             char lobby_label[96];
             std::snprintf(lobby_label, sizeof(lobby_label), "%s%s",
                           row.name[0] ? row.name : "Unnamed lobby",
-                          row.has_password ? "  [locked]" : "");
+                          row.lobby_kind == 1
+                              ? (row.has_password ? "  [PSX-Link] [locked]"
+                                                  : "  [PSX-Link]")
+                              : (row.has_password ? "  [locked]" : ""));
             ImGui::TextUnformatted(lobby_label);
             ImGui::TableSetColumnIndex(1);
             table_row_vcenter(lobby_row_h, text_h);

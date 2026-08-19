@@ -80,6 +80,8 @@ typedef struct RecompLauncherCNetplayLobby {
     int  has_password;
     /* Round-trip ms to the lobby host; -1 when unknown / timed out. */
     int  latency_ms;
+    /* 0 standard, 1 PSX-Link (browser badge; 0 when the server predates it). */
+    int  lobby_kind;
 } RecompLauncherCNetplayLobby;
 
 typedef struct RecompLauncherCNetplayMember {
@@ -133,6 +135,13 @@ typedef struct RecompLauncherCNetplayLaunch {
     int      force_turn;
     /* Host match_caps: rollback invent/episode path (0/1; lobby default on). */
     int      rollback;
+    /* Lobby kind (match_caps.lobby_kind): 0 = standard; 1 = PSX-Link (two
+     * consoles over the serial cable — 4 seats split into console A = {0,1}
+     * and console B = {2,3}; each client runs its console visibly and drives
+     * a headless follower for the other). Link behavior only engages when a
+     * console-B seat is occupied at launch; otherwise the session degrades to
+     * a standard lobby of the seated players. */
+    int      lobby_kind;
 } RecompLauncherCNetplayLaunch;
 
 typedef struct RecompLauncherCNetplayLocalAddress {
@@ -247,6 +256,13 @@ typedef struct RecompLauncherCNetplayCallbacks {
     /* -1 idle, -2 fail, 0..100 in flight. */
     int  (*mod_xfer_progress)(void* ctx);
     int  (*mod_xfer_failed)(void* ctx, char* err, size_t err_cap);
+    /* Optional PSX-Link lobby type (append-only: positional initializers).
+     * link_lobby_supported: 1 when this title offers the PSX-Link kind
+     * (game.toml [netplay] link_lobby). lobby_kind_get/set: host-side kind
+     * for the room being created / currently joined (0 standard, 1 link). */
+    int  (*link_lobby_supported)(void* ctx);
+    int  (*lobby_kind_get)(void* ctx);
+    int  (*lobby_kind_set)(void* ctx, int kind);
 } RecompLauncherCNetplayCallbacks;
 
 /* ---- schema-driven mods --------------------------------------------------
