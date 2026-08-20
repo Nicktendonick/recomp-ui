@@ -5021,7 +5021,8 @@ static void np_ingest_last_error(LauncherModel* m, const RecompLauncherCNetplayC
 /* One seat row of the lobby player table. Shared by the standard single
  * table and the PSX-Link two-console tables (identical columns; the caller
  * owns BeginTable/EndTable and the header rows). */
-static void draw_lobby_seat_row(const LauncherTheme& th,
+static void draw_lobby_seat_row(LauncherModel* m,
+                                const LauncherTheme& th,
                                 const RecompLauncherCNetplayCallbacks* np,
                                 int slot,
                                 RecompLauncherCNetplayMember* slots,
@@ -5036,7 +5037,19 @@ static void draw_lobby_seat_row(const LauncherTheme& th,
                           ImGuiSelectableFlags_SpanAllColumns |
                           ImGuiSelectableFlags_AllowOverlap,
                           ImVec2(0, member_row_h));
-        /* Slot 0 = session host / sim authority — never a drop target. */
+        /* Slot 0 = session host / sim authority — never a drop target. In a
+         * 2-player room that means the ONLY other player is un-droppable, so
+         * a swap attempt there looks broken unless we explain it. */
+        if (slot == 0 && ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload =
+                    ImGui::AcceptDragDropPayload("NETPLAY_MEMBER_SLOT")) {
+                (void)payload;
+                std::snprintf(m->netplay_status, sizeof(m->netplay_status),
+                              "P1 is the session host seat and cannot be "
+                              "traded.");
+            }
+            ImGui::EndDragDropTarget();
+        }
         if (slot != 0 && ImGui::BeginDragDropTarget()) {
             if (const ImGuiPayload* payload =
                     ImGui::AcceptDragDropPayload("NETPLAY_MEMBER_SLOT")) {
@@ -5048,12 +5061,25 @@ static void draw_lobby_seat_row(const LauncherTheme& th,
                         (void)np->move_member(np->ctx, from_slot, slot);
                     } else if (self_drag) {
                         /* Moving yourself: a free seat is yours to take; an
-                         * occupied one needs that player's consent. */
+                         * occupied one needs that player's consent. Say so
+                         * when the backend refuses — a drag that silently
+                         * does nothing is indistinguishable from a bug. */
+                        int rc = -1;
                         if (!occupied[slot]) {
                             if (np->seat_move_self)
-                                (void)np->seat_move_self(np->ctx, slot);
+                                rc = np->seat_move_self(np->ctx, slot);
+                            if (rc != 0)
+                                std::snprintf(m->netplay_status,
+                                              sizeof(m->netplay_status),
+                                              "Could not move to P%d (seat "
+                                              "refused by the host).", slot + 1);
                         } else if (np->seat_swap_request) {
-                            (void)np->seat_swap_request(np->ctx, slot);
+                            rc = np->seat_swap_request(np->ctx, slot);
+                            if (rc != 0)
+                                std::snprintf(m->netplay_status,
+                                              sizeof(m->netplay_status),
+                                              "Could not ask %s to swap seats.",
+                                              slots[slot].display_name);
                         }
                     }
                 }
@@ -5363,9 +5389,16 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
      * everyone can actually run the match. The host's own seat is covered by
      * its local catalog (it is the source of the plan). */
     int peers_not_ready = 0;
+    char not_ready_names[160] = {0};
     for (int slot = 0; slot < max_slots; ++slot) {
         if (!occupied[slot] || slots[slot].is_host) continue;
-        if (!slots[slot].ready) ++peers_not_ready;
+        if (slots[slot].ready) continue;
+        ++peers_not_ready;
+        /* Name them: "somebody is missing mods" is not actionable when the
+         * player in question is looking at a green screen. */
+        const size_t used = std::strlen(not_ready_names);
+        std::snprintf(not_ready_names + used, sizeof(not_ready_names) - used,
+                      "%s%s", used ? ", " : "", slots[slot].display_name);
     }
     const bool link_kind =
         max_slots >= 4 &&
@@ -5385,7 +5418,7 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
             ImGui::TableSetupColumn("Kick", ImGuiTableColumnFlags_WidthFixed, px(56));
             ImGui::TableHeadersRow();
             for (int slot = lo; slot < hi; ++slot)
-                draw_lobby_seat_row(th, np, slot, slots, occupied, is_host, text_h);
+                draw_lobby_seat_row(m, th, np, slot, slots, occupied, is_host, text_h);
             ImGui::EndTable();
         }
     };
@@ -5664,11 +5697,12 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                                "and are ready.");
         } else {
             ImGui::TextColored(col(th.warn),
-                               "%d player(s) are missing this lobby's mods — "
-                               "they need to open 'View Mods' and download "
-                               "them from the host. The match cannot start "
-                               "until then.",
-                               peers_not_ready);
+                               "Waiting on: %s — this lobby's mods are not "
+                               "confirmed installed there yet. They can open "
+                               "'View Mods' to download them from the host. "
+                               "The match cannot start until then.",
+                               not_ready_names[0] ? not_ready_names
+                                                  : "another player");
         }
         if (lobby_mod_n > 0) {
             ImGui::TextColored(col(th.text_muted),
