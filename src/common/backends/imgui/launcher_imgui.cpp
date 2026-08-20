@@ -4199,6 +4199,14 @@ static bool mod_commit_netplay_launch(LauncherModel* m) {
         if (mods->commit_netplay(mods->ctx, launcher_model_rom_path(m)))
             return true;
         mod_note_error(m);
+        /* A refused mod commit cancels the launch. mod_status only shows on
+         * the Mods page, so mirror it where the player actually is — the
+         * lobby — or the game just never starts with no explanation. */
+        std::snprintf(m->netplay_status, sizeof(m->netplay_status),
+                      "Cannot start: %s",
+                      m->mod_status[0] ? m->mod_status
+                                       : "this lobby's mods could not be "
+                                         "applied on this machine.");
         return false;
     }
     return true;
@@ -5055,26 +5063,17 @@ static void draw_lobby_seat_row(LauncherModel* m,
                           ImGuiSelectableFlags_SpanAllColumns |
                           ImGuiSelectableFlags_AllowOverlap,
                           ImVec2(0, member_row_h));
-        /* Slot 0 = session host / sim authority — never a drop target. In a
-         * 2-player room that means the ONLY other player is un-droppable, so
-         * a swap attempt there looks broken unless we explain it. */
-        if (slot == 0 && ImGui::BeginDragDropTarget()) {
-            if (const ImGuiPayload* payload =
-                    ImGui::AcceptDragDropPayload("NETPLAY_MEMBER_SLOT")) {
-                (void)payload;
-                std::snprintf(m->netplay_status, sizeof(m->netplay_status),
-                              "P1 is the session host seat and cannot be "
-                              "traded.");
-            }
-            ImGui::EndDragDropTarget();
-        }
-        if (slot != 0 && ImGui::BeginDragDropTarget()) {
+        /* Any seat — including P1/host — is a valid drop target: the host's
+         * seat identifies whoever is hosting (host_slot / host_player_id),
+         * not a fixed index, so it can move or be traded into like any
+         * other. */
+        if (ImGui::BeginDragDropTarget()) {
             if (const ImGuiPayload* payload =
                     ImGui::AcceptDragDropPayload("NETPLAY_MEMBER_SLOT")) {
                 const int from_slot = *(const int*)payload->Data;
                 const bool self_drag =
                     from_slot >= 0 && slots[from_slot].is_local;
-                if (from_slot != slot && from_slot != 0) {
+                if (from_slot != slot) {
                     if (is_host && np->move_member && !self_drag) {
                         (void)np->move_member(np->ctx, from_slot, slot);
                     } else if (self_drag) {
@@ -5112,7 +5111,7 @@ static void draw_lobby_seat_row(LauncherModel* m,
         const float grip_cy = (grip_min.y + grip_max.y) * 0.5f;
         const bool self_row = occupied[slot] && slots[slot].is_local;
         const int can_drag =
-            slot != 0 && occupied[slot] &&
+            occupied[slot] &&
             ((is_host && np->move_member) ||
              (self_row && (np->seat_move_self || np->seat_swap_request)));
         ImU32 grip_col = imcol(can_drag ? th.text_muted : th.border);
@@ -5827,9 +5826,13 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                     ImGui::SameLine();
                     ImGui::TextUnformatted(lm.name);
                     ImGui::SameLine();
-                    ImGui::TextColored(col(th.text_muted), "%s%s%s",
+                    ImGui::TextColored(col(th.text_muted), "%s%s%s%s",
                                        lm.version,
-                                       lm.installed ? "" : "  (not installed)",
+                                       lm.installed ? "" : "  — ",
+                                       lm.installed ? ""
+                                                    : (lm.reason[0]
+                                                           ? lm.reason
+                                                           : "not installed"),
                                        lm.builtin ? "  [built-in]" : "");
                     ImGui::Separator();
                 }
@@ -5842,10 +5845,26 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
             ImGui::EndChild();
 
             if (missing_n > 0) {
+                /* Distinguish "you can fix this with Download" from "your
+                 * disc dump is different", which no download can repair. */
+                bool image_mismatch = false;
+                for (int i = 0; i < plan_n; ++i) {
+                    RecompLauncherCNetplayLobbyMod lm{};
+                    if (!np->lobby_mods_get || !np->lobby_mods_get(np->ctx, i, &lm))
+                        continue;
+                    if (!lm.installed && std::strstr(lm.reason, "image"))
+                        image_mismatch = true;
+                }
                 ImGui::Spacing();
                 ImGui::TextColored(col(th.warn),
-                                   "%d mod(s) missing. The match cannot start "
-                                   "until you install them.", missing_n);
+                                   "%d mod(s) unavailable. The match cannot "
+                                   "start until they are.", missing_n);
+                if (image_mismatch) {
+                    ImGui::TextColored(col(th.warn),
+                        "One or more mods target a different dump of this game "
+                        "than yours. Downloading will not help — the host and "
+                        "you need the same disc image.");
+                }
                 ImGui::TextColored(col(th.text_muted),
                                    "Downloading runs the host's code on your "
                                    "machine. Only accept mods from a host you "

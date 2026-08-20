@@ -115,6 +115,9 @@ typedef struct RecompLauncherCNetplayLobbyMod {
     char version[32];
     char name[64];
     int  installed;
+    /* Why `installed` is 0 — "not installed" vs "does not match your game
+     * image". Empty when installed. */
+    char reason[96];
     int  builtin;
     uint32_t size;
 } RecompLauncherCNetplayLobbyMod;
