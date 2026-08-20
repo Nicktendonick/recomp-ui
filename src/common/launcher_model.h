@@ -459,6 +459,8 @@ typedef struct {
     char      netplay_password[64];
     char      netplay_status[160];
     bool      netplay_lobby_settings_open;
+    /* Host-authoritative mod picker for the open lobby (compact mods page). */
+    bool      netplay_lobby_mods_open;
     int       netplay_lobby_input_delay; /* UI cache; engine clamps 2..20 */
     /* When false (default), host picks delay from max peer RTT at match start.
      * When true, netplay_lobby_input_delay is used as-is. */

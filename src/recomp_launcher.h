@@ -107,6 +107,18 @@ typedef struct RecompLauncherCNetplayNeedMod {
     uint32_t size;
 } RecompLauncherCNetplayNeedMod;
 
+/* One entry of the lobby's host-authoritative mod plan, as seen by THIS
+ * peer. `installed` is local: a guest missing a package still sees the row,
+ * so it knows what to download instead of silently failing to seat. */
+typedef struct RecompLauncherCNetplayLobbyMod {
+    char id[96];
+    char version[32];
+    char name[64];
+    int  installed;
+    int  builtin;
+    uint32_t size;
+} RecompLauncherCNetplayLobbyMod;
+
 typedef struct RecompLauncherCNetplayLaunch {
     int      enabled;
     int      local_slot;
@@ -263,6 +275,39 @@ typedef struct RecompLauncherCNetplayCallbacks {
     int  (*link_lobby_supported)(void* ctx);
     int  (*lobby_kind_get)(void* ctx);
     int  (*lobby_kind_set)(void* ctx, int kind);
+    /* Optional (append-only): re-publish the host's match capabilities —
+     * including the required-mod plan built from the currently enabled mod
+     * features — to the lobby right now. The lobby Mods picker calls this
+     * after every toggle so peers see the host's plan without waiting for an
+     * unrelated settings change. No-op for guests. */
+    void (*push_match_caps)(void* ctx);
+    /* Optional (append-only): the lobby's required mod plan as seen by this
+     * peer, live (works after seating, unlike the join-time need_mods flow).
+     * lobby_mods_missing counts entries this peer does not have installed;
+     * lobby_mods_download asks the host to send them over the lobby's mod
+     * transfer channel (0 = started, <0 = unavailable). */
+    int  (*lobby_mods_count)(void* ctx);
+    int  (*lobby_mods_get)(void* ctx, int index,
+                           RecompLauncherCNetplayLobbyMod* out);
+    int  (*lobby_mods_missing)(void* ctx);
+    int  (*lobby_mods_download)(void* ctx);
+    /* Optional (append-only): seat self-service. A player may move ITSELF to
+     * a free seat; taking a seat somebody occupies requires that player's
+     * consent, so it is a request/approve exchange rather than a move.
+     *   seat_move_self(to)      : 0 ok, <0 refused (occupied/unsupported)
+     *   seat_swap_request(to)   : ask the player in `to` to trade seats
+     *   seat_swap_incoming(...) : 1 when somebody asked THIS player to trade;
+     *                             fills their display name and seat
+     *   seat_swap_respond(ok)   : answer the incoming request
+     *   seat_swap_outgoing(...) : 0 idle, 1 waiting, 2 accepted, -1 declined
+     *   seat_swap_clear()       : drop a finished outgoing result */
+    int  (*seat_move_self)(void* ctx, int to_slot);
+    int  (*seat_swap_request)(void* ctx, int target_slot);
+    int  (*seat_swap_incoming)(void* ctx, char* who, size_t who_cap,
+                               int* from_slot);
+    int  (*seat_swap_respond)(void* ctx, int accept);
+    int  (*seat_swap_outgoing)(void* ctx);
+    void (*seat_swap_clear)(void* ctx);
 } RecompLauncherCNetplayCallbacks;
 
 /* ---- schema-driven mods --------------------------------------------------

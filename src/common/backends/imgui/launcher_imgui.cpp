@@ -4163,10 +4163,16 @@ void np_refresh_lobby_list(LauncherModel* m) {
 
 static void mod_note_error(LauncherModel* m);
 static bool mod_commit_launch(LauncherModel* m);
+/* Defined with the Mods page; reused by the compact lobby mod picker. */
+static void draw_mod_feature_option(LauncherModel* m,
+                                    const RecompLauncherCModFeature& feature,
+                                    const RecompLauncherCModOption& option);
 
-/* Netplay must stay vanilla while mod sync is unproven. Prefer the optional
- * provider commit_netplay hook (clears an in-session plan without touching
- * offline selections); otherwise skip mod commit entirely. */
+/* Netplay commits through the provider's commit_netplay hook: it applies the
+ * HOST's lobby mod plan (match_caps.mods) on every peer without touching the
+ * player's persisted offline selection, and clears to vanilla when the host
+ * published no mods. Skipping the hook entirely (no provider support) leaves
+ * the session vanilla, which is the safe default. */
 static bool mod_commit_netplay_launch(LauncherModel* m) {
     if (!m) return true;
     const auto* mods = m->mods;
@@ -5030,14 +5036,27 @@ static void draw_lobby_seat_row(const LauncherTheme& th,
                           ImGuiSelectableFlags_SpanAllColumns |
                           ImGuiSelectableFlags_AllowOverlap,
                           ImVec2(0, member_row_h));
-        /* Slot 0 = session host / sim authority — guests rearrange only. */
-        if (is_host && np->move_member && slot != 0 &&
-            ImGui::BeginDragDropTarget()) {
+        /* Slot 0 = session host / sim authority — never a drop target. */
+        if (slot != 0 && ImGui::BeginDragDropTarget()) {
             if (const ImGuiPayload* payload =
                     ImGui::AcceptDragDropPayload("NETPLAY_MEMBER_SLOT")) {
                 const int from_slot = *(const int*)payload->Data;
-                if (from_slot != slot && from_slot != 0)
-                    (void)np->move_member(np->ctx, from_slot, slot);
+                const bool self_drag =
+                    from_slot >= 0 && slots[from_slot].is_local;
+                if (from_slot != slot && from_slot != 0) {
+                    if (is_host && np->move_member && !self_drag) {
+                        (void)np->move_member(np->ctx, from_slot, slot);
+                    } else if (self_drag) {
+                        /* Moving yourself: a free seat is yours to take; an
+                         * occupied one needs that player's consent. */
+                        if (!occupied[slot]) {
+                            if (np->seat_move_self)
+                                (void)np->seat_move_self(np->ctx, slot);
+                        } else if (np->seat_swap_request) {
+                            (void)np->seat_swap_request(np->ctx, slot);
+                        }
+                    }
+                }
             }
             ImGui::EndDragDropTarget();
         }
@@ -5047,8 +5066,11 @@ static void draw_lobby_seat_row(const LauncherTheme& th,
         ImVec2 grip_max = ImGui::GetItemRectMax();
         const float grip_cx = (grip_min.x + grip_max.x) * 0.5f;
         const float grip_cy = (grip_min.y + grip_max.y) * 0.5f;
+        const bool self_row = occupied[slot] && slots[slot].is_local;
         const int can_drag =
-            is_host && occupied[slot] && slot != 0 && np->move_member;
+            slot != 0 && occupied[slot] &&
+            ((is_host && np->move_member) ||
+             (self_row && (np->seat_move_self || np->seat_swap_request)));
         ImU32 grip_col = imcol(can_drag ? th.text_muted : th.border);
         ImDrawList* grip_dl = ImGui::GetWindowDrawList();
         for (int line = -1; line <= 1; ++line) {
@@ -5177,6 +5199,7 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
     if (!seated) {
         m->netplay_local_room = false;
         m->netplay_lobby_settings_open = false;
+        m->netplay_lobby_mods_open = false;
         /* Keep netplay_lobby_max_slots across create/join races: online create
          * can report unseated for a few frames, and wiping this falls back to
          * game num_players (e.g. 5P) while the list correctly shows 1/2. */
@@ -5281,8 +5304,25 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
     ImGui::Spacing();
 #if RECOMP_UI_ENABLE_MODS
     if (m->mods) {
-        ImGui::TextColored(col(th.text_muted),
-                           "Mods are disabled for netplay (vanilla match).");
+        /* Summarize the plan every peer will run (host-authoritative). */
+        const auto* lmods = m->mods;
+        const int lfc = lmods->feature_count ? lmods->feature_count(lmods->ctx) : 0;
+        int enabled_n = 0;
+        char first_name[128] = {0};   /* RecompLauncherCModFeature::name */
+        for (int i = 0; i < lfc; ++i) {
+            RecompLauncherCModFeature f{};
+            if (!lmods->feature_get(lmods->ctx, i, &f) || !f.enabled) continue;
+            if (!enabled_n) std::snprintf(first_name, sizeof(first_name), "%s", f.name);
+            ++enabled_n;
+        }
+        if (enabled_n == 0) {
+            ImGui::TextColored(col(th.text_muted), "Mods: vanilla match.");
+        } else if (enabled_n == 1) {
+            ImGui::TextColored(col(th.accent2), "Mods: %s", first_name);
+        } else {
+            ImGui::TextColored(col(th.accent2), "Mods: %s +%d more",
+                               first_name, enabled_n - 1);
+        }
         ImGui::Spacing();
     }
 #endif
@@ -5318,6 +5358,15 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
     int seated_players = 0;
     for (int slot = 0; slot < max_slots; ++slot)
         if (occupied[slot]) ++seated_players;
+    /* Mod readiness: a seated peer publishes ready=0 while it is still
+     * missing this lobby's mod plan, so the host can hold the launch until
+     * everyone can actually run the match. The host's own seat is covered by
+     * its local catalog (it is the source of the plan). */
+    int peers_not_ready = 0;
+    for (int slot = 0; slot < max_slots; ++slot) {
+        if (!occupied[slot] || slots[slot].is_host) continue;
+        if (!slots[slot].ready) ++peers_not_ready;
+    }
     const bool link_kind =
         max_slots >= 4 &&
         (((np->lobby_kind_get && np->lobby_kind_get(np->ctx) == 1)) ||
@@ -5417,6 +5466,7 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
         const float btn_h = px(36);
         const float leave_w = px(130);
         const float settings_w = px(110);
+        const float mods_w = px(110);
         const float play_w = px(150);
         const float gap = px(10);
         const float row_w = ImGui::GetContentRegionAvail().x;
@@ -5435,6 +5485,7 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
         if (ImGui::Button("Leave Lobby", ImVec2(leave_w, btn_h))) {
             m->netplay_local_room = false;
             m->netplay_lobby_settings_open = false;
+            m->netplay_lobby_mods_open = false;
             m->netplay_lobby_max_slots = 0;
             if (np->leave) (void)np->leave(np->ctx);
             ImGui::CloseCurrentPopup();
@@ -5474,7 +5525,28 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                 }
                 m->netplay_lobby_settings_open = true;
             }
+        }
 
+#if RECOMP_UI_ENABLE_MODS
+        /* Mods — host picks the lobby's set; guests get the read-only view of
+         * what they will run (the host's plan is authoritative at launch). */
+        if (m->mods) {
+            ImGui::SetCursorPos(
+                ImVec2(row_x + leave_w + gap + (is_host ? settings_w + gap : 0.0f),
+                       row_y));
+            if (ImGui::Button(is_host ? "Mods" : "View Mods",
+                              ImVec2(mods_w, btn_h))) {
+                m->netplay_lobby_mods_open = true;
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+                ImGui::SetTooltip(is_host
+                    ? "Pick the mods everyone in this lobby will run"
+                    : "See the mods the host has enabled for this lobby");
+            }
+        }
+#endif
+
+        if (is_host) {
             /* ▶ Play — green, pinned right. */
             const LngColor play_bg = th.good;
             auto clamp01 = [](float v) { return v > 1.0f ? 1.0f : v; };
@@ -5493,8 +5565,15 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
             /* Require two seated players, without waiting for every open seat.
              * Count only visible game slots: a host sitting alone in P2 after a
              * seat swap must not satisfy the start gate. */
-            const bool can_start = seated_players >= 2;
+            const bool can_start = seated_players >= 2 && peers_not_ready == 0;
             ImGui::BeginDisabled(!can_start);
+            const char* blocked_why =
+                seated_players < 2
+                    ? "Waiting for another player to join"
+                    : (peers_not_ready > 0
+                           ? "Waiting for every player to install this "
+                             "lobby's mods"
+                           : nullptr);
             if (ImGui::Button(u8"\u25B6 Play", ImVec2(play_w, btn_h))) {
                 /* Ensure engine match_caps.rollback matches UI before start. */
                 if (np->rollback_set)
@@ -5534,7 +5613,10 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                     (void)np->input_prediction_set(np->ctx, pred);
                 }
                 if (np->set_ready)
-                    (void)np->set_ready(np->ctx, 1);
+                    (void)np->set_ready(np->ctx,
+                                        np->lobby_mods_missing
+                                            ? (np->lobby_mods_missing(np->ctx) == 0)
+                                            : 1);
                 const int rc = np->request_start
                     ? np->request_start(np->ctx, &m->s) : -1;
                 if (rc != 0) {
@@ -5555,12 +5637,281 @@ void draw_netplay_room_modal(LauncherModel* m, const LauncherTheme& th) {
                 }
             }
             ImGui::EndDisabled();
+            /* Tooltips do not fire on a disabled item unless we allow it. */
+            if (blocked_why &&
+                ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("%s", blocked_why);
             ImGui::PopStyleColor(4);
         }
         /* Advance layout past the button row. */
         ImGui::SetCursorPos(ImVec2(row_x, row_y + btn_h));
         ImGui::Dummy(ImVec2(row_w, 0));
     }
+
+#if RECOMP_UI_ENABLE_MODS
+    /* Mod readiness line: the host cannot start until every peer can run the
+     * plan, so say plainly which state the room is in — and warn about what
+     * downloading a mod actually means (it is code from another player). */
+    if (m->mods && np->lobby_mods_count) {
+        const int lobby_mod_n = np->lobby_mods_count(np->ctx);
+        ImGui::Spacing();
+        if (lobby_mod_n <= 0) {
+            ImGui::TextColored(col(th.text_muted),
+                               "No mods required — vanilla match.");
+        } else if (peers_not_ready == 0) {
+            ImGui::TextColored(col(th.good),
+                               "All players have this lobby's mods installed "
+                               "and are ready.");
+        } else {
+            ImGui::TextColored(col(th.warn),
+                               "%d player(s) are missing this lobby's mods — "
+                               "they need to open 'View Mods' and download "
+                               "them from the host. The match cannot start "
+                               "until then.",
+                               peers_not_ready);
+        }
+        if (lobby_mod_n > 0) {
+            ImGui::TextColored(col(th.text_muted),
+                               "Mods are code that runs on your machine. Only "
+                               "download them from a host you trust.");
+        }
+    }
+#endif
+
+    /* Seat trade: somebody asked to swap with this player. Modal, because
+     * agreeing moves them out of the seat they chose. */
+    if (np->seat_swap_incoming) {
+        char who[64] = {0};
+        int from_slot = -1;
+        if (np->seat_swap_incoming(np->ctx, who, sizeof(who), &from_slot)) {
+            ImGui::OpenPopup("Swap seats?");
+            if (ImGui::BeginPopupModal("Swap seats?", nullptr,
+                                       ImGuiWindowFlags_AlwaysAutoResize)) {
+                ImGui::Text("%s wants to swap seats with you.",
+                            who[0] ? who : "Another player");
+                if (from_slot >= 0)
+                    ImGui::TextColored(col(th.text_muted),
+                                       "They are in P%d; you would move there.",
+                                       from_slot + 1);
+                ImGui::Spacing();
+                if (ImGui::Button("Swap", ImVec2(px(120), 0))) {
+                    if (np->seat_swap_respond)
+                        (void)np->seat_swap_respond(np->ctx, 1);
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Keep my seat", ImVec2(px(140), 0))) {
+                    if (np->seat_swap_respond)
+                        (void)np->seat_swap_respond(np->ctx, 0);
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+        }
+    }
+    /* Outcome of a swap this player asked for. */
+    if (np->seat_swap_outgoing) {
+        const int st = np->seat_swap_outgoing(np->ctx);
+        if (st == 1) {
+            ImGui::TextColored(col(th.text_muted),
+                               "Waiting for the other player to accept the seat "
+                               "swap…");
+        } else if (st == -1) {
+            ImGui::TextColored(col(th.warn),
+                               "That player kept their seat.");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("OK##swapres") && np->seat_swap_clear)
+                np->seat_swap_clear(np->ctx);
+        } else if (st == 2) {
+            if (np->seat_swap_clear) np->seat_swap_clear(np->ctx);
+        }
+    }
+
+#if RECOMP_UI_ENABLE_MODS
+    /* Lobby mod picker: the HOST owns the session plan. Every peer applies
+     * the host's required-mod list at launch (match_caps.mods), so guests get
+     * a read-only view of what they are about to run. Compact by design — the
+     * full Mods page stays the place to install packages and read details. */
+    if (m->netplay_lobby_mods_open && m->mods)
+        ImGui::OpenPopup("Lobby Mods");
+    if (m->mods &&
+        ImGui::BeginPopupModal("Lobby Mods", &m->netplay_lobby_mods_open,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        const auto* mods = m->mods;
+        const int feature_count =
+            mods->feature_count ? mods->feature_count(mods->ctx) : 0;
+        if (is_host) {
+            ImGui::TextColored(col(th.text_muted),
+                               "Everyone in this lobby runs the mods you pick "
+                               "here.");
+        } else {
+            ImGui::TextColored(col(th.text_muted),
+                               "The host picks this lobby's mods. You will run "
+                               "this set when the match starts.");
+        }
+        ImGui::Spacing();
+
+        /* GUEST: the plan is the host's published package list, which may
+         * name packages this peer does not have. Those must be visible (and
+         * downloadable) — they are exactly why the match cannot start. */
+        if (!is_host) {
+            const int plan_n =
+                np->lobby_mods_count ? np->lobby_mods_count(np->ctx) : 0;
+            const int missing_n =
+                np->lobby_mods_missing ? np->lobby_mods_missing(np->ctx) : 0;
+            const int progress =
+                np->mod_xfer_progress ? np->mod_xfer_progress(np->ctx) : -1;
+            if (ImGui::BeginChild("##lobby_plan_list", ImVec2(px(520), px(260)),
+                                  ImGuiChildFlags_Borders)) {
+                for (int i = 0; i < plan_n; ++i) {
+                    RecompLauncherCNetplayLobbyMod lm{};
+                    if (!np->lobby_mods_get || !np->lobby_mods_get(np->ctx, i, &lm))
+                        continue;
+                    if (lm.installed) {
+                        ImGui::TextColored(col(th.good), "OK");
+                    } else {
+                        ImGui::TextColored(col(th.warn), "--");
+                    }
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted(lm.name);
+                    ImGui::SameLine();
+                    ImGui::TextColored(col(th.text_muted), "%s%s%s",
+                                       lm.version,
+                                       lm.installed ? "" : "  (not installed)",
+                                       lm.builtin ? "  [built-in]" : "");
+                    ImGui::Separator();
+                }
+                if (plan_n == 0) {
+                    ImGui::TextColored(col(th.text_muted),
+                                       "The host has not enabled any mods — "
+                                       "vanilla match.");
+                }
+            }
+            ImGui::EndChild();
+
+            if (missing_n > 0) {
+                ImGui::Spacing();
+                ImGui::TextColored(col(th.warn),
+                                   "%d mod(s) missing. The match cannot start "
+                                   "until you install them.", missing_n);
+                ImGui::TextColored(col(th.text_muted),
+                                   "Downloading runs the host's code on your "
+                                   "machine. Only accept mods from a host you "
+                                   "trust.");
+                if (progress >= 0 && progress < 100) {
+                    ImGui::ProgressBar(progress / 100.0f,
+                                       ImVec2(px(320), 0));
+                    ImGui::SameLine();
+                    if (ImGui::Button("Cancel", ImVec2(px(100), 0)) &&
+                        np->mod_xfer_cancel) {
+                        np->mod_xfer_cancel(np->ctx);
+                    }
+                } else {
+                    if (ImGui::Button("Download from host", ImVec2(px(200), 0))) {
+                        const int rc = np->lobby_mods_download
+                            ? np->lobby_mods_download(np->ctx) : -1;
+                        if (rc != 0) {
+                            std::snprintf(m->mod_status, sizeof(m->mod_status),
+                                          "Could not start the download — ask "
+                                          "the host to re-open the lobby, or "
+                                          "install the mods manually.");
+                        } else {
+                            m->mod_status[0] = '\0';
+                        }
+                    }
+                }
+                char xfer_err[160];
+                if (np->mod_xfer_failed &&
+                    np->mod_xfer_failed(np->ctx, xfer_err, sizeof(xfer_err)) &&
+                    xfer_err[0]) {
+                    ImGui::TextColored(col(th.warn), "Transfer failed: %s",
+                                       xfer_err);
+                }
+            } else if (plan_n > 0) {
+                ImGui::Spacing();
+                ImGui::TextColored(col(th.good),
+                                   "You have every mod this lobby needs.");
+            }
+        }
+
+        ImGui::BeginDisabled(!is_host);
+        if (is_host &&
+            ImGui::BeginChild("##lobby_mod_list", ImVec2(px(520), px(300)),
+                              ImGuiChildFlags_Borders)) {
+            int shown = 0;
+            for (int i = 0; i < feature_count; ++i) {
+                RecompLauncherCModFeature f{};
+                if (!mods->feature_get(mods->ctx, i, &f)) continue;
+                ++shown;
+                ImGui::PushID(f.package_id);
+                ImGui::PushID(f.id);
+
+                bool enabled = f.enabled != 0;
+                if (ImGui::Checkbox("##en", &enabled)) {
+                    if (mods->feature_enable(mods->ctx, f.package_id, f.id,
+                                             enabled ? 1 : 0)) {
+                        /* Publish immediately: peers must see the host's plan
+                         * without waiting for an unrelated settings change. */
+                        if (np->push_match_caps) np->push_match_caps(np->ctx);
+                    } else {
+                        mod_note_error(m);
+                    }
+                }
+                ImGui::SameLine();
+                if (f.has_error) {
+                    ImGui::TextColored(col(th.warn), "!");
+                    if (ImGui::IsItemHovered() && f.status[0])
+                        ImGui::SetTooltip("%s", f.status);
+                    ImGui::SameLine();
+                }
+                ImGui::TextUnformatted(f.name);
+                if (f.package_name[0] || f.package_version[0]) {
+                    ImGui::SameLine();
+                    ImGui::TextColored(col(th.text_muted), "(%s %s)",
+                                       f.package_name[0] ? f.package_name
+                                                         : f.package_id,
+                                       f.package_version);
+                }
+
+                /* Options of an ENABLED feature are part of the plan, so they
+                 * belong here — a divergent option value is exactly the kind
+                 * of mismatch that only shows up as a mid-race desync. */
+                if (enabled && f.option_count > 0 && mods->feature_option_get) {
+                    ImGui::Indent(px(24));
+                    for (int o = 0; o < f.option_count; ++o) {
+                        RecompLauncherCModOption opt{};
+                        if (!mods->feature_option_get(mods->ctx, f.package_id,
+                                                      f.id, o, &opt))
+                            continue;
+                        draw_mod_feature_option(m, f, opt);
+                    }
+                    ImGui::Unindent(px(24));
+                }
+                ImGui::PopID();
+                ImGui::PopID();
+                ImGui::Separator();
+            }
+            if (shown == 0) {
+                ImGui::TextColored(col(th.text_muted),
+                                   feature_count
+                                       ? "No mods enabled — vanilla match."
+                                       : "No mod features installed.");
+            }
+        }
+        if (is_host) ImGui::EndChild();
+        ImGui::EndDisabled();
+
+        if (m->mod_status[0]) {
+            ImGui::TextColored(col(th.warn), "%s", m->mod_status);
+        }
+        ImGui::Spacing();
+        if (ImGui::Button("Close", ImVec2(px(120), 0))) {
+            m->netplay_lobby_mods_open = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+#endif
 
     if (is_host && m->netplay_lobby_settings_open)
         ImGui::OpenPopup("Lobby Settings");
