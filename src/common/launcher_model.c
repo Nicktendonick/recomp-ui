@@ -911,7 +911,10 @@ bool launcher_model_rom_verified(const LauncherModel* m) {
 }
 
 void launcher_model_set_view(LauncherModel* m, LngView v) {
-    if (v < 0 || v > LNG_VIEW_MODS) return;
+    // Keep this bound at the final enum value.  Assist Tools and Credits were
+    // added after Mods; using the old LNG_VIEW_MODS ceiling made their header
+    // buttons look clickable while silently rejecting the navigation request.
+    if (v < 0 || v > LNG_VIEW_CREDITS) return;
     /* Re-entering Netplay should rescan server + LAN lists. */
     if (m->view == LNG_VIEW_NETPLAY && v != LNG_VIEW_NETPLAY)
         m->netplay_list_fresh = false;

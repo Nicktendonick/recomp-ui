@@ -2280,6 +2280,9 @@ bool any_deep_display(const LauncherModel* m) {
 // the fixed height (byte-identical to before this console existed).
 bool video_card_grows(const LauncherModel* m) {
     if (any_deep_display(m)) return true;
+    if (m->widescreen_supported || m->adaptive_view_supported ||
+        m->num_aspect_labels > 0 || m->aspect_mask)
+        return true;
     if (m->has_shader) return true;
     if (m->has_sharp_filter || m->has_affine_filter) return true;
     if (m->num_display_layouts > 0) return true;
@@ -2287,6 +2290,27 @@ bool video_card_grows(const LauncherModel* m) {
     // add extra rows the fixed no_scroll band wasn't sized for.
     if (m->has_integer_scale || m->hdpack_supported) return true;
     return false;
+}
+
+bool has_view_mode_control(const LauncherModel* m) {
+    return m && (m->widescreen_supported || m->adaptive_view_supported ||
+                 m->num_aspect_labels > 0 || m->aspect_mask);
+}
+
+void draw_view_mode_row(LauncherModel* m, const LauncherTheme& th,
+                        float col_w = 0.0f) {
+    if (!has_view_mode_control(m)) return;
+    const char* label = (m->aspect_setting_label && m->aspect_setting_label[0])
+        ? m->aspect_setting_label : "View mode";
+    row_label(label, th, col_w);
+    ImGui::PushID("view_mode");
+    if (ImGui::Button(launcher_model_view_mode_label(m),
+                      ImVec2(px(260), px(30))))
+        launcher_model_cycle_view_mode(m);
+    if (m->aspect_setting_help && m->aspect_setting_help[0] &&
+        ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        ImGui::SetTooltip("%s", m->aspect_setting_help);
+    ImGui::PopID();
 }
 
 void draw_shader_row(LauncherModel* m, const LauncherTheme& th, float col_w = 0.0f) {
@@ -2373,6 +2397,13 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
             if (t > cw) cw = t;
         }
         if (m->has_integer_scale) { float t = ImGui::CalcTextSize("Integer scaling").x; if (t > cw) cw = t; }
+        if (has_view_mode_control(m)) {
+            const char* label =
+                (m->aspect_setting_label && m->aspect_setting_label[0])
+                    ? m->aspect_setting_label : "View mode";
+            float t = ImGui::CalcTextSize(label).x;
+            if (t > cw) cw = t;
+        }
         cw += px(18.0f);
         row_label("Window scale", th, cw);
         ImGui::PushID("window_scale");
@@ -2387,6 +2418,7 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         if (ImGui::Button(launcher_model_fullscreen_label(m), ImVec2(px(120), px(30))))
             launcher_model_cycle_fullscreen(m);
         ImGui::PopID();
+        draw_view_mode_row(m, th, cw);
         if (m->num_display_layouts > 0) {
             row_label("Screen layout", th, cw);
             ImGui::PushID("screen_layout");
@@ -2498,6 +2530,7 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
     if (ImGui::Button(launcher_model_fullscreen_label(m), ImVec2(px(120), px(30))))
         launcher_model_cycle_fullscreen(m);
     ImGui::PopID();
+    draw_view_mode_row(m, th);
     if (m->num_display_layouts > 0) {
         row_label("Screen layout", th);
         ImGui::PushID("screen_layout");
