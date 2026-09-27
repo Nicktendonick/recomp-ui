@@ -243,6 +243,11 @@ typedef struct {
     // Box-art path relative to the assets dir (GameInfo.boxart_path);
     // NULL => the default "assets/img/boxart.tga".
     const char* boxart_path;
+    const char* logo_path;
+    const char* backdrop_path;
+    const char* tagline;
+    bool sidebar_layout;
+    const char* settings_note;
 
     // ---- N64 Transfer Pak (GameInfo.tpak_slots > 0 games) ------------------
     // Per-slot facts refreshed via tpak_inspect_cb (the HOST's cartridge
@@ -310,9 +315,20 @@ typedef struct {
     bool has_assist_tools;
     const char* assist_tools_note;
     bool settings_bindings;
+    bool hybrid_input;
+    void* import_file_ctx;
+    int (*import_file)(void*, const char*, const char*, char*, size_t, char*, size_t);
+    const char* save_states_note;
+    size_t battery_save_size;
+    char file_status[512];
     const char* const* assist_binding_labels;
     int assist_binding_count;
     const char* credits_text;
+    const char* credits_title;
+    const char* credits_secondary_title;
+    const char* credits_secondary_text;
+    const char* credits_tools_text;
+    bool credits_tools_open;
     int assist_fast_forward_min;
     int assist_fast_forward_max;
     /* Resolved defaults for the assist bindings, seeded from
@@ -578,6 +594,10 @@ bool launcher_model_rom_verified(const LauncherModel* m);
 
 // ---- navigation ----
 void launcher_model_set_view(LauncherModel* m, LngView v);
+/* Patch import is independent of the optional mod catalog provider. */
+bool launcher_model_has_mods_view(const LauncherModel* m);
+bool launcher_model_has_credits_view(const LauncherModel* m);
+void launcher_model_show_credit_tools(LauncherModel* m, bool open);
 void launcher_model_open_config(LauncherModel* m, int player);  // -> Controller view
 void launcher_model_begin_camera_capture(LauncherModel* m, int action);
 void launcher_model_cancel_camera_capture(LauncherModel* m);

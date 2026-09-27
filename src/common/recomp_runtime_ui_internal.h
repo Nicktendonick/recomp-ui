@@ -15,6 +15,8 @@ struct RecompRuntimeUi {
     size_t row_index;
     int open;
     int in_section;
+    const RecompRuntimeUiItem *pending_action;
+    int confirm_accept;
     unsigned status_frames;
     char status[48];
     RecompRuntimeUiItem *owned_items;

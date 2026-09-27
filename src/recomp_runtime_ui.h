@@ -81,6 +81,9 @@ enum {
 #define RECOMP_RUNTIME_UI_KEY_SAVE_STATE        "system.save_state"
 #define RECOMP_RUNTIME_UI_KEY_LOAD_STATE        "system.load_state"
 #define RECOMP_RUNTIME_UI_KEY_RESET             "system.reset"
+#define RECOMP_RUNTIME_UI_KEY_PAUSE             "system.pause"
+#define RECOMP_RUNTIME_UI_KEY_PAUSE_ON_OPEN     "system.pause_on_open"
+#define RECOMP_RUNTIME_UI_KEY_CLOSE             "system.close"
 
 typedef struct RecompRuntimeUiItem {
     const char *key;
@@ -95,6 +98,8 @@ typedef struct RecompRuntimeUiItem {
     size_t choice_count;
     /* Optional stable values for sparse choices. NULL means minimum + index. */
     const int *choice_values;
+    /* Optional ACTION confirmation; Cancel is selected by default. */
+    const char *confirmation;
 } RecompRuntimeUiItem;
 
 typedef struct RecompRuntimeUiCallbacks {
@@ -169,6 +174,9 @@ enum {
     RECOMP_RUNTIME_UI_STANDARD_LOAD_STATE        = UINT64_C(1) << 14,
     RECOMP_RUNTIME_UI_STANDARD_RESET             = UINT64_C(1) << 15,
     RECOMP_RUNTIME_UI_STANDARD_FMV_FILTER        = UINT64_C(1) << 16,
+    RECOMP_RUNTIME_UI_STANDARD_PAUSE             = UINT64_C(1) << 17,
+    RECOMP_RUNTIME_UI_STANDARD_CLOSE             = UINT64_C(1) << 18,
+    RECOMP_RUNTIME_UI_STANDARD_PAUSE_ON_OPEN     = UINT64_C(1) << 19,
 };
 
 typedef struct RecompRuntimeUiStandardConfig {
@@ -198,6 +206,11 @@ void recomp_runtime_ui_destroy(RecompRuntimeUi *ui);
 int recomp_runtime_ui_is_open(const RecompRuntimeUi *ui);
 void recomp_runtime_ui_open(RecompRuntimeUi *ui);
 void recomp_runtime_ui_close(RecompRuntimeUi *ui);
+/* Semantic activation shared by mouse, keyboard, controller and host tests.
+ * Destructive actions enter confirmation, never bypass it. */
+int recomp_runtime_ui_activate(RecompRuntimeUi *ui, const char *key);
+void recomp_runtime_ui_confirm(RecompRuntimeUi *ui, int accept);
+int recomp_runtime_ui_confirmation_pending(const RecompRuntimeUi *ui);
 
 /* Returns non-zero when the input belongs to the menu. */
 int recomp_runtime_ui_handle_input(RecompRuntimeUi *ui,
@@ -231,6 +244,8 @@ void recomp_runtime_ui_render_argb8888(RecompRuntimeUi *ui, void *pixels,
  * version consume the same runtime model.
  */
 void recomp_runtime_ui_render_imgui(RecompRuntimeUi *ui);
+/* Compact non-interactive indicator when manually paused with the menu shut. */
+void recomp_runtime_ui_render_paused_imgui(RecompRuntimeUi *ui);
 
 #ifdef __cplusplus
 }

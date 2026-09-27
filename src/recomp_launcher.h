@@ -1263,6 +1263,29 @@ typedef struct RecompLauncherCGameInfo {
     const char* rom_patch_note;
     const char* rom_patch_cache_dir;
     const char* rom_patch_required_sha1;
+    // Additive, opt-in portable/hybrid host contract. Selected files are
+    // imported by the host; failures leave the prior selection intact.
+    int hybrid_input;
+    void* import_file_ctx;
+    int (*import_file)(void*, const char* category, const char* source,
+                       char* result, size_t capacity, char* error, size_t error_capacity);
+    const char* save_states_note;
+    size_t battery_save_size; // 0 = host has no fixed-size constraint
+    /* Optional second credits panel. Host owns strings through launcher exit.
+     * NULL secondary text preserves the legacy single-panel layout. */
+    const char* credits_title;
+    const char* credits_secondary_title;
+    const char* credits_secondary_text;
+    /* Opt-in credits details page. Plain UTF-8; standalone HTTP(S) URL lines
+     * become user-activated links. Host retains ownership until exit. */
+    const char* credits_tools_text;
+    // Optional game-owned presentation. NULL/false retains the console layout.
+    // Asset paths use the same executable-relative resolver as boxart_path.
+    const char* logo_path;
+    const char* backdrop_path;
+    const char* tagline;
+    int sidebar_layout;
+    const char* settings_note; // Optional host-owned location/help text, Settings only.
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */

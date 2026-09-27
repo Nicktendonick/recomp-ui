@@ -45,7 +45,7 @@ int recomp_launcher_run_window(const char* window_title,
 
     LauncherPlatform plat;
     if (!launcher_platform_open(&plat, window_title ? window_title : "Launcher",
-                                1100, 880)) {
+                                  game && game->sidebar_layout ? 1240 : 1100, 880)) {
         // Window/GL init failed — tell the caller to boot as if the launcher was
         // skipped, exactly like the old launcher's UNAVAILABLE path.
         return RECOMP_LAUNCHER_RESULT_UNAVAILABLE;
@@ -63,7 +63,8 @@ int recomp_launcher_run_window(const char* window_title,
 
     launcher_platform_close(&plat);
 
-    if (act == LNG_ACTION_LAUNCH || act == LNG_ACTION_RELAUNCH) {
+    if (act == LNG_ACTION_LAUNCH || act == LNG_ACTION_RELAUNCH ||
+        (act == LNG_ACTION_QUIT && model.hybrid_input)) {
         launcher_model_commit(&model, io);   // edited settings back to the caller
         const char* rom = launcher_model_effective_rom_path(&model);
         if (out_rom_path && out_rom_path_len) {
@@ -80,7 +81,8 @@ int recomp_launcher_run_window(const char* window_title,
                          "%s", model.relaunch_exe);
             return RECOMP_LAUNCHER_RESULT_RELAUNCH;
         }
-        return RECOMP_LAUNCHER_RESULT_LAUNCH;
+        return act == LNG_ACTION_QUIT ? RECOMP_LAUNCHER_RESULT_QUIT
+                                     : RECOMP_LAUNCHER_RESULT_LAUNCH;
     }
 
     return RECOMP_LAUNCHER_RESULT_QUIT;

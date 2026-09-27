@@ -83,6 +83,33 @@ RecompRuntimeUi *recomp_runtime_ui_create_standard(
     }
 
     size_t count = 0;
+    /* Session actions come first when the host opts into the pause menu. */
+    if (has(f, RECOMP_RUNTIME_UI_STANDARD_PAUSE))
+        add_item(items, &count, RECOMP_RUNTIME_UI_KEY_PAUSE, "Game", "Pause game",
+                 "Hold gameplay, even when the menu is closed.",
+                 RECOMP_RUNTIME_UI_ACTION, 0, 0, 0, NULL, 0, NULL);
+    if (has(f, RECOMP_RUNTIME_UI_STANDARD_RESUME))
+        add_item(items, &count, RECOMP_RUNTIME_UI_KEY_RESUME,
+                 has(f, RECOMP_RUNTIME_UI_STANDARD_PAUSE) ? "Game" : "System", "Resume game",
+                 "Resume gameplay and close the menu.", RECOMP_RUNTIME_UI_ACTION,
+                 0, 0, 0, NULL, 0, NULL);
+    if (has(f, RECOMP_RUNTIME_UI_STANDARD_PAUSE_ON_OPEN))
+        add_item(items, &count, RECOMP_RUNTIME_UI_KEY_PAUSE_ON_OPEN, "Game",
+                 "Pause while Esc menu is open",
+                 "On: pause automatically. Off: let the game run behind the menu. Manual Pause still applies.",
+                 RECOMP_RUNTIME_UI_BOOL, 0, 1, 1, NULL, 0, NULL);
+    if (has(f, RECOMP_RUNTIME_UI_STANDARD_RESET)) {
+        add_item(items, &count, RECOMP_RUNTIME_UI_KEY_RESET, "Game", "Reset game",
+                 "Restart from the title screen. Battery saves are kept.",
+                 RECOMP_RUNTIME_UI_ACTION, 0, 0, 0, NULL, 0, NULL);
+        items[count-1].confirmation = "Restart the game? Unsaved progress will be lost. Your battery save and save states will not be deleted.";
+    }
+    if (has(f, RECOMP_RUNTIME_UI_STANDARD_CLOSE)) {
+        add_item(items, &count, RECOMP_RUNTIME_UI_KEY_CLOSE, "Game", "Close game",
+                 "End this session and close the game window.",
+                 RECOMP_RUNTIME_UI_ACTION, 0, 0, 0, NULL, 0, NULL);
+        items[count-1].confirmation = "Close the game? Unsaved progress will be lost. Your battery save and save states will not be deleted.";
+    }
     if (has(f, RECOMP_RUNTIME_UI_STANDARD_FULLSCREEN))
         add_item(items, &count, RECOMP_RUNTIME_UI_KEY_FULLSCREEN, "Display",
                  "Fullscreen", "Choose windowed or fullscreen output.",
@@ -140,10 +167,6 @@ RecompRuntimeUi *recomp_runtime_ui_create_standard(
         add_item(items, &count, RECOMP_RUNTIME_UI_KEY_VOLUME, "Audio", "Volume",
                  "Set the in-game mixer volume.", RECOMP_RUNTIME_UI_INT,
                  0, 100, 5, NULL, 0, NULL);
-    if (has(f, RECOMP_RUNTIME_UI_STANDARD_RESUME))
-        add_item(items, &count, RECOMP_RUNTIME_UI_KEY_RESUME, "System", "Resume game",
-                 "Close settings and return to the game.", RECOMP_RUNTIME_UI_ACTION,
-                 0, 0, 0, NULL, 0, NULL);
     if (has(f, RECOMP_RUNTIME_UI_STANDARD_SAVE_STATE))
         add_item(items, &count, RECOMP_RUNTIME_UI_KEY_SAVE_STATE, "System", "Save state",
                  "Save the current state.", RECOMP_RUNTIME_UI_ACTION,
@@ -151,10 +174,6 @@ RecompRuntimeUi *recomp_runtime_ui_create_standard(
     if (has(f, RECOMP_RUNTIME_UI_STANDARD_LOAD_STATE))
         add_item(items, &count, RECOMP_RUNTIME_UI_KEY_LOAD_STATE, "System", "Load state",
                  "Load the current state slot.", RECOMP_RUNTIME_UI_ACTION,
-                 0, 0, 0, NULL, 0, NULL);
-    if (has(f, RECOMP_RUNTIME_UI_STANDARD_RESET))
-        add_item(items, &count, RECOMP_RUNTIME_UI_KEY_RESET, "System", "Reset game",
-                 "Reset the emulated machine.", RECOMP_RUNTIME_UI_ACTION,
                  0, 0, 0, NULL, 0, NULL);
 
     if (standard->extra_items && standard->extra_item_count) {

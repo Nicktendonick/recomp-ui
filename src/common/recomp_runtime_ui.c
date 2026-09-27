@@ -83,6 +83,7 @@ int recomp_runtime_ui_is_open(const RecompRuntimeUi *ui) {
 
 void recomp_runtime_ui_open(RecompRuntimeUi *ui) {
     if (!ui) return;
+    ui->pending_action = NULL;
     ui->in_section = 0;
     ui->row_index = 0;
     visibility(ui, 1);
@@ -91,7 +92,7 @@ void recomp_runtime_ui_open(RecompRuntimeUi *ui) {
 void recomp_runtime_ui_close(RecompRuntimeUi *ui) {
     /* Abandon any in-progress edit, so reopening never resumes a stale buffer
      * and wants_text_input cannot stay stuck on with the menu shut. */
-    if (ui) ui->editing_text = 0;
+    if (ui) { ui->editing_text = 0; ui->pending_action = NULL; }
     visibility(ui, 0);
 }
 
@@ -121,15 +122,52 @@ static void accepted_action(RecompRuntimeUi *ui) {
     ui->status_frames = 90;
 }
 
+int recomp_runtime_ui_confirmation_pending(const RecompRuntimeUi *ui) {
+    return ui && ui->open && ui->pending_action;
+}
+
+void recomp_runtime_ui_confirm(RecompRuntimeUi *ui, int accept) {
+    if (!ui || !ui->open) return;
+    const RecompRuntimeUiItem *item = ui->pending_action;
+    ui->pending_action = NULL;
+    ui->confirm_accept = 0;
+    if (accept && item && recomp_runtime_ui_item_enabled(ui, item) &&
+        ui->config.callbacks.run_action &&
+        ui->config.callbacks.run_action(ui->config.callbacks.context, item))
+        accepted_action(ui);
+}
+
+int recomp_runtime_ui_activate(RecompRuntimeUi *ui, const char *key) {
+    if (!ui || !ui->open || !key || ui->pending_action) return 0;
+    for (size_t i = 0; i < ui->config.item_count; ++i) {
+        const RecompRuntimeUiItem *item = &ui->config.items[i];
+        if (!same_text(item->key, key) || item->type != RECOMP_RUNTIME_UI_ACTION ||
+            !recomp_runtime_ui_item_enabled(ui, item)) continue;
+        if (item->confirmation && item->confirmation[0]) {
+            ui->pending_action = item;
+            ui->confirm_accept = 0;
+            ui->editing_text = 0;
+            return 1;
+        }
+        if (ui->config.callbacks.run_action &&
+            ui->config.callbacks.run_action(ui->config.callbacks.context, item)) {
+            accepted_action(ui);
+            return 1;
+        }
+        return 0;
+    }
+    return 0;
+}
+
 void recomp_runtime_ui_adjust_current(RecompRuntimeUi *ui, int direction,
                                       int activate, int repeat) {
+    if (!ui || ui->pending_action) return;
     const RecompRuntimeUiItem *item = recomp_runtime_ui_section_item(
         ui, ui->section_index, ui->row_index);
     if (!item || !recomp_runtime_ui_item_enabled(ui, item)) return;
     if (item->type == RECOMP_RUNTIME_UI_ACTION) {
         if (!activate || repeat || !ui->config.callbacks.run_action) return;
-        if (ui->config.callbacks.run_action(ui->config.callbacks.context, item))
-            accepted_action(ui);
+        recomp_runtime_ui_activate(ui, item->key);
         return;
     }
     if (item->type == RECOMP_RUNTIME_UI_TEXT) {
@@ -224,6 +262,18 @@ int recomp_runtime_ui_handle_input(RecompRuntimeUi *ui,
         return 0;
     }
     if (!pressed) return 1;
+    if (ui->pending_action) {
+        if (repeat) return 1;
+        if (input == RECOMP_RUNTIME_UI_INPUT_BACK || input == RECOMP_RUNTIME_UI_INPUT_TOGGLE)
+            recomp_runtime_ui_confirm(ui, 0);
+        else if (input == RECOMP_RUNTIME_UI_INPUT_LEFT || input == RECOMP_RUNTIME_UI_INPUT_UP)
+            ui->confirm_accept = 0;
+        else if (input == RECOMP_RUNTIME_UI_INPUT_RIGHT || input == RECOMP_RUNTIME_UI_INPUT_DOWN)
+            ui->confirm_accept = 1;
+        else if (input == RECOMP_RUNTIME_UI_INPUT_ACCEPT)
+            recomp_runtime_ui_confirm(ui, ui->confirm_accept);
+        return 1;
+    }
     if (input == RECOMP_RUNTIME_UI_INPUT_TOGGLE) {
         if (!repeat) recomp_runtime_ui_close(ui);
         return 1;
@@ -260,6 +310,19 @@ int recomp_runtime_ui_handle_input(RecompRuntimeUi *ui,
     }
     if (input == RECOMP_RUNTIME_UI_INPUT_LEFT ||
         input == RECOMP_RUNTIME_UI_INPUT_RIGHT) {
+        const RecompRuntimeUiItem *item = recomp_runtime_ui_section_item(ui, ui->section_index, ui->row_index);
+        if (ui->in_section && item) {
+            int right = input == RECOMP_RUNTIME_UI_INPUT_RIGHT;
+            if ((right && same_text(item->key, RECOMP_RUNTIME_UI_KEY_PAUSE)) ||
+                (!right && same_text(item->key, RECOMP_RUNTIME_UI_KEY_RESUME))) {
+                size_t next = right ? ui->row_index + 1 : ui->row_index ? ui->row_index - 1 : ui->row_index;
+                const RecompRuntimeUiItem *other = recomp_runtime_ui_section_item(ui, ui->section_index, next);
+                if (other && same_text(other->key, right ? RECOMP_RUNTIME_UI_KEY_RESUME : RECOMP_RUNTIME_UI_KEY_PAUSE)) {
+                    ui->row_index = next;
+                    return 1;
+                }
+            }
+        }
         if (ui->in_section)
             recomp_runtime_ui_adjust_current(ui,
                            input == RECOMP_RUNTIME_UI_INPUT_LEFT ? -1 : 1,
@@ -479,6 +542,33 @@ void recomp_runtime_ui_render_argb8888(RecompRuntimeUi *ui, void *pixels,
     int list_y = panel_y + 32 * scale + header_extra;
     int footer_y = panel_y + panel_h - 28 * scale;
     int row_h = 15 * scale;
+    if (ui->pending_action) {
+        draw_text(pixels,width,height,pitch,panel_x+pad,list_y,scale,accent,
+                  ui->pending_action->label,panel_x+panel_w-pad);
+        /* Wrap the warning by words for low-resolution software hosts. */
+        const char *p = ui->pending_action->confirmation;
+        int y = list_y + row_h;
+        int columns = (panel_w - pad * 2) / (6 * scale);
+        if (columns < 1) columns = 1;
+        while (*p && y < footer_y - row_h) {
+            char line[128];
+            size_t n = strlen(p), max = (size_t)columns;
+            if (max > sizeof(line)-1) max = sizeof(line)-1;
+            if (n > max) {
+                n = max;
+                while (n > 0 && p[n] != ' ') --n;
+                if (!n) n = max;
+            }
+            memcpy(line,p,n); line[n] = 0;
+            draw_text(pixels,width,height,pitch,panel_x+pad,y,scale,white,line,panel_x+panel_w-pad);
+            p += n; while (*p == ' ') ++p;
+            y += row_h;
+        }
+        draw_text(pixels,width,height,pitch,panel_x+pad,footer_y,scale,accent,
+                  ui->confirm_accept ? "CANCEL    > CONFIRM" : "> CANCEL    CONFIRM",
+                  panel_x+panel_w-pad);
+        return;
+    }
     int visible = (footer_y - list_y) / row_h;
     if (visible < 1) visible = 1;
     size_t count = ui->in_section ? recomp_runtime_ui_section_item_count(ui, ui->section_index)

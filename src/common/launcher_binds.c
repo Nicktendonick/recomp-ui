@@ -497,7 +497,7 @@ void launcher_binds_load(LauncherModel* m, const char* config_path_in, const cha
     } else if (is_gb_profile(m)) {
         rui_gb_binds_init(gb_binds_file_path());   // load/generate keybinds.ini [controls] (gb-recompiled format)
     } else {
-        recompui_keybinds_init(NULL);              // load/generate keybinds.ini (exe-anchored)
+        if (!m->hybrid_input) recompui_keybinds_init(NULL);
     }
     launcher_binds_refresh(m);
     launcher_binds_refresh_camera(m);

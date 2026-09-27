@@ -173,6 +173,7 @@ ImVec4 col(const LngColor& c) { return ImVec4(c.r, c.g, c.b, c.a); }
 // g_th moved to external linkage above the anonymous namespace (see note).
 
 LauncherTexture g_boxart, g_pad, g_pad_analog, g_pad_digital, g_brand, g_memcard;
+LauncherTexture g_game_logo, g_game_backdrop;
 // Optional platform wordmark (SystemProfile.wordmark_image) — rendered in the
 // header instead of the platform text when the asset is present. Absent => text.
 LauncherTexture g_wordmark;
@@ -552,7 +553,7 @@ static void merge_font_if_present(const char* path, float size,
 // ---- DPI: rebuild fonts + re-derive style from an unscaled baseline ----------
 void apply_scale(const LauncherTheme& th, float scale, const char* font_path,
                  const char* jp_font_path, const char* symbols_font_path,
-                 const char* emoji_font_path) {
+                 const char* emoji_font_path, const LauncherModel* model) {
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->Clear();
     ImFontConfig cfg; cfg.OversampleH = 2; cfg.OversampleV = 2;
@@ -578,8 +579,16 @@ void apply_scale(const LauncherTheme& th, float scale, const char* font_path,
             fclose(jf);
             ImFontConfig jcfg; jcfg.OversampleH = 2; jcfg.OversampleV = 2;
             jcfg.MergeMode = true;
-            io.Fonts->AddFontFromFileTTF(jp_font_path, body, &jcfg,
-                                         io.Fonts->GetGlyphRangesJapanese());
+            // Credits can contain names outside the standard Japanese subset.
+            // Keep ranges alive through Build; only rasterize requested glyphs.
+            static ImVector<ImWchar> jp_ranges;
+            ImFontGlyphRangesBuilder builder;
+            builder.AddRanges(io.Fonts->GetGlyphRangesJapanese());
+            if (model->credits_text) builder.AddText(model->credits_text);
+            if (model->credits_secondary_text) builder.AddText(model->credits_secondary_text);
+            if (model->credits_tools_text) builder.AddText(model->credits_tools_text);
+            builder.BuildRanges(&jp_ranges);
+            io.Fonts->AddFontFromFileTTF(jp_font_path, body, &jcfg, jp_ranges.Data);
         }
     }
     // Symbol / emoji fallbacks (kick 🥾, lock 🔒, etc.). Outline fonts only —
@@ -610,10 +619,27 @@ void apply_scale(const LauncherTheme& th, float scale, const char* font_path,
     (void)emoji_font_path;
 #endif
     io.Fonts->Build();
+    if (SDL_getenv("LNG_SCRIPT") && launcher_model_has_credits_view(model)) {
+        ImFontGlyphRangesBuilder requested;
+        if (model->credits_text) requested.AddText(model->credits_text);
+        if (model->credits_secondary_text) requested.AddText(model->credits_secondary_text);
+        if (model->credits_tools_text) requested.AddText(model->credits_tools_text);
+        ImVector<ImWchar> ranges;
+        requested.BuildRanges(&ranges);
+        int missing = 0;
+        for (int i = 0; i + 1 < ranges.Size && ranges[i]; i += 2)
+            for (unsigned c = ranges[i]; c <= ranges[i + 1]; ++c)
+                if (c > 32 && !io.Fonts->Fonts[0]->FindGlyphNoFallback((ImWchar)c)) ++missing;
+        std::fprintf(stderr, "[credits] panels=%d missing_glyphs=%d\n",
+                     model->credits_secondary_text ? 2 : 1, missing);
+    }
     ImGui_ImplOpenGL3_DestroyFontsTexture();
     ImGui_ImplOpenGL3_CreateFontsTexture();
 
-    ImGuiStyle style; ImGui::StyleColorsDark(&style);
+    ImGuiStyle style;
+    const bool light_theme = th.background.r + th.background.g + th.background.b > 2.4f;
+    if (light_theme) ImGui::StyleColorsLight(&style);
+    else ImGui::StyleColorsDark(&style);
     style.WindowRounding = th.radius_lg; style.ChildRounding = th.radius_lg;
     style.FrameRounding  = th.radius_sm; style.GrabRounding  = th.radius_sm;
     style.WindowPadding  = ImVec2(th.spacing_lg, th.spacing_lg);
@@ -634,10 +660,10 @@ void apply_scale(const LauncherTheme& th, float scale, const char* font_path,
     style.Colors[ImGuiCol_FrameBgActive]   = col(th.control_hovered);
     style.Colors[ImGuiCol_Button]          = col(th.control);
     style.Colors[ImGuiCol_ButtonHovered]   = col(th.control_hovered);
-    style.Colors[ImGuiCol_ButtonActive]    = col(th.accent);
+    style.Colors[ImGuiCol_ButtonActive]    = col(light_theme ? th.control_hovered : th.accent);
     style.Colors[ImGuiCol_Header]          = col(th.control_hovered);
     style.Colors[ImGuiCol_HeaderHovered]   = col(th.control_hovered);
-    style.Colors[ImGuiCol_HeaderActive]    = col(th.accent);
+    style.Colors[ImGuiCol_HeaderActive]    = col(light_theme ? th.control_hovered : th.accent);
     style.Colors[ImGuiCol_CheckMark]       = col(th.accent);
     style.Colors[ImGuiCol_Text]            = col(th.text);
     style.Colors[ImGuiCol_TextDisabled]    = col(th.text_muted);
@@ -648,6 +674,14 @@ void apply_scale(const LauncherTheme& th, float scale, const char* font_path,
     style.Colors[ImGuiCol_ScrollbarBg]     = col(th.panel);
     style.Colors[ImGuiCol_ScrollbarGrab]   = col(th.border);
     style.Colors[ImGuiCol_ScrollbarGrabHovered] = col(th.control_hovered);
+    style.Colors[ImGuiCol_SliderGrab] = col(th.accent);
+    style.Colors[ImGuiCol_SliderGrabActive] = col(th.accent_dim);
+    if (light_theme) {
+        style.Colors[ImGuiCol_TableHeaderBg] = col(th.control);
+        style.Colors[ImGuiCol_TableBorderStrong] = col(th.border);
+        style.Colors[ImGuiCol_TableBorderLight] = col(th.border);
+        style.Colors[ImGuiCol_TableRowBgAlt] = col(th.panel_hovered);
+    }
     // Gamepad/keyboard focus ring: bright cyan so a Deck user always sees where
     // they are. NavCursor is the 1.91.4+ name; older ImGui (e.g. an rt64 host on
     // 1.90.x) calls the same slot NavHighlight.
@@ -1088,7 +1122,8 @@ void draw_verdict_block(const LauncherModel* m, const LauncherTheme& th, float a
     }
 }
 
-void draw_game_panel(LauncherModel* m, const LauncherTheme& th, bool fill_h = false) {
+void draw_game_panel(LauncherModel* m, const LauncherTheme& th, bool fill_h = false,
+                     bool show_art = true) {
     if (!begin_panel("game", 0, fill_h)) { end_panel(); return; }
     // No "GAME" eyebrow: the box art itself tells the user this is the game.
     const float availw = ImGui::GetContentRegionAvail().x;
@@ -1098,15 +1133,17 @@ void draw_game_panel(LauncherModel* m, const LauncherTheme& th, bool fill_h = fa
     // mode==0 systems (SNES/cart) keep the CRC/SHA line exactly as before.
     const bool disc_verdict = m->profile && m->profile->verify.mode == 1;
 
+    if (!show_art) eyebrow("GAME & SAVE");
     // Box art on top (centered), everything else BELOW it. Height is derived
     // from the space actually left after the metadata + button, so the art is
     // as large as it can be WITHOUT pushing the last row out of the card.
     {
+        if (show_art) {
         // Reserve space for everything under the art: verified line + 2 meta rows
         // + Change ROM, plus the SAVES block when this game has battery SRAM.
         float reserve = px(198.0f);
         if (disc_verdict) reserve += px(120.0f);          // taller: icon+headline + tracks row
-        if (m->saves_supported) reserve += px(96.0f);    // compact SAVES row below Change ROM
+        if (m->saves_supported) reserve += px(176.0f); // save path/status and management
         if (m->password_save_path) reserve += px(96.0f); // password-save row (same footprint)
         if (m->msu1_patch_available) reserve += px(198.0f);  // MSU-1 patch-available sub-block
                                                               // (title + up-to-3-line wrapped note + 2 stacked buttons)
@@ -1114,6 +1151,7 @@ void draw_game_panel(LauncherModel* m, const LauncherTheme& th, bool fill_h = fa
         if (art_h > px(368.0f)) art_h = px(368.0f);   // allow a larger hero box art (~15% bigger than before)
         if (art_h < px(248.0f)) art_h = px(248.0f);   // keep it big enough to balance the side column
         hero_boxart_centered(g_boxart, art_h, availw);
+        }
     }
     ImGui::Dummy(ImVec2(0, px(10)));
 
@@ -1315,18 +1353,31 @@ void draw_save_row(LauncherModel* m, const LauncherTheme& th) {
         ImGui::TextColored(col(th.text_muted), "no save yet");
     }
     ImGui::SameLine(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - bw*2 - px(th.spacing_sm));
-    static const char* kSramPatterns[] = { "*.srm", "*.sav" };
+    static const char* kSramPatterns[] = { "*.srm", "*.sav", "*.eep" };
     if (ImGui::Button("Import", ImVec2(bw, px(30)))) {
         char buf[512];
-        if (launcher_pick_file("Import SRAM save", kSramPatterns, 2,
-                               "Battery save (.srm .sav)", buf, sizeof(buf)))
+        if (launcher_pick_file("Import battery save", kSramPatterns, 3,
+                               "Battery save (.srm .sav .eep)", buf, sizeof(buf)))
             launcher_model_import_sram(m, buf);   // backs up existing to .bak, then copies in
     }
     ImGui::SameLine(0, px(th.spacing_sm));
     ImGui::BeginDisabled(!has_save);              // nothing to clear when no save exists
     if (ImGui::Button("Clear", ImVec2(bw, px(30))))
-        launcher_model_clear_sram(m);             // backs up to .bak, then deletes
+        ImGui::OpenPopup("Clear battery save?");
     ImGui::EndDisabled();
+    if (ImGui::BeginPopupModal("Clear battery save?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("Clear the in-game save? A numbered backup will be kept.");
+        if (ImGui::Button("Back up and clear")) {
+            launcher_model_clear_sram(m); ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    ImGui::TextWrapped("Battery save: %s", sp[0] ? sp : "(not configured)");
+    if (has_save) ImGui::TextWrapped("Present (%ld bytes). Loaded when you press Play.", sz);
+    else ImGui::TextWrapped("No battery save yet. Use the game's save feature or Import.");
+    if (m->file_status[0]) ImGui::TextWrapped("%s", m->file_status);
 }
 
 // ---- panel adapters: LauncherPanelDrawFn = void(LauncherModel*, const LauncherTheme*) ----
@@ -2041,7 +2092,8 @@ void draw_player_panel(LauncherModel* m, const LauncherTheme& th, int p, float w
     }
 
     ImGui::SetNextItemWidth(cw);
-    if (ImGui::BeginCombo("##src", launcher_model_player_src_label(m, p))) {
+    if (m->hybrid_input) ImGui::TextUnformatted("Keyboard + Gamepad");
+    else if (ImGui::BeginCombo("##src", launcher_model_player_src_label(m, p))) {
         draw_source_selectables(m, p);
         ImGui::EndCombo();
     }
@@ -2106,7 +2158,43 @@ void panel_controller_draw(LauncherModel* m, const LauncherTheme* th) {
 // (SAVES only when the game has SRAM, folded into the GAME card — see
 // draw_save_row). A different system's profile simply contributes a
 // different panel list.
+void draw_system_controls(LauncherModel* m, const LauncherTheme& th);
+
+// The optional game-branded home reuses the exact file/save/BIOS controls.
+// Presentation stays separate from all import, verification and launch logic.
+void draw_storybook_dashboard(LauncherModel* m, const LauncherTheme& th) {
+    const float width = ImGui::GetContentRegionAvail().x;
+    const float gap = px(th.spacing_md);
+    const bool columns = width >= px(750);
+    if (columns) {
+        const float art_w = width * 0.42f;
+        const float art_h = ImGui::GetContentRegionAvail().y;
+        begin_container("home_art", ImVec2(art_w, art_h));
+        if (begin_panel("artwork", 0, true)) {
+            hero_boxart_centered(g_boxart, ImGui::GetContentRegionAvail().y,
+                                ImGui::GetContentRegionAvail().x);
+        }
+        end_panel();
+        end_container();
+        ImGui::SameLine(0, gap);
+        begin_container("home_details", ImVec2(0, art_h));
+    } else {
+        if (begin_panel("artwork"))
+            hero_boxart_centered(g_boxart, px(300), ImGui::GetContentRegionAvail().x);
+        end_panel();
+        ImGui::Dummy(ImVec2(0, gap));
+    }
+    draw_game_panel(m, th, false, false);
+    ImGui::Dummy(ImVec2(0, gap));
+    if (begin_panel("home_system")) {
+        draw_system_controls(m, th);
+    }
+    end_panel();
+    if (columns) end_container();
+}
+
 void draw_dashboard(LauncherModel* m, const LauncherTheme& th, int logical_w) {
+    if (m->sidebar_layout) { draw_storybook_dashboard(m, th); return; }
     const SystemProfile* prof = (const SystemProfile*)m->profile;
     const LauncherPanel* game_p = find_composed(prof->panels_dashboard, "game", m);
     const LauncherPanel* ctrl_p = find_composed(prof->panels_dashboard, "controller", m);
@@ -3208,6 +3296,28 @@ void panel_hotkeys_draw(LauncherModel* m, const LauncherTheme* th) {
 // still stack full-width below that — driven by the composition array + the
 // registry's available() gate.
 void draw_settings(LauncherModel* m, const LauncherTheme& th) {
+    if (m->sidebar_layout) {
+        if (m->settings_note && m->settings_note[0]) {
+            if (begin_panel("settings_note")) {
+                eyebrow("GAME FOLDER");
+                ImGui::TextWrapped("%s", m->settings_note);
+            }
+            end_panel();
+            ImGui::Dummy(ImVec2(0, px(th.spacing_md)));
+        }
+        const SystemProfile* profile = (const SystemProfile*)m->profile;
+        if (profile && profile->panels_settings) {
+            for (int i = 0; profile->panels_settings[i]; ++i) {
+                const LauncherPanel* panel = find_composed(profile->panels_settings,
+                                                          profile->panels_settings[i], m);
+                if (panel) {
+                    panel->draw(m, &th);
+                    ImGui::Dummy(ImVec2(0, px(th.spacing_md)));
+                }
+            }
+        }
+        return;
+    }
     // Row 1: DISPLAY | AUDIO share the top band. For the legacy minimal
     // surface (no deep caps set — e.g. SNES) both cards are pinned to the
     // SAME fixed height, exactly as before, so that screenshot is unchanged.
@@ -3531,10 +3641,80 @@ void draw_assist_tools(LauncherModel* m, const LauncherTheme& th) {
         ImGui::Dummy(ImVec2(0, px(8)));
         draw_assist_binding_editor(m, th, "assist_binds", 0, true);
     }
+    if (m->save_states_note && *m->save_states_note) {
+        ImGui::Spacing();
+        ImGui::TextUnformatted("SAVE STATES");
+        ImGui::TextWrapped("%s", m->save_states_note);
+    }
     end_panel();
 }
 
+static void setup_url_link(const char* label, const char* url);
+
 void draw_credits(LauncherModel* m, const LauncherTheme& th) {
+    if (m->credits_tools_open && m->credits_tools_text) {
+        if (ImGui::Button("< Back to Credits"))
+            launcher_model_show_credit_tools(m, false);
+        ImGui::SameLine();
+        ImGui::TextColored(col(th.accent), "Tools & Open-Source Projects");
+        if (ImGui::BeginChild("credits_tools", ImVec2(0, 0), ImGuiChildFlags_Borders,
+                              ImGuiWindowFlags_AlwaysVerticalScrollbar)) {
+            ImGui::PushStyleColor(ImGuiCol_Text, col(th.text));
+            ImGui::PushTextWrapPos(0);
+            const char* cursor = m->credits_tools_text;
+            int line_id = 0;
+            while (*cursor) {
+                const char* end = std::strchr(cursor, '\n');
+                if (!end) end = cursor + std::strlen(cursor);
+                std::string line(cursor, end);
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                ImGui::PushID(line_id++);
+                if (line.rfind("https://", 0) == 0 || line.rfind("http://", 0) == 0)
+                    setup_url_link(line.c_str(), line.c_str());
+                else if (line.empty()) ImGui::Spacing();
+                else ImGui::TextUnformatted(line.c_str());
+                ImGui::PopID();
+                cursor = *end ? end + 1 : end;
+            }
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+        }
+        ImGui::EndChild();
+        return;
+    }
+    if (m->credits_tools_text && m->credits_tools_text[0]) {
+        if (ImGui::Button("Tools & Open-Source Projects"))
+            launcher_model_show_credit_tools(m, true);
+        ImGui::Spacing();
+    }
+    if (m->credits_secondary_text) {
+        const float gap = ImGui::GetStyle().ItemSpacing.x;
+        const float width = (ImGui::GetContentRegionAvail().x - gap) * 0.5f;
+        const float height = ImGui::GetContentRegionAvail().y;
+        const char* titles[] = {m->credits_title, m->credits_secondary_title};
+        const char* texts[] = {m->credits_text, m->credits_secondary_text};
+        for (int i = 0; i < 2; ++i) {
+            if (i) ImGui::SameLine(0, gap);
+            ImGui::PushID(i);
+            if (ImGui::BeginChild("credits_panel", ImVec2(width, height), ImGuiChildFlags_Borders)) {
+                ImGui::TextColored(col(th.accent), "%s", titles[i] ? titles[i] : "Credits");
+                ImGui::Separator();
+                // Independent child IDs keep each panel's scroll position.
+                if (ImGui::BeginChild("credits_text", ImVec2(0, 0), 0,
+                                      ImGuiWindowFlags_AlwaysVerticalScrollbar)) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, col(th.text));
+                    ImGui::PushTextWrapPos(0);
+                    ImGui::TextUnformatted(texts[i] ? texts[i] : "");
+                    ImGui::PopTextWrapPos();
+                    ImGui::PopStyleColor();
+                }
+                ImGui::EndChild();
+            }
+            ImGui::EndChild();
+            ImGui::PopID();
+        }
+        return;
+    }
     if (!begin_panel("credits_page", 0, false)) {
         end_panel();
         return;
@@ -3570,7 +3750,8 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
         ImGui::Text("CONTROLLER - PLAYER %d", p + 1); ImGui::PopStyleColor(); ImGui::Spacing();
         row_label("Input source", th);
         ImGui::SetNextItemWidth(px(200));
-        if (ImGui::BeginCombo("##csrc", launcher_model_player_src_label(m, p))) {
+        if (m->hybrid_input) ImGui::TextUnformatted("Keyboard + Gamepad (both active)");
+        else if (ImGui::BeginCombo("##csrc", launcher_model_player_src_label(m, p))) {
             draw_source_selectables(m, p);
             ImGui::EndCombo();
         }
@@ -3979,6 +4160,37 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
                     ImGui::TextColored(col(th.accent2), "Input Profile Saved!");
             }
         } else {
+        if (m->hybrid_input) {
+            const int count = launcher_model_active_button_count(m, p);
+            for (int device = 0; device < 2; ++device) {
+                ImGui::PushID(device);
+                ImGui::TextUnformatted(device ? "GAMEPAD CONTROLS" : "KEYBOARD CONTROLS");
+                ImGui::TextWrapped(device ? "Use a connected standard gamepad. Keyboard stays active."
+                                          : "Use keyboard controls at any time, including with a gamepad connected.");
+                if (ImGui::BeginTable("hybrid_bindings", 2, ImGuiTableFlags_SizingStretchProp)) {
+                    for (int b = 0; b < count; ++b) {
+                        ImGui::TableNextRow(); ImGui::TableNextColumn();
+                        ImGui::TextUnformatted(spec.buttons[b].label);
+                        ImGui::TableNextColumn(); ImGui::PushID(b);
+                        char pad[48];
+                        settings_pad_label(m->s.player_pad_bind[p][b], pad, sizeof pad);
+                        const bool capture = m->capturing && m->capture_btn == b &&
+                                             m->capture_pad == (device != 0);
+                        const char* label = capture ? "[ press input; Esc cancels ]" :
+                            device ? pad : settings_key_label(m->s.player_key_bind[p][b]);
+                        if (ImGui::Button(label, ImVec2(px(210), 0))) {
+                            if (device) launcher_model_begin_pad_capture(m, b);
+                            else launcher_model_begin_capture(m, b);
+                        }
+                        ImGui::PopID();
+                    }
+                    ImGui::EndTable();
+                }
+                ImGui::PopID(); ImGui::Spacing();
+            }
+            if (ImGui::Button("Reset gameplay controls"))
+                launcher_model_reset_player_bindings(m, p);
+        } else {
         // Alternate binds per input (N64's input.cfg keeps two; SNES/GBA
         // keep one). 0 in the spec reads as 1 (older positional initializers).
         // Host-owned settings arrays have one keyboard and one controller
@@ -4112,6 +4324,7 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
                 launcher_binds_reset_player(m, m->cfg_player + 1);
         }
         if (m->capturing) ImGui::TextColored(col(th.warn), "Listening... (Esc cancels)");
+        } // !hybrid
         } // !is_psx
     } end_panel();
 
@@ -4136,7 +4349,7 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
         } end_panel();
     }
 
-    if (m->settings_bindings) {
+    if (m->settings_bindings && !m->hybrid_input) {
         if (begin_panel("cfg_assist_binds", 0)) {
             draw_controller_assist_shortcuts(m, th);
         } end_panel();
@@ -7345,7 +7558,7 @@ static void draw_rom_patch(LauncherModel* m, const LauncherTheme& th) {
 
 void draw_mods(LauncherModel* m, const LauncherTheme& th) {
     const auto* mods = m ? m->mods : nullptr;
-    if (!m || (!mods && !m->rom_patch_supported)) return;
+    if (!launcher_model_has_mods_view(m)) return;
     if (m->rom_patch_supported) {
         draw_rom_patch(m, th);
         if (!mods) return;
@@ -8480,6 +8693,85 @@ void draw_restore_defaults_modal(LauncherModel* m) {
     }
 }
 
+void draw_game_header(LauncherModel* m, const LauncherTheme& th) {
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const float width = ImGui::GetContentRegionAvail().x;
+    const float height = px(146);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height),
+                      imcol(th.panel), px(th.radius_lg));
+    if (g_game_backdrop.id && g_game_backdrop.w > 0 && g_game_backdrop.h > 0) {
+        const float bw = width * 0.50f;
+        const float source_aspect = (float)g_game_backdrop.w / g_game_backdrop.h;
+        const float target_aspect = bw / height;
+        ImVec2 uv0(0, 0), uv1(1, 1);
+        if (source_aspect > target_aspect) {
+            const float span = target_aspect / source_aspect;
+            uv0.x = (1 - span) * 0.5f; uv1.x = 1 - uv0.x;
+        } else {
+            const float span = source_aspect / target_aspect;
+            uv0.y = (1 - span) * 0.5f; uv1.y = 1 - uv0.y;
+        }
+        const ImVec2 left(origin.x + width - bw, origin.y);
+        dl->AddImage(tid(g_game_backdrop), left,
+                     ImVec2(origin.x + width, origin.y + height), uv0, uv1);
+        dl->AddRectFilledMultiColor(left, ImVec2(origin.x + width, origin.y + height),
+            imcol(th.panel), imcol(th.panel, 0.06f), imcol(th.panel, 0.06f), imcol(th.panel));
+    }
+    if (g_game_logo.id) {
+        ImGui::SetCursorScreenPos(ImVec2(origin.x + px(12), origin.y + px(4)));
+        image_fit(g_game_logo, 190, 138);
+    } else {
+        ImGui::SetCursorScreenPos(ImVec2(origin.x + px(16), origin.y + px(20)));
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(190));
+        ImGui::TextUnformatted(m->game_name ? m->game_name : "Launcher");
+        ImGui::PopTextWrapPos();
+    }
+    if (m->tagline && m->tagline[0]) {
+        ImGui::SetCursorScreenPos(ImVec2(origin.x + px(230), origin.y + px(48)));
+        const float text_width = std::max(px(100), std::min(px(370), width - px(252)));
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + text_width);
+        ImGui::PushStyleColor(ImGuiCol_Text, col(th.accent2));
+        ImGui::SetWindowFontScale(1.14f);
+        ImGui::TextUnformatted(m->tagline);
+        ImGui::SetWindowFontScale(1.0f);
+        ImGui::PopStyleColor();
+        ImGui::PopTextWrapPos();
+    }
+    dl->AddRect(origin, ImVec2(origin.x + width, origin.y + height),
+                imcol(th.border), px(th.radius_lg));
+    ImGui::SetCursorScreenPos(origin);
+    ImGui::Dummy(ImVec2(width, height + px(16)));
+}
+
+void draw_game_navigation(LauncherModel* m, const LauncherTheme& th) {
+    struct Nav { const char* label; LngView view; bool shown; };
+    const Nav items[] = {
+        {"Home", LNG_VIEW_DASHBOARD, true},
+        {"Settings", LNG_VIEW_SETTINGS, true},
+        {"Controls", LNG_VIEW_CONTROLLER, true},
+        {"Assist Tools", LNG_VIEW_ASSIST_TOOLS, m->has_assist_tools != 0},
+        {"Mods", LNG_VIEW_MODS, launcher_model_has_mods_view(m)},
+        {"Credits", LNG_VIEW_CREDITS, launcher_model_has_credits_view(m)},
+        {"Netplay", LNG_VIEW_NETPLAY, m->netplay_supported != 0},
+    };
+    eyebrow("LAUNCHER");
+    for (const auto& item : items) {
+        if (!item.shown) continue;
+        const bool active = m->view == item.view;
+        ImGui::PushStyleColor(ImGuiCol_Button, col(active ? th.accent2 : th.panel));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, col(active ? th.accent_dim : th.control_hovered));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, col(active ? th.accent_dim : th.control_hovered));
+        ImGui::PushStyleColor(ImGuiCol_Text, col(active ? th.accent_text : th.text));
+        if (ImGui::Button(item.label, ImVec2(-1, px(44)))) {
+            if (item.view == LNG_VIEW_CONTROLLER) m->cfg_player = 0;
+            launcher_model_set_view(m, item.view);
+        }
+        ImGui::PopStyleColor(4);
+        ImGui::Dummy(ImVec2(0, px(4)));
+    }
+}
+
 void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logical_h) {
     ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->Pos);
@@ -8494,6 +8786,9 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
                  ImGuiWindowFlags_NoBringToFrontOnFocus);
     ImGui::PopStyleColor();
 
+    if (m->sidebar_layout) {
+        draw_game_header(m, th);
+    } else {
     // ---- Marquee header: brand · GAME TITLE · subtitle .......... [nav] ----
     ImVec2 hp = ImGui::GetCursorScreenPos();
     // Vertically center the brand mark against the two-line title block (game
@@ -8553,15 +8848,16 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
         const float right = ImGui::GetWindowContentRegionMax().x;
         const float y = hdr_top + px(6.0f);
         if (m->view == LNG_VIEW_DASHBOARD) {
-            const int count = 1 + (m->mods ? 1 : 0) +
+            const bool has_mods_view = launcher_model_has_mods_view(m);
+            const int count = 1 + (has_mods_view ? 1 : 0) +
                               (m->has_assist_tools ? 1 : 0) +
-                              ((m->credits_text && m->credits_text[0]) ? 1 : 0);
+                              (launcher_model_has_credits_view(m) ? 1 : 0);
             const float w = px(110.0f);
             const float total = w * count + gap * (count - 1);
             ImGui::SetCursorPos(ImVec2(right - total, y));
             if (ImGui::Button("Settings", ImVec2(w, px(34))))
                 launcher_model_set_view(m, LNG_VIEW_SETTINGS);
-            if (m->mods) {
+            if (has_mods_view) {
                 ImGui::SameLine(0, gap);
                 if (ImGui::Button("Mods", ImVec2(w, px(34))))
                     launcher_model_set_view(m, LNG_VIEW_MODS);
@@ -8571,7 +8867,7 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
                 if (ImGui::Button("Assist Tools", ImVec2(w, px(34))))
                     launcher_model_set_view(m, LNG_VIEW_ASSIST_TOOLS);
             }
-            if (m->credits_text && m->credits_text[0]) {
+            if (launcher_model_has_credits_view(m)) {
                 ImGui::SameLine(0, gap);
                 if (ImGui::Button("Credits", ImVec2(w, px(34))))
                     launcher_model_set_view(m, LNG_VIEW_CREDITS);
@@ -8611,6 +8907,7 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
     }
     ImGui::Dummy(ImVec2(0, px(12.0f)));
     (void)hp;
+    }
 
     // Body: fixed-height child that scrolls when content overflows, so nothing
     // is ever clipped out of reach. The footer below stays fixed (in the fold).
@@ -8618,6 +8915,21 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
     float body_h = ImGui::GetContentRegionAvail().y - footer_h;
     if (body_h < px(80.0f)) body_h = px(80.0f);
     begin_container("body", ImVec2(0, body_h));
+    if (m->sidebar_layout) {
+        const float nav_w = logical_w >= 1000 ? px(166) : px(138);
+        begin_container("navigation", ImVec2(nav_w, 0));
+        draw_game_navigation(m, th);
+        end_container();
+        ImGui::SameLine(0, px(th.spacing_md));
+        begin_container("page", ImVec2(0, 0));
+        // State-level evidence for automation; never use framebuffer pixels.
+        static int last_view = -1;
+        if (last_view != (int)m->view) {
+            last_view = (int)m->view;
+            std::fprintf(stderr, "[appearance] view=%d content=%.0fx%.0f\n", last_view,
+                         ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y);
+        }
+    }
     switch (m->view) {
         case LNG_VIEW_DASHBOARD:  draw_dashboard(m, th, logical_w); break;
         case LNG_VIEW_SETTINGS:   draw_settings(m, th);             break;
@@ -8627,6 +8939,7 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
         case LNG_VIEW_ASSIST_TOOLS: draw_assist_tools(m, th);        break;
         case LNG_VIEW_CREDITS:      draw_credits(m, th);             break;
     }
+    if (m->sidebar_layout) end_container();
     end_container();
 
     draw_footer(m, th, footer_h);
@@ -8708,20 +9021,20 @@ bool try_capture(LauncherModel* m, const SDL_Event& ev) {
     // axis push (past a dead threshold) commits. PSX only accepts events from
     // the player's selected Input source device.
     if (m->capturing && m->capture_pad) {
-        if (m->settings_bindings && m->capture_assist) {
+        if (m->settings_bindings && (m->capture_assist || m->hybrid_input)) {
             if (ev.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
                 const int button = (int)LNG_EVGBTN(ev);
                 uint32_t mask = launcher_input_gamepad_button_mask(
                     (uint32_t)LNG_EVGBTNWHICH(ev));
                 if (button >= 0 && button < 32)
                     mask |= (uint32_t)1u << button;
-                if (button_mask_count(mask) >= 2) {
+                if (m->capture_assist && button_mask_count(mask) >= 2) {
                     launcher_model_set_captured_pad(
                         m, RECOMP_LAUNCHER_PAD_BUTTON_COMBO((int)mask));
                     launcher_model_cancel_capture(m);
                     return true;
                 }
-                if (settings_pad_button_is_select(button))
+                if (m->capture_assist && settings_pad_button_is_select(button))
                     return true;
                 launcher_model_set_captured_pad(
                     m, RECOMP_LAUNCHER_PAD_BUTTON(button));
@@ -8881,7 +9194,7 @@ bool try_capture(LauncherModel* m, const SDL_Event& ev) {
         // Single-bind stores (SNES/PSX/GBA) use the legacy scancode setter
         // (capture_slot is always 0 for them).
         const SystemProfile* prof = (const SystemProfile*)m->profile;
-        if (m->settings_bindings && m->capture_assist)
+        if (m->settings_bindings && (m->capture_assist || m->hybrid_input))
             launcher_model_set_captured_key(m, (int)LNG_EVSCAN(ev));
         else if (prof && prof->controller.binds_per_input >= 2 && prof->id && !strcmp(prof->id, "psx"))
             launcher_binds_set_button_slot(m, m->cfg_player + 1, m->capture_btn,
@@ -8967,6 +9280,7 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
     io.ConfigFlags |= ImGuiConfigFlags_IsTouchScreen;
 #endif
     io.IniFilename = nullptr;
+    io.LogFilename = nullptr;
     // Test hook: force the focus ring always-on so scripted screenshots can
     // verify nav rendering without a physical pad. Off => normal auto behaviour
     // (ring appears on pad/keyboard, hides on mouse).
@@ -9001,6 +9315,14 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
     g_boxart = launcher_texture_load(
         asset(m->boxart_path && m->boxart_path[0] ? m->boxart_path
                                                   : "assets/img/boxart.tga").c_str());
+    if (m->logo_path && m->logo_path[0])
+        g_game_logo = launcher_texture_load(asset(m->logo_path).c_str());
+    if (m->backdrop_path && m->backdrop_path[0])
+        g_game_backdrop = launcher_texture_load(asset(m->backdrop_path).c_str());
+    if (m->sidebar_layout)
+        std::fprintf(stderr, "[appearance] sidebar=1 art=%dx%d logo=%dx%d backdrop=%dx%d\n",
+                     g_boxart.w, g_boxart.h, g_game_logo.w, g_game_logo.h,
+                     g_game_backdrop.w, g_game_backdrop.h);
     // Controller art comes from the active SystemProfile's ControllerSpec —
     // never hardcoded console filenames in this common backend. Conventions:
     // a 32-bit TGA carries real alpha -> the plain alpha-respecting loader;
@@ -9075,6 +9397,11 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
     // Games that don't ship it stay Latin-only (fopen in apply_scale fails
     // silently), so this path is inert for every other console.
     std::string jp_font_path = asset("assets/fonts/NotoSansJP-Subset.ttf");
+    const std::string full_jp_font_path = asset("assets/fonts/NotoSansJP-Regular.ttf");
+    if (FILE* font = fopen(full_jp_font_path.c_str(), "rb")) {
+        fclose(font);
+        jp_font_path = full_jp_font_path;
+    }
     std::string symbols_font_path =
         asset("assets/fonts/NotoSansSymbols2-Regular.ttf");
     std::string emoji_font_path =
@@ -9109,7 +9436,7 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
         if (applied_scale != p->display_scale) {
             apply_scale(*th, p->display_scale, font_path.c_str(),
                         jp_font_path.c_str(), symbols_font_path.c_str(),
-                        emoji_font_path.c_str());
+                        emoji_font_path.c_str(), m);
             applied_scale = p->display_scale;
             if (!first_present_marked)
                 launcher_boot_timing_mark("rui:fonts_built");
@@ -9174,6 +9501,8 @@ extern "C" LngAction launcher_backend_run(LauncherPlatform* p,
 
     launcher_input_shutdown();
     launcher_texture_free(&g_boxart);
+    launcher_texture_free(&g_game_logo);
+    launcher_texture_free(&g_game_backdrop);
     launcher_texture_free(&g_pad);
     launcher_texture_free(&g_pad_analog);
     launcher_texture_free(&g_pad_digital);

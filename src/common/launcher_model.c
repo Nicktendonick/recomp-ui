@@ -276,6 +276,11 @@ void launcher_model_init(LauncherModel* m,
         m->fmv_timing_busy_status = game->fmv_timing_busy_status;
         m->fmv_timing_success_status = game->fmv_timing_success_status;
         m->boxart_path          = game->boxart_path;      // NULL => default boxart.tga
+        m->logo_path = game->logo_path;
+        m->backdrop_path = game->backdrop_path;
+        m->tagline = game->tagline;
+        m->sidebar_layout = game->sidebar_layout;
+        m->settings_note = game->settings_note;
         m->aspect_labels        = game->aspect_labels;    // NULL => built-in 4:3/16:9/21:9
         m->num_aspect_labels    = game->num_aspect_labels;
         m->aspect_experimental  = game->aspect_experimental != 0;
@@ -287,11 +292,20 @@ void launcher_model_init(LauncherModel* m,
         m->has_assist_tools     = game->has_assist_tools != 0;
         m->assist_tools_note    = game->assist_tools_note;
         m->settings_bindings    = game->settings_bindings != 0;
+        m->hybrid_input         = game->hybrid_input != 0;
+        m->import_file_ctx      = game->import_file_ctx;
+        m->import_file          = game->import_file;
+        m->save_states_note     = game->save_states_note;
+        m->battery_save_size    = game->battery_save_size;
         m->assist_binding_labels = game->assist_binding_labels;
         m->assist_binding_count =
             clampi(game->assist_binding_count, 0,
                    RECOMP_LAUNCHER_MAX_ASSIST_BINDINGS);
         m->credits_text         = game->credits_text;
+        m->credits_title = game->credits_title;
+        m->credits_secondary_title = game->credits_secondary_title;
+        m->credits_secondary_text = game->credits_secondary_text;
+        m->credits_tools_text = game->credits_tools_text;
         m->assist_fast_forward_min = game->assist_fast_forward_min > 0
             ? game->assist_fast_forward_min : 2;
         m->assist_fast_forward_max = game->assist_fast_forward_max >=
@@ -751,6 +765,12 @@ void launcher_model_commit(const LauncherModel* m, RecompLauncherCSettings* io) 
 }
 
 void launcher_model_set_rom(LauncherModel* m, const char* path) {
+    char imported[1024];
+    if (m->import_file && path && *path) {
+        if (!m->import_file(m->import_file_ctx, "ROMs", path, imported,
+                           sizeof imported, m->file_status, sizeof m->file_status)) return;
+        path = imported;
+    }
     m->rom_present = path && path[0] != '\0';
     safe_copy(m->rom_full, sizeof(m->rom_full), m->rom_present ? path : "");
     m->rom_sha1_hex[0] = '\0';
@@ -910,11 +930,28 @@ bool launcher_model_rom_verified(const LauncherModel* m) {
     return true;
 }
 
+bool launcher_model_has_mods_view(const LauncherModel* m) {
+    return m && (m->mods != NULL || m->rom_patch_supported);
+}
+
+bool launcher_model_has_credits_view(const LauncherModel* m) {
+    return m && ((m->credits_text && m->credits_text[0]) ||
+                 (m->credits_secondary_text && m->credits_secondary_text[0]) ||
+                 (m->credits_tools_text && m->credits_tools_text[0]));
+}
+
+void launcher_model_show_credit_tools(LauncherModel* m, bool open) {
+    if (!m) return;
+    m->credits_tools_open = open && m->view == LNG_VIEW_CREDITS &&
+                            m->credits_tools_text && m->credits_tools_text[0];
+}
+
 void launcher_model_set_view(LauncherModel* m, LngView v) {
     // Keep this bound at the final enum value.  Assist Tools and Credits were
     // added after Mods; using the old LNG_VIEW_MODS ceiling made their header
     // buttons look clickable while silently rejecting the navigation request.
     if (v < 0 || v > LNG_VIEW_CREDITS) return;
+    if (v != LNG_VIEW_CREDITS) m->credits_tools_open = false;
     /* Re-entering Netplay should rescan server + LAN lists. */
     if (m->view == LNG_VIEW_NETPLAY && v != LNG_VIEW_NETPLAY)
         m->netplay_list_fresh = false;
@@ -1597,6 +1634,12 @@ static void lm_persist_setup_sidecars(LauncherModel* m) {
 }
 
 void launcher_model_set_bios_path(LauncherModel* m, const char* path) {
+    char imported[1024];
+    if (m->import_file && path && *path) {
+        if (!m->import_file(m->import_file_ctx, "BIOS", path, imported,
+                           sizeof imported, m->file_status, sizeof m->file_status)) return;
+        path = imported;
+    }
     if (path && path[0]) {
 #if defined(_WIN32)
         char abs[MAX_PATH];
@@ -1886,6 +1929,9 @@ bool launcher_model_can_launch(const LauncherModel* m) {
     if (!m->rom_present || strcmp(m->rom_size, "--") == 0) return false;
     if (m->rom_patch_supported && m->s.rom_patch_enabled &&
         !m->s.rom_patch_path[0]) return false;
+    if (m->rom_patch_required_sha1 && *m->rom_patch_required_sha1 &&
+        strcmp(m->rom_sha1_hex, m->rom_patch_required_sha1) != 0 &&
+        !m->s.rom_patch_enabled) return false;
     if (m->profile && m->profile->verify.mode == 1) {
         /* Disc systems: reject none/bad; warn (2) and ok (1) are playable. */
         if (m->verify.verdict == 0 || m->verify.verdict == 3) return false;
@@ -2573,23 +2619,61 @@ static bool lm_copy_file(const char* src, const char* dst) {
     char buf[8192]; size_t n; bool ok = true;
     while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
         if (fwrite(buf, 1, n, out) != n) { ok = false; break; }
-    fclose(in); fclose(out);
+    if (ferror(in)) ok = false;
+    fclose(in);
+    if (fclose(out) != 0) ok = false;
     return ok;
 }
 
 void launcher_model_import_sram(LauncherModel* m, const char* src) {
     if (!m->sram_path || !m->sram_path[0] || !src || !src[0]) return;
-    char bak[600]; snprintf(bak, sizeof(bak), "%s.bak", m->sram_path);
+    FILE* input = fopen(src, "rb");
+    if (!input) { safe_copy(m->file_status, sizeof m->file_status, "Cannot read selected save."); return; }
+    fseek(input, 0, SEEK_END); long size = ftell(input); fclose(input);
+    if (size < 0 || (m->battery_save_size && (size_t)size != m->battery_save_size)) {
+        safe_copy(m->file_status, sizeof m->file_status, "Save size does not match this game. Existing save unchanged."); return;
+    }
+    char temp[1100]; snprintf(temp, sizeof temp, "%s.importing", m->sram_path);
+    if (!lm_copy_file(src, temp)) {
+        safe_copy(m->file_status, sizeof m->file_status, "Cannot stage save import. Existing save unchanged."); return;
+    }
+    char bak[1100] = {0};
     FILE* existing = fopen(m->sram_path, "rb");
-    if (existing) { fclose(existing); lm_copy_file(m->sram_path, bak); }  // back up first
-    lm_copy_file(src, m->sram_path);
+    if (existing) {
+        fclose(existing);
+        unsigned n = 1;
+        do {
+            snprintf(bak, sizeof bak, "%s.backup-%u", m->sram_path, n++);
+            existing = fopen(bak, "rb");
+            if (existing) fclose(existing); else break;
+        } while (n < 100000);
+        if (n >= 100000 || rename(m->sram_path, bak) != 0) {
+            safe_copy(m->file_status, sizeof m->file_status, "Cannot preserve previous save. Import cancelled."); return;
+        }
+    }
+    if (rename(temp, m->sram_path) != 0) {
+        if (bak[0]) rename(bak, m->sram_path);
+        safe_copy(m->file_status, sizeof m->file_status, "Cannot install imported save; backup retained."); return;
+    }
+    safe_copy(m->file_status, sizeof m->file_status, "Save imported. Any previous save is retained beside it as a numbered backup.");
 }
 
 void launcher_model_clear_sram(LauncherModel* m) {
     if (!m->sram_path || !m->sram_path[0]) return;
-    char bak[600]; snprintf(bak, sizeof(bak), "%s.bak", m->sram_path);
+    char bak[1100];
     FILE* existing = fopen(m->sram_path, "rb");
-    if (existing) { fclose(existing); lm_copy_file(m->sram_path, bak); remove(m->sram_path); }
+    if (!existing) return;
+    fclose(existing);
+    unsigned n = 1;
+    do {
+        snprintf(bak, sizeof bak, "%s.backup-%u", m->sram_path, n++);
+        existing = fopen(bak, "rb");
+        if (existing) fclose(existing); else break;
+    } while (n < 100000);
+    safe_copy(m->file_status, sizeof m->file_status,
+        n < 100000 && rename(m->sram_path, bak) == 0
+        ? "Save cleared. A recoverable numbered backup remains in the Saves folder."
+        : "Could not back up the save. Nothing cleared.");
 }
 
 void launcher_model_toggle_msu1(LauncherModel* m) {
@@ -2783,6 +2867,12 @@ static bool lm_read_whole_file(const char* path, uint8_t** out_data, size_t* out
 
 void launcher_model_set_rom_patch(LauncherModel* m, const char* path) {
     if (!m || !m->rom_patch_supported) return;
+    char imported[1024];
+    if (m->import_file && path && *path) {
+        if (!m->import_file(m->import_file_ctx, "Mods", path, imported,
+                           sizeof imported, m->file_status, sizeof m->file_status)) return;
+        path = imported;
+    }
     safe_copy(m->s.rom_patch_path, sizeof(m->s.rom_patch_path),
               path ? path : "");
     m->s.rom_patch_enabled = m->s.rom_patch_path[0] ? 1 : 0;
@@ -2827,6 +2917,14 @@ static const char* lm_path_extension(const char* path) {
 }
 
 bool launcher_model_prepare_rom_patch(LauncherModel* m) {
+    if (m && m->rom_patch_required_sha1 &&
+        strcmp(m->rom_sha1_hex, m->rom_patch_required_sha1) == 0) {
+        // The selected image is already the exact target; never double-patch.
+        m->rom_patch_prepared_path[0] = '\0';
+        m->s.rom_patch_sha1[0] = '\0';
+        safe_copy(m->s.rom_patch_source_path, sizeof m->s.rom_patch_source_path, m->rom_full);
+        return true;
+    }
     if (!m || !m->rom_patch_supported || !m->s.rom_patch_enabled) {
         if (m) {
             m->rom_patch_prepared_path[0] = '\0';
@@ -2893,8 +2991,10 @@ bool launcher_model_prepare_rom_patch(LauncherModel* m) {
         cache_len && (m->rom_patch_cache_dir[cache_len - 1] == '/' ||
                       m->rom_patch_cache_dir[cache_len - 1] == '\\') ? "" : "/";
     char target[512];
-    const int target_chars = snprintf(target, sizeof(target), "%s%s%s-%s%s",
-             m->rom_patch_cache_dir, separator, m->rom_sha1_hex, patch_hex,
+    // The verified output hash identifies cached bytes without doubling the
+    // filename length in portable folders on Windows.
+    const int target_chars = snprintf(target, sizeof(target), "%s%s%s%s",
+             m->rom_patch_cache_dir, separator, output_hex,
              lm_path_extension(m->rom_full));
     if (target_chars < 0 || (size_t)target_chars >= sizeof(target)) {
         free(output);

@@ -8,6 +8,7 @@
 
 #ifndef LAUNCHER_NG_THEME_H
 #define LAUNCHER_NG_THEME_H
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -278,12 +279,38 @@ static inline LauncherTheme launcher_theme_gbc(void) {
     return t;
 }
 
+// Light paper, plum ink and crystal-blue actions. Opt-in, game-neutral theme.
+static inline LauncherTheme launcher_theme_storybook(void) {
+    LauncherTheme t = launcher_theme_default();
+    t.background      = lng_rgba(0.961f, 0.929f, 0.863f, 1.0f);
+    t.background2     = lng_rgba(0.992f, 0.976f, 0.933f, 1.0f);
+    t.panel           = lng_rgba(1.000f, 0.984f, 0.945f, 1.0f);
+    t.panel_hovered   = lng_rgba(0.961f, 0.937f, 0.894f, 1.0f);
+    t.control         = lng_rgba(0.933f, 0.898f, 0.843f, 1.0f);
+    t.control_hovered = lng_rgba(0.875f, 0.925f, 0.933f, 1.0f);
+    t.border          = lng_rgba(0.729f, 0.659f, 0.545f, 1.0f);
+    t.accent          = lng_rgba(0.125f, 0.420f, 0.510f, 1.0f);
+    t.accent_dim      = lng_rgba(0.086f, 0.306f, 0.396f, 1.0f);
+    t.accent_text     = lng_rgba(1.000f, 0.988f, 0.957f, 1.0f);
+    t.accent2         = lng_rgba(0.357f, 0.227f, 0.341f, 1.0f);
+    t.text            = lng_rgba(0.243f, 0.184f, 0.224f, 1.0f);
+    t.text_muted      = lng_rgba(0.420f, 0.369f, 0.349f, 1.0f);
+    t.good            = lng_rgba(0.173f, 0.392f, 0.282f, 1.0f);
+    t.warn            = lng_rgba(0.608f, 0.306f, 0.090f, 1.0f);
+    t.focus_ring      = lng_rgba(0.086f, 0.388f, 0.608f, 1.0f);
+    t.scanlines = 0;
+    t.radius_sm = 4.0f; t.radius_lg = 8.0f;
+    t.font_body = 17.0f; t.font_title = 28.0f;
+    return t;
+}
+
 // Pick a built-in theme by name ("psx" -> PlayStation, "gba" -> Game Boy
 // Advance, "gbc" -> Game Boy Color, "gb" -> Game Boy (DMG), "n64" -> Nintendo
 // 64, "nes" -> Nintendo Entertainment System, "genesis" -> Sega Genesis;
 // anything else -> default CRT). Note the "gb*" order: match "gba" and "gbc"
 // (3rd char) BEFORE the bare "gb" fallback.
 static inline LauncherTheme launcher_theme_by_name(const char* name) {
+    if (name && strcmp(name, "storybook") == 0) return launcher_theme_storybook();
     if (name && (name[0] == 'p' || name[0] == 'P') &&
         (name[1] == 's' || name[1] == 'S'))
         return launcher_theme_psx();

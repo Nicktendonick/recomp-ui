@@ -84,6 +84,39 @@ void draw_items(RecompRuntimeUi *ui, const LauncherTheme &theme,
             ui, ui->section_index, index);
         if (!item) continue;
 
+        // Keep the two distinct session actions together, including on narrow
+        // windows. They remain ordinary model rows for keyboard/controller use.
+        const auto* next_item = recomp_runtime_ui_section_item(ui, ui->section_index, index + 1);
+        if (item->key && std::strcmp(item->key, RECOMP_RUNTIME_UI_KEY_PAUSE) == 0 &&
+            next_item && next_item->key && std::strcmp(next_item->key, RECOMP_RUNTIME_UI_KEY_RESUME) == 0) {
+            int paused = 0;
+            if (recomp_runtime_ui_current_value(ui, item, &paused))
+                ImGui::TextColored(col(theme.accent2), "%s", paused ? "Game is paused" : "Game is running");
+            const float button_w = std::max(1.0f, (ImGui::GetContentRegionAvail().x - theme.spacing_sm) * 0.5f);
+            for (size_t side = 0; side < 2; ++side) {
+                const auto* action = side ? next_item : item;
+                if (side) ImGui::SameLine(0, theme.spacing_sm);
+                ImGui::PushID(action->key);
+                const bool selected = ui->in_section && ui->row_index == index + side;
+                ImGui::PushStyleColor(ImGuiCol_Button, col(selected ? theme.control_hovered : theme.control));
+                ImGui::BeginDisabled(!recomp_runtime_ui_item_enabled(ui, action));
+                if (ImGui::Button(side ? "Resume" : "Pause", ImVec2(button_w, theme.row_height))) {
+                    ui->row_index = index + side;
+                    ui->in_section = 1;
+                    recomp_runtime_ui_activate(ui, action->key);
+                }
+                ImGui::EndDisabled();
+                ImGui::PopStyleColor();
+                ImGui::PopID();
+            }
+            ImGui::PushTextWrapPos();
+            ImGui::TextDisabled("Pause holds gameplay. Resume returns to play.");
+            ImGui::PopTextWrapPos();
+            ImGui::Separator();
+            ++index;
+            continue;
+        }
+
         const bool enabled = recomp_runtime_ui_item_enabled(ui, item) != 0;
         const bool selected = ui->in_section && index == ui->row_index;
         char value[128];
@@ -92,9 +125,11 @@ void draw_items(RecompRuntimeUi *ui, const LauncherTheme &theme,
         ImGui::PushID(static_cast<int>(index));
         if (!enabled) ImGui::BeginDisabled();
         const ImVec2 start = ImGui::GetCursorScreenPos();
-        const float row_h = item->description && item->description[0]
-                                ? theme.row_height + theme.spacing_sm
-                                : theme.row_height;
+        const float description_w = std::max(40.0f, ImGui::GetContentRegionAvail().x - theme.spacing_md * 2);
+        const float description_h = item->description && item->description[0]
+            ? ImGui::CalcTextSize(item->description, nullptr, false, description_w).y : 0.0f;
+        const float row_h = std::max(theme.row_height, ImGui::GetTextLineHeight() +
+            description_h + theme.spacing_sm * 2 + 4.0f);
         const float step_button_w =
             touch_friendly ? std::max(76.0f, row_h * 0.90f) : 38.0f;
         const float step_gap = touch_friendly ? 12.0f : 6.0f;
@@ -142,10 +177,10 @@ void draw_items(RecompRuntimeUi *ui, const LauncherTheme &theme,
                           value);
         }
         if (item->description && item->description[0]) {
-            draw->AddText(ImVec2(start.x + theme.spacing_md,
+            draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(start.x + theme.spacing_md,
                                 start.y + theme.spacing_sm +
                                     ImGui::GetTextLineHeight() + 2.0f),
-                          u32(theme.text_muted), item->description);
+                          u32(theme.text_muted), item->description, nullptr, description_w);
         }
         if (editing_this && enabled) {
             const float field_w = touch_friendly
@@ -227,10 +262,10 @@ void push_runtime_style(const LauncherTheme &theme, bool touch_friendly) {
     ImGui::PushStyleColor(ImGuiCol_TextDisabled, col(theme.text_muted));
     ImGui::PushStyleColor(ImGuiCol_Header, col(theme.control_hovered));
     ImGui::PushStyleColor(ImGuiCol_HeaderHovered, col(theme.panel_hovered));
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive, col(theme.accent_dim));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, col(theme.control_hovered));
     ImGui::PushStyleColor(ImGuiCol_Button, col(theme.control));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, col(theme.control_hovered));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, col(theme.accent_dim));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, col(theme.control_hovered));
 }
 
 void pop_runtime_style() {
@@ -240,10 +275,27 @@ void pop_runtime_style() {
 
 } // namespace
 
+extern "C" void recomp_runtime_ui_render_paused_imgui(RecompRuntimeUi *ui) {
+    if (!ui || ImGui::GetCurrentContext() == nullptr) return;
+    const auto theme = launcher_theme_by_name(ui->config.theme);
+    const auto display = ImGui::GetIO().DisplaySize;
+    ImGui::SetNextWindowPos(ImVec2(display.x * 0.5f, 18), ImGuiCond_Always, ImVec2(0.5f, 0));
+    push_runtime_style(theme, false);
+    if (ImGui::Begin("##recomp-paused", nullptr, ImGuiWindowFlags_NoDecoration |
+            ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+            ImGuiWindowFlags_NoInputs)) {
+        ImGui::TextColored(col(theme.accent2), "PAUSED");
+        ImGui::TextUnformatted("Esc / Guide: open menu to resume");
+    }
+    ImGui::End();
+    pop_runtime_style();
+}
+
 extern "C" void recomp_runtime_ui_render_imgui(RecompRuntimeUi *ui) {
     if (!ui || !ui->open || ImGui::GetCurrentContext() == nullptr) return;
 
     LauncherTheme theme = launcher_theme_by_name(ui->config.theme);
+    const bool storybook = ui->config.theme && std::strcmp(ui->config.theme, "storybook") == 0;
     ImGuiIO &io = ImGui::GetIO();
     const ImVec2 display = io.DisplaySize;
     if (display.x <= 0.0f || display.y <= 0.0f) return;
@@ -288,6 +340,7 @@ extern "C" void recomp_runtime_ui_render_imgui(RecompRuntimeUi *ui) {
                                    ImGuiWindowFlags_NoMove |
                                    ImGuiWindowFlags_NoSavedSettings;
     if (ImGui::Begin("##recomp-runtime-ui", nullptr, flags)) {
+        if (storybook && !touch_friendly) ImGui::SetWindowFontScale(1.2f);
         if (touch_friendly) {
             // Scale toward a phone-readable physical size regardless of any
             // host-wide DPI scale already applied to the ImGui context.
@@ -301,14 +354,14 @@ extern "C" void recomp_runtime_ui_render_imgui(RecompRuntimeUi *ui) {
             ImGui::SetWindowFontScale(font_scale);
         }
         ImGui::PushStyleColor(ImGuiCol_Text, col(theme.accent2));
+        ImGui::PushTextWrapPos();
         ImGui::TextUnformatted(ui->config.title ? ui->config.title : "Settings");
+        ImGui::PopTextWrapPos();
         ImGui::PopStyleColor();
         if (ui->config.subtitle && ui->config.subtitle[0]) {
-            ImGui::SameLine();
-            const float subtitle_w = ImGui::CalcTextSize(ui->config.subtitle).x;
-            ImGui::SetCursorPosX(ImGui::GetWindowWidth() -
-                                 ImGui::GetStyle().WindowPadding.x - subtitle_w);
+            ImGui::PushTextWrapPos();
             ImGui::TextDisabled("%s", ui->config.subtitle);
+            ImGui::PopTextWrapPos();
         }
         ImGui::Separator();
 
@@ -319,7 +372,19 @@ extern "C" void recomp_runtime_ui_render_imgui(RecompRuntimeUi *ui) {
             ? close_h + theme.spacing_sm * 2.0f
             : ImGui::GetTextLineHeightWithSpacing() + theme.spacing_lg + 2.0f;
         const float content_h = ImGui::GetContentRegionAvail().y - footer_h;
-        if (wide) {
+        const bool confirming = ui->pending_action != nullptr;
+        if (confirming) {
+            ImGui::BeginChild("##confirmation", ImVec2(0.0f, content_h), true);
+            ImGui::TextColored(col(theme.accent2), "%s?", ui->pending_action->label);
+            ImGui::Spacing();
+            ImGui::TextWrapped("%s", ui->pending_action->confirmation);
+            ImGui::Spacing();
+            if (ImGui::Selectable("Cancel", !ui->confirm_accept, 0, ImVec2(0, theme.row_height)))
+                recomp_runtime_ui_confirm(ui, 0);
+            if (ImGui::Selectable("Confirm", ui->confirm_accept != 0, 0, ImVec2(0, theme.row_height)))
+                recomp_runtime_ui_confirm(ui, 1);
+            ImGui::EndChild();
+        } else if (wide) {
             const float sidebar_w = touch_friendly
                 ? std::clamp(width * 0.20f, 280.0f, 520.0f)
                 : 190.0f;
@@ -353,13 +418,7 @@ extern "C" void recomp_runtime_ui_render_imgui(RecompRuntimeUi *ui) {
         if (touch_friendly) {
             ImGui::TextDisabled("Tap a section or setting");
         } else {
-            const char *accept = ui->config.accept_label
-                                     ? ui->config.accept_label : "Select";
-            const char *back = ui->config.back_label
-                                   ? ui->config.back_label : "Back";
-            ImGui::TextDisabled(
-                "%s  Select    %s  Back    D-pad / Arrows  Navigate",
-                accept, back);
+            ImGui::TextDisabled("Arrows / D-pad: move   Enter / A: select");
         }
         if (ui->status_frames) {
             ImGui::SameLine();
@@ -368,16 +427,31 @@ extern "C" void recomp_runtime_ui_render_imgui(RecompRuntimeUi *ui) {
             ImGui::PopStyleColor();
             --ui->status_frames;
         }
+        ImGui::BeginDisabled(confirming);
         ImGui::SameLine();
-        const char *close_label = "Resume";
+        bool has_pause = false;
+        for (size_t i = 0; i < ui->config.item_count; ++i)
+            if (ui->config.items[i].key && std::strcmp(ui->config.items[i].key, RECOMP_RUNTIME_UI_KEY_PAUSE) == 0)
+                has_pause = true;
+        const char *close_label = has_pause ? "Close menu" : "Resume";
         const float close_w = touch_friendly
             ? std::max(320.0f, ImGui::CalcTextSize(close_label).x +
                                    theme.spacing_lg * 2.0f)
             : ImGui::CalcTextSize(close_label).x + theme.spacing_lg * 2.0f;
         ImGui::SetCursorPosX(ImGui::GetWindowWidth() -
                              ImGui::GetStyle().WindowPadding.x - close_w);
-        if (ImGui::Button(close_label, ImVec2(close_w, close_h)))
-            recomp_runtime_ui_close(ui);
+        if (storybook) {
+            ImGui::PushStyleColor(ImGuiCol_Button, col(theme.accent));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, col(theme.accent_dim));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, col(theme.accent_dim));
+            ImGui::PushStyleColor(ImGuiCol_Text, col(theme.accent_text));
+        }
+        if (ImGui::Button(close_label, ImVec2(close_w, close_h))) {
+            if (has_pause || !recomp_runtime_ui_activate(ui, RECOMP_RUNTIME_UI_KEY_RESUME))
+                recomp_runtime_ui_close(ui);
+        }
+        if (storybook) ImGui::PopStyleColor(4);
+        ImGui::EndDisabled();
     }
     ImGui::End();
     pop_runtime_style();
