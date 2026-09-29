@@ -172,6 +172,50 @@ void launcher_debug_step(LauncherPlatform* p, LauncherModel* m) {
         else if (strcmp(v, "assist_tools") == 0) launcher_model_set_view(m, LNG_VIEW_ASSIST_TOOLS);
         else if (strcmp(v, "credits") == 0) launcher_model_set_view(m, LNG_VIEW_CREDITS);
         else if (strcmp(v, "mods") == 0) launcher_model_set_view(m, LNG_VIEW_MODS);
+    } else if (strcmp(c, "romprobe") == 0) {
+        fprintf(stderr, "[launcher:probe] verified=%d can_play=%d patch=%d language=%s save=%s\n",
+                launcher_model_rom_verified(m), launcher_model_can_launch(m),
+                m->s.rom_patch_enabled, m->rom_variant_label ? m->rom_variant_label : "unset",
+                m->sram_path ? m->sram_path : "unset");
+    } else if (strcmp(c, "aspectcycle") == 0) {
+        launcher_model_cycle_view_mode(m);
+    } else if (strcmp(c, "aspectprobe") == 0) {
+        fprintf(stderr, "[launcher:aspect] index=%d label=%s\n", m->s.aspect_index, launcher_model_view_mode_label(m));
+    } else if (strncmp(c, "scaling:", 8) == 0) {
+        const char* name = c + 8;
+        if (!strcmp(name, "nearest")) launcher_model_set_scaling_filter(m, 0);
+        else if (!strcmp(name, "linear")) launcher_model_set_scaling_filter(m, 1);
+        else if (!strcmp(name, "sharp")) launcher_model_set_scaling_filter(m, 2);
+        else if (!strcmp(name, "smooth")) launcher_model_set_scaling_filter(m, 3);
+        else fprintf(stderr, "[dbg] unknown scaling filter: %s\n", name);
+    } else if (strncmp(c, "effect:", 7) == 0) {
+        const char* name = c + 7;
+        if (!strcmp(name, "off")) launcher_model_set_screen_effect(m, 0);
+        else if (!strcmp(name, "lcd")) launcher_model_set_screen_effect(m, 1);
+        else if (!strcmp(name, "crt")) launcher_model_set_screen_effect(m, 2);
+        else fprintf(stderr, "[dbg] unknown screen effect: %s\n", name);
+    } else if (strncmp(c, "effectstrength:", 15) == 0) {
+        launcher_model_set_screen_effect_strength(m, atoi(c + 15));
+    } else if (strcmp(c, "filterprobe") == 0) {
+        fprintf(stderr, "[launcher:filters] scaler=%s linear=%d sharp=%d smooth=%d effect=%d strength=%d\n",
+                launcher_model_scaling_filter_label(m), m->s.linear_filter,
+                m->s.sharp_filter, m->s.smooth_filter, m->s.screen_effect,
+                m->s.screen_effect_strength);
+    } else if (strncmp(c, "romfile:", 8) == 0) {
+        launcher_model_set_rom(m, c + 8);
+    } else if (strncmp(c, "patchfile:", 10) == 0) {
+        launcher_model_set_rom_patch(m, c + 10);
+    } else if (strcmp(c, "patchtoggle") == 0) {
+        launcher_model_toggle_rom_patch(m);
+    } else if (strcmp(c, "patchclear") == 0) {
+        launcher_model_clear_rom_patch(m);
+    } else if (strcmp(c, "play") == 0) {
+        // Same model/patch/provider gates as PLAY; no verification bypass.
+        if (launcher_model_can_launch(m) && launcher_model_prepare_rom_patch(m) &&
+            (!m->mods || !m->mods->commit ||
+             m->mods->commit(m->mods->ctx, launcher_model_effective_rom_path(m))))
+            m->action = LNG_ACTION_LAUNCH;
+        else fprintf(stderr, "[launcher:probe] play blocked: %s\n", m->rom_patch_status);
     } else if (strncmp(c, "credittools:", 12) == 0) {
         launcher_model_show_credit_tools(m, strcmp(c + 12, "open") == 0);
         fprintf(stderr, "[credits] tools_open=%d\n", m->credits_tools_open ? 1 : 0);

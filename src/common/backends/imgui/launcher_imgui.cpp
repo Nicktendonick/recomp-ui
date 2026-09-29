@@ -1185,9 +1185,15 @@ void draw_game_panel(LauncherModel* m, const LauncherTheme& th, bool fill_h = fa
         // beside it, which reads as a bug.
         if (!disc_verdict && m->region[0])
             kv_row("Region", m->region, th, false, false);
-        kv_row("File",   m->rom_file, th, false, false);
+        ImGui::PushTextWrapPos(0.0f);
+        if (m->rom_variant_label)
+            kv_row("Language", m->rom_variant_label, th, false, false);
+        kv_row(m->rom_file_is_label ? "Game" : "File", m->rom_file, th, false, false);
+        ImGui::PopTextWrapPos();
         ImGui::EndTable();
     }
+    if (m->rom_file_is_label)
+        ImGui::TextWrapped("Imported by an older launcher. Use Change ROM and select your original file to restore its filename.");
     ImGui::Dummy(ImVec2(0, px(12)));
     char change_label[32];
     snprintf(change_label, sizeof(change_label), "Change %s", noun);
@@ -2372,7 +2378,8 @@ bool video_card_grows(const LauncherModel* m) {
         m->num_aspect_labels > 0 || m->aspect_mask)
         return true;
     if (m->has_shader) return true;
-    if (m->has_sharp_filter || m->has_affine_filter) return true;
+    if (m->has_sharp_filter || m->has_affine_filter ||
+        m->has_smooth_filter || m->has_screen_effects) return true;
     if (m->num_display_layouts > 0) return true;
     // NES legacy-surface additions (Integer scaling row, HD texture pack block)
     // add extra rows the fixed no_scroll band wasn't sized for.
@@ -2466,18 +2473,72 @@ void draw_shader_row(LauncherModel* m, const LauncherTheme& th, float col_w = 0.
     ImGui::EndDisabled();
 }
 
+void draw_scaling_filter_row(LauncherModel* m, const LauncherTheme& th,
+                             float col_w = 0.0f) {
+    row_label("Scaling filter", th, col_w);
+    ImGui::SetNextItemWidth(px(220));
+    if (ImGui::BeginCombo("##scaling_filter", launcher_model_scaling_filter_label(m))) {
+        static const char* const names[] = {"Nearest", "Linear", "Sharp fractional", "Smooth 2x"};
+        const int current = m->has_smooth_filter && m->s.smooth_filter ? 3
+                          : m->has_sharp_filter && m->s.sharp_filter ? 2
+                          : m->s.linear_filter ? 1 : 0;
+        for (int i = 0; i < 4; ++i) {
+            if ((i == 2 && !m->has_sharp_filter) || (i == 3 && !m->has_smooth_filter)) continue;
+            if (ImGui::Selectable(names[i], current == i))
+                launcher_model_set_scaling_filter(m, i);
+        }
+        ImGui::EndCombo();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        ImGui::SetTooltip("Nearest preserves hard pixels. Linear softens the image.\n"
+                          "Sharp fractional keeps pixels clearer at non-integer sizes.\n"
+                          "Smooth 2x adds independently implemented edge-aware smoothing.\n"
+                          "It is CPU-heavy and may lower FPS in widescreen combat.\n"
+                          "Only the game image is affected; launcher and pause-menu UI stay sharp.");
+}
+
+void draw_screen_effect_rows(LauncherModel* m, const LauncherTheme& th,
+                             float col_w = 0.0f) {
+    if (!m->has_screen_effects) return;
+    row_label("Screen effect", th, col_w);
+    ImGui::SetNextItemWidth(px(220));
+    if (ImGui::BeginCombo("##screen_effect", launcher_model_screen_effect_label(m))) {
+        static const char* const names[] = {"Off", "LCD Grid", "CRT"};
+        for (int i = 0; i < 3; ++i) {
+            if (ImGui::Selectable(names[i], m->s.screen_effect == i))
+                launcher_model_set_screen_effect(m, i);
+        }
+        ImGui::EndCombo();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        ImGui::SetTooltip("LCD Grid adds a handheld-screen texture. CRT adds scanlines and a TV-style mask.\n"
+                          "Works with any scaling filter and screen colour model.\n"
+                          "Only the game image is affected, not the launcher or pause-menu UI.");
+    row_label("Effect strength", th, col_w);
+    ImGui::SetNextItemWidth(px(220));
+    ImGui::BeginDisabled(m->s.screen_effect == 0);
+    int strength = m->s.screen_effect_strength;
+    if (ImGui::SliderInt("##screen_effect_strength", &strength, 0, 100, "%d%%"))
+        launcher_model_set_screen_effect_strength(m, strength);
+    ImGui::EndDisabled();
+}
+
 void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
     eyebrow("DISPLAY");
 
     if (!any_deep_display(m)) {
         // ---- legacy minimal surface (SNES/NES etc.) — aligned label grid -------
         float cw = ImGui::CalcTextSize("Linear filtering").x;
-        if (m->has_sharp_filter) {
+        if (m->has_sharp_filter || m->has_smooth_filter) {
             float t = ImGui::CalcTextSize("Scaling filter").x;
             if (t > cw) cw = t;
         }
         if (m->has_affine_filter) {
             float t = ImGui::CalcTextSize("Affine background smoothing").x;
+            if (t > cw) cw = t;
+        }
+        if (m->has_screen_effects) {
+            float t = ImGui::CalcTextSize("Effect strength").x;
             if (t > cw) cw = t;
         }
         if (m->has_shader) {
@@ -2520,11 +2581,8 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
             bool is = m->s.integer_scale != 0;
             if (ImGui::Checkbox("##intscale", &is)) launcher_model_toggle_integer_scale(m);
         }
-        if (m->has_sharp_filter) {
-            row_label("Scaling filter", th, cw);
-            if (ImGui::Button(launcher_model_scaling_filter_label(m),
-                              ImVec2(px(180), px(30))))
-                launcher_model_cycle_scaling_filter(m);
+        if (m->has_sharp_filter || m->has_smooth_filter) {
+            draw_scaling_filter_row(m, th, cw);
         } else {
             row_label("Linear filtering", th, cw);
             bool filter = m->s.linear_filter != 0;
@@ -2537,6 +2595,7 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
             if (ImGui::Checkbox("##affine_filter", &affine))
                 launcher_model_toggle_affine_filter(m);
         }
+        draw_screen_effect_rows(m, th, cw);
         draw_shader_row(m, th, cw);
         // HD texture packs (NES module, Mesen hires.txt format): one line —
         //   [x] HD texture pack   …folder tail   [Browse]
@@ -2628,11 +2687,8 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         ImGui::PopID();
     }
 
-    if (m->has_sharp_filter) {
-        row_label("Scaling filter", th);
-        if (ImGui::Button(launcher_model_scaling_filter_label(m),
-                          ImVec2(px(180), px(30))))
-            launcher_model_cycle_scaling_filter(m);
+    if (m->has_sharp_filter || m->has_smooth_filter) {
+        draw_scaling_filter_row(m, th);
     } else if (m->has_texture_filter) {
         row_label("Texture filtering", th);
         if (ImGui::Button(launcher_model_texture_filter_label(m), ImVec2(px(120), px(30))))
@@ -2714,6 +2770,7 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
         if (ImGui::Button(launcher_model_screen_kind_label(m), ImVec2(px(220), px(30))))
             launcher_model_cycle_screen_kind(m);
     }
+    draw_screen_effect_rows(m, th);
 
     // Frame interpolation is only meaningful under OpenGL (Software has no
     // interpolation pass); Presentation target only matters once frame
@@ -3747,7 +3804,9 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
 
     if (begin_panel("cfg_src", 0)) {
         ImGui::PushStyleColor(ImGuiCol_Text, col(th.accent2));
-        ImGui::Text("CONTROLLER - PLAYER %d", p + 1); ImGui::PopStyleColor(); ImGui::Spacing();
+        if (m->hybrid_input) ImGui::TextUnformatted("Controls");
+        else ImGui::Text("CONTROLLER - PLAYER %d", p + 1);
+        ImGui::PopStyleColor(); ImGui::Spacing();
         row_label("Input source", th);
         ImGui::SetNextItemWidth(px(200));
         if (m->hybrid_input) ImGui::TextUnformatted("Keyboard + Gamepad (both active)");
@@ -7813,6 +7872,12 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
             ImGui::SetTooltip("Select a verified %s first", noun);
         } else if (m->setup_preparing) {
             ImGui::SetTooltip("Wait for the current setup job to finish");
+        } else if (launcher_model_rom_verified(m) && m->rom_patch_supported &&
+                   m->s.rom_patch_enabled && !m->s.rom_patch_path[0]) {
+            ImGui::SetTooltip("Select a patch in Mods, or disable patching to use the original game.");
+        } else if (launcher_model_rom_verified(m) && !m->rom_patch_allow_unpatched &&
+                   m->rom_patch_required_sha1 && !m->s.rom_patch_enabled) {
+            ImGui::SetTooltip("This build needs its matching translation patch. Select and enable it in Mods.");
         } else {
             ImGui::SetTooltip("Select a valid %s first", noun);
         }

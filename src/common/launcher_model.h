@@ -283,6 +283,8 @@ typedef struct {
     bool has_gyro_controls;
     bool has_sharp_filter;
     bool has_affine_filter;
+    bool has_smooth_filter;
+    bool has_screen_effects;
     bool has_shader;
     bool netplay_supported;
     /* Host opted into first-run wizard + Generate & rebuild (GameInfo). */
@@ -298,6 +300,12 @@ typedef struct {
     const char* rom_patch_note;
     const char* rom_patch_cache_dir;
     const char* rom_patch_required_sha1;
+    bool rom_patch_allow_unpatched;
+    const char* unpatched_label;
+    const char* patched_label;
+    const char* unpatched_sram_path;
+    const char* patched_sram_path;
+    const char* rom_variant_label;
     char      rom_patch_status[256];
     char      rom_patch_prepared_path[512];
     char      rom_patch_prepared_sha1[41];
@@ -407,7 +415,8 @@ typedef struct {
     bool     rom_present;
     char     rom_full[512];          // absolute path (what we hand to the game)
     char     rom_sha1_hex[41];       // complete stock-image identity
-    char     rom_file[128];          // basename for display, e.g. "mmx.sfc"
+    char     rom_file[512];          // basename for display; do not truncate to 128 bytes
+    bool     rom_file_is_label;      // verified description for legacy numeric imports
     char     rom_size[48];           // "1.50 MB"
     char     rom_header[24];         // "LoROM"
     char     rom_crc_str[16];        // "1B4B2E9C"
@@ -612,7 +621,12 @@ void launcher_model_cancel_restore_defaults(LauncherModel* m);
 void launcher_model_cycle_scale(LauncherModel* m);   // 1..6 wrap
 void launcher_model_toggle_filter(LauncherModel* m);
 void launcher_model_cycle_scaling_filter(LauncherModel* m);
+void launcher_model_set_scaling_filter(LauncherModel* m, int filter); // 0 nearest, 1 linear, 2 sharp, 3 smooth
 const char* launcher_model_scaling_filter_label(const LauncherModel* m);
+void launcher_model_set_screen_effect(LauncherModel* m, int effect); // 0 off, 1 LCD, 2 CRT
+void launcher_model_cycle_screen_effect(LauncherModel* m);
+const char* launcher_model_screen_effect_label(const LauncherModel* m);
+void launcher_model_set_screen_effect_strength(LauncherModel* m, int strength);
 void launcher_model_toggle_affine_filter(LauncherModel* m);
 void launcher_model_toggle_widescreen(LauncherModel* m);  // gated
 void launcher_model_toggle_adaptive_view(LauncherModel* m);  // gated; fixed aspect is retained

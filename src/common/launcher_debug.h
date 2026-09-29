@@ -16,6 +16,15 @@
 //   wait:N                               idle N frames (let layout settle)
 //   shot:PATH                            write a PNG of the current frame
 //   quit                                 exit the launcher
+//   romfile:PATH / patchfile:PATH         import through normal model gates
+//   patchtoggle / patchclear             normal patch enable/clear actions
+//   romprobe                             log verified language/save/PLAY state
+//   scaling:nearest|linear|sharp|smooth   set through capability-gated model
+//   effect:off|lcd|crt                    set game-image screen effect
+//   effectstrength:N                     set/clamp effect strength to 0..100
+//   filterprobe                          log presentation settings (no pixels)
+//   aspectcycle / aspectprobe            cycle/log game-supplied view presets
+//   play                                 use normal verification + patch gates
 //
 // Example:
 //   LNG_SCRIPT="wait:5;shot:a.png;view:settings;wait:5;shot:b.png;quit"

@@ -753,6 +753,15 @@ struct RecompLauncherCSettings {
     char rom_patch_source_path[512];
     char rom_patch_sha1[41];
     char rom_patch_crc32[9];
+    /* Output only: battery path corresponding to the selected ROM/patch. */
+    char selected_sram_path[1024];
+
+    /* Optional game-image presentation filters (appended additively).
+     * Smooth 2x is exclusive with linear_filter/sharp_filter. Screen effects are
+     * independent and never apply to the host launcher or its pause menu. */
+    int smooth_filter;            // bool: independently implemented edge-aware 2x smoothing
+    int screen_effect;            // 0 off, 1 LCD grid, 2 CRT
+    int screen_effect_strength;   // 0..100; host seeds 35 on a fresh config
 };
 
 /* Values for RecompLauncherCSettings.vsync (1-based; 0 = unset). */
@@ -1286,6 +1295,15 @@ typedef struct RecompLauncherCGameInfo {
     const char* tagline;
     int sidebar_layout;
     const char* settings_note; // Optional host-owned location/help text, Settings only.
+    /* Opt-in dual-corpus host. Patch output still has to match required_sha1;
+     * allowing the verified source does not relax output verification. */
+    int rom_patch_allow_unpatched;
+    const char* unpatched_label;
+    const char* patched_label;
+    const char* patched_sram_path;
+    /* Opt-in extra presentation rows; zero-init keeps older hosts unchanged. */
+    int has_smooth_filter;
+    int has_screen_effects;
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */

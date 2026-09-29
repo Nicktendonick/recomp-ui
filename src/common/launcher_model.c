@@ -149,6 +149,17 @@ static float clampf(float v, float lo, float hi) {
 }
 
 static void run_verify(LauncherModel* m);   // fwd; defined below, called from launcher_model_set_rom
+static void update_rom_variant(LauncherModel* m) {
+    if (!m->rom_patch_allow_unpatched) return;
+    const bool target = m->rom_patch_required_sha1 &&
+        strcmp(m->rom_sha1_hex, m->rom_patch_required_sha1) == 0;
+    const bool patch = target || (m->rom_patch_supported && m->s.rom_patch_enabled);
+    m->rom_variant_label = !launcher_model_rom_verified(m) ? "Select a verified ROM"
+        : (patch ? m->patched_label : m->unpatched_label);
+    m->sram_path = patch ? m->patched_sram_path : m->unpatched_sram_path;
+    m->saves_supported = m->sram_path != NULL;
+    m->file_status[0] = '\0';
+}
 static void update_msu1_patch_available(LauncherModel* m);   // fwd; called from launcher_model_set_rom
 static void lm_inspect_memcard(LauncherModel* m, int slot); // fwd; host memcard_inspect callback
 static void lm_inspect_tpak(LauncherModel* m, int slot);    // fwd; host tpak_inspect callback
@@ -323,6 +334,8 @@ void launcher_model_init(LauncherModel* m,
         m->has_gyro_controls    = game->has_gyro_controls != 0;
         m->has_sharp_filter     = game->has_sharp_filter != 0;
         m->has_affine_filter    = game->has_affine_filter != 0;
+        m->has_smooth_filter    = game->has_smooth_filter != 0;
+        m->has_screen_effects   = game->has_screen_effects != 0;
         m->has_shader           = game->has_shader != 0;
         m->netplay_supported    = game->netplay_supported != 0 && game->netplay != NULL;
         m->netplay              = game->netplay;
@@ -330,6 +343,11 @@ void launcher_model_init(LauncherModel* m,
         m->rom_patch_note       = game->rom_patch_note;
         m->rom_patch_cache_dir  = game->rom_patch_cache_dir;
         m->rom_patch_required_sha1 = game->rom_patch_required_sha1;
+        m->rom_patch_allow_unpatched = game->rom_patch_allow_unpatched != 0;
+        m->unpatched_label = game->unpatched_label;
+        m->patched_label = game->patched_label;
+        m->unpatched_sram_path = game->sram_path;
+        m->patched_sram_path = game->patched_sram_path;
 #if RECOMP_UI_ENABLE_MODS
         m->mods                 = game->mods;
 #else
@@ -382,12 +400,20 @@ void launcher_model_init(LauncherModel* m,
         memcpy(m->default_assist_pad_bind, m->s.assist_pad_bind,
                sizeof m->default_assist_pad_bind);
     }
-    if (m->has_sharp_filter) {
+    if (m->has_sharp_filter || m->has_smooth_filter) {
         m->s.linear_filter = m->s.linear_filter ? 1 : 0;
-        m->s.sharp_filter = m->s.sharp_filter ? 1 : 0;
+        m->s.sharp_filter = m->has_sharp_filter && m->s.sharp_filter ? 1 : 0;
+        m->s.smooth_filter = m->has_smooth_filter && m->s.smooth_filter == 1 ? 1 : 0;
         // Preserve an existing explicit linear-filter preference when a host
         // first gains the three-state scaler control.
         if (m->s.linear_filter) m->s.sharp_filter = 0;
+        // An explicitly selected Smooth 2x scaler wins over stale legacy flags.
+        if (m->s.smooth_filter) m->s.linear_filter = m->s.sharp_filter = 0;
+    }
+    if (m->has_screen_effects) {
+        if (m->s.screen_effect < 0 || m->s.screen_effect > 2)
+            m->s.screen_effect = 0;
+        m->s.screen_effect_strength = clampi(m->s.screen_effect_strength, 0, 100);
     }
     memset(&m->s.netplay_launch, 0, sizeof(m->s.netplay_launch));
     if (!m->s.netplay_player_name[0] && m->netplay && m->netplay->player_name) {
@@ -761,10 +787,15 @@ void launcher_model_init(LauncherModel* m,
 }
 
 void launcher_model_commit(const LauncherModel* m, RecompLauncherCSettings* io) {
-    if (io) *io = m->s;
+    if (io) {
+        *io = m->s;
+        safe_copy(io->selected_sram_path, sizeof io->selected_sram_path,
+                  m->sram_path ? m->sram_path : "");
+    }
 }
 
 void launcher_model_set_rom(LauncherModel* m, const char* path) {
+    bool legacy_import_name = false;
     char imported[1024];
     if (m->import_file && path && *path) {
         if (!m->import_file(m->import_file_ctx, "ROMs", path, imported,
@@ -782,6 +813,7 @@ void launcher_model_set_rom(LauncherModel* m, const char* path) {
     for (const char* q = m->rom_full; *q; ++q)
         if (*q == '/' || *q == '\\') base = q + 1;
     safe_copy(m->rom_file, sizeof(m->rom_file), m->rom_present ? base : "(none)");
+    m->rom_file_is_label = false;
 
     /* Cartridge consoles: read the ROM once for size + CRC32/SHA over the
      * body (SMC header stripped) vs expected fingerprints.
@@ -805,6 +837,20 @@ void launcher_model_set_rom(LauncherModel* m, const char* path) {
                     fseek(f, 0, SEEK_SET);
                     uint8_t* buf = (uint8_t*)malloc((size_t)n);
                     if (buf && fread(buf, 1, (size_t)n, f) == (size_t)n) {
+                        // Older portable imports used decimal FNV-1a names.
+                        // Only identify that naming scheme when the complete
+                        // file's fingerprint agrees, not merely because a
+                        // user chose a numeric filename. It is NOT verification.
+                        const size_t digits = strspn(base, "0123456789");
+                        if (m->import_file && digits > 0 && digits <= 20 && base[digits] == '.') {
+                            uint64_t h = UINT64_C(14695981039346656037);
+                            for (size_t j = 0; j < (size_t)n; ++j)
+                                h = (h ^ buf[j]) * UINT64_C(1099511628211);
+                            char fingerprint[32];
+                            snprintf(fingerprint, sizeof(fingerprint), "%llu", (unsigned long long)h);
+                            legacy_import_name = strlen(fingerprint) == digits &&
+                                strncmp(base, fingerprint, digits) == 0;
+                        }
                         /* Normalize container headers before fingerprinting.
                          * SNES .smc images may carry a 512-byte copier header;
                          * NES .nes images carry a 16-byte iNES/NES 2.0 header.
@@ -858,8 +904,21 @@ void launcher_model_set_rom(LauncherModel* m, const char* path) {
     }
     if (!m->rom_size[0]) safe_copy(m->rom_size, sizeof(m->rom_size), "--");
 
+    // The old importer did not preserve the original name. Give recognized
+    // bytes an honest game/version label without renaming or inventing a file.
+    if (legacy_import_name && launcher_model_rom_verified(m)) {
+        const char* role = "verified ROM";
+        if (m->rom_patch_required_sha1 && m->rom_patch_required_sha1[0])
+            role = strcmp(m->rom_sha1_hex, m->rom_patch_required_sha1) == 0
+                ? "patched ROM" : "source ROM";
+        snprintf(m->rom_file, sizeof(m->rom_file), "%s (%s)",
+                 m->game_name && m->game_name[0] ? m->game_name : "Game", role);
+        m->rom_file_is_label = true;
+    }
+
     run_verify(m);
     update_msu1_patch_available(m);
+    update_rom_variant(m);
 }
 
 // Disc-verdict (verify.mode==1 systems, e.g. PSX): run the SystemProfile's
@@ -975,6 +1034,9 @@ void launcher_model_request_restore_defaults(LauncherModel* m) {
 void launcher_model_restore_defaults(LauncherModel* m) {
     if (!launcher_model_can_restore_defaults(m)) return;
     m->s = m->default_settings;
+    m->rom_patch_prepared_path[0] = '\0';
+    m->rom_patch_prepared_sha1[0] = '\0';
+    update_rom_variant(m);
     {
         int d = m->s.rewind_depth;
         if (d != 50 && d != 100 && d != 150 && d != 200)
@@ -996,29 +1058,61 @@ void launcher_model_cycle_scale(LauncherModel* m) {
 }
 
 void launcher_model_toggle_filter(LauncherModel* m) {
+    if (!m) return;
     m->s.linear_filter = !m->s.linear_filter;
     if (m->s.linear_filter && m->has_sharp_filter)
         m->s.sharp_filter = 0;
+    if (m->s.linear_filter && m->has_smooth_filter)
+        m->s.smooth_filter = 0;
+}
+
+void launcher_model_set_scaling_filter(LauncherModel* m, int filter) {
+    if (!m || filter < 0 || filter > 3) return;
+    if (filter == 2 && !m->has_sharp_filter) return;
+    if (filter == 3 && !m->has_smooth_filter) return;
+    m->s.linear_filter = filter == 1;
+    m->s.sharp_filter = filter == 2;
+    m->s.smooth_filter = filter == 3;
 }
 
 void launcher_model_cycle_scaling_filter(LauncherModel* m) {
-    if (!m || !m->has_sharp_filter) return;
-    if (m->s.sharp_filter) {
-        m->s.sharp_filter = 0;
-        m->s.linear_filter = 0;
-    } else if (m->s.linear_filter) {
-        m->s.linear_filter = 0;
-        m->s.sharp_filter = 1;
-    } else {
-        m->s.linear_filter = 1;
-    }
+    if (!m || (!m->has_sharp_filter && !m->has_smooth_filter)) return;
+    int filter = m->s.smooth_filter && m->has_smooth_filter ? 3
+               : m->s.sharp_filter && m->has_sharp_filter ? 2
+               : m->s.linear_filter ? 1 : 0;
+    do {
+        filter = (filter + 1) % 4;
+    } while ((filter == 2 && !m->has_sharp_filter) ||
+             (filter == 3 && !m->has_smooth_filter));
+    launcher_model_set_scaling_filter(m, filter);
 }
 
 const char* launcher_model_scaling_filter_label(const LauncherModel* m) {
     if (!m) return "Nearest";
-    if (m->s.sharp_filter) return "Sharp fractional";
+    if (m->has_smooth_filter && m->s.smooth_filter) return "Smooth 2x";
+    if (m->has_sharp_filter && m->s.sharp_filter) return "Sharp fractional";
     if (m->s.linear_filter) return "Linear";
     return "Nearest";
+}
+
+void launcher_model_set_screen_effect(LauncherModel* m, int effect) {
+    if (!m || !m->has_screen_effects) return;
+    m->s.screen_effect = effect >= 0 && effect <= 2 ? effect : 0;
+}
+
+void launcher_model_cycle_screen_effect(LauncherModel* m) {
+    if (!m || !m->has_screen_effects) return;
+    launcher_model_set_screen_effect(m, (clampi(m->s.screen_effect, 0, 2) + 1) % 3);
+}
+
+const char* launcher_model_screen_effect_label(const LauncherModel* m) {
+    static const char* const names[] = {"Off", "LCD Grid", "CRT"};
+    return names[m ? clampi(m->s.screen_effect, 0, 2) : 0];
+}
+
+void launcher_model_set_screen_effect_strength(LauncherModel* m, int strength) {
+    if (!m || !m->has_screen_effects) return;
+    m->s.screen_effect_strength = clampi(strength, 0, 100);
 }
 
 void launcher_model_toggle_affine_filter(LauncherModel* m) {
@@ -1927,9 +2021,11 @@ bool launcher_model_can_finish_setup(const LauncherModel* m) {
 bool launcher_model_can_launch(const LauncherModel* m) {
     if (!m) return false;
     if (!m->rom_present || strcmp(m->rom_size, "--") == 0) return false;
-    if (m->rom_patch_supported && m->s.rom_patch_enabled &&
+    const bool already_target = m->rom_patch_required_sha1 &&
+        strcmp(m->rom_sha1_hex, m->rom_patch_required_sha1) == 0;
+    if (!already_target && m->rom_patch_supported && m->s.rom_patch_enabled &&
         !m->s.rom_patch_path[0]) return false;
-    if (m->rom_patch_required_sha1 && *m->rom_patch_required_sha1 &&
+    if (!m->rom_patch_allow_unpatched && m->rom_patch_required_sha1 && *m->rom_patch_required_sha1 &&
         strcmp(m->rom_sha1_hex, m->rom_patch_required_sha1) != 0 &&
         !m->s.rom_patch_enabled) return false;
     if (m->profile && m->profile->verify.mode == 1) {
@@ -2879,6 +2975,7 @@ void launcher_model_set_rom_patch(LauncherModel* m, const char* path) {
     m->rom_patch_prepared_path[0] = '\0';
     m->rom_patch_prepared_sha1[0] = '\0';
     m->rom_patch_status[0] = '\0';
+    update_rom_variant(m);
 }
 
 void launcher_model_clear_rom_patch(LauncherModel* m) {
@@ -2891,6 +2988,7 @@ void launcher_model_clear_rom_patch(LauncherModel* m) {
     m->rom_patch_prepared_path[0] = '\0';
     m->rom_patch_prepared_sha1[0] = '\0';
     m->rom_patch_status[0] = '\0';
+    update_rom_variant(m);
 }
 
 void launcher_model_toggle_rom_patch(LauncherModel* m) {
@@ -2899,11 +2997,13 @@ void launcher_model_toggle_rom_patch(LauncherModel* m) {
         m->s.rom_patch_enabled = 0;
         safe_copy(m->rom_patch_status, sizeof(m->rom_patch_status),
                   "Select a patch file first.");
+        update_rom_variant(m);
         return;
     }
     m->s.rom_patch_enabled = m->s.rom_patch_enabled ? 0 : 1;
     m->rom_patch_prepared_path[0] = '\0';
     m->rom_patch_prepared_sha1[0] = '\0';
+    update_rom_variant(m);
 }
 
 static const char* lm_path_extension(const char* path) {
@@ -3002,6 +3102,16 @@ bool launcher_model_prepare_rom_patch(LauncherModel* m) {
                   "The patched-ROM cache path is too long.");
         return false;
     }
+#if defined(_WIN32)
+    // This patcher's C file API is not long-path aware, including the .tmp
+    // publication file. Explain the actual remedy instead of a vague I/O error.
+    if (target_chars + 4 >= 260) {
+        free(output);
+        safe_copy(m->rom_patch_status, sizeof(m->rom_patch_status),
+                  "Game folder path is too long for the patch cache. Move the whole game folder to a shorter path and try again.");
+        return false;
+    }
+#endif
     char temporary[520];
     const int temporary_chars =
         snprintf(temporary, sizeof(temporary), "%s.tmp", target);
