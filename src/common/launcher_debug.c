@@ -172,6 +172,19 @@ void launcher_debug_step(LauncherPlatform* p, LauncherModel* m) {
         else if (strcmp(v, "assist_tools") == 0) launcher_model_set_view(m, LNG_VIEW_ASSIST_TOOLS);
         else if (strcmp(v, "credits") == 0) launcher_model_set_view(m, LNG_VIEW_CREDITS);
         else if (strcmp(v, "mods") == 0) launcher_model_set_view(m, LNG_VIEW_MODS);
+    } else if (strcmp(c, "builtinprobe") == 0) {
+        for (int i = 0; i < m->builtin_mod_count; ++i) {
+            const RecompLauncherCBuiltinMod* mod = &m->builtin_mods[i];
+            fprintf(stderr, "[launcher:builtin] id=%s enabled=%d\n",
+                    mod->id ? mod->id : "", mod->get_enabled ? mod->get_enabled(mod->ctx) : -1);
+        }
+    } else if (strncmp(c, "builtintoggle:", 14) == 0) {
+        const int index = atoi(c + 14);
+        if (index >= 0 && index < m->builtin_mod_count && m->builtin_mods[index].get_enabled) {
+            const RecompLauncherCBuiltinMod* mod = &m->builtin_mods[index];
+            fprintf(stderr, "[launcher:builtin] saved=%d\n",
+                    launcher_model_set_builtin_mod(m, index, !mod->get_enabled(mod->ctx)));
+        }
     } else if (strcmp(c, "romprobe") == 0) {
         fprintf(stderr, "[launcher:probe] verified=%d can_play=%d patch=%d language=%s save=%s\n",
                 launcher_model_rom_verified(m), launcher_model_can_launch(m),
@@ -181,6 +194,11 @@ void launcher_debug_step(LauncherPlatform* p, LauncherModel* m) {
         launcher_model_cycle_view_mode(m);
     } else if (strcmp(c, "aspectprobe") == 0) {
         fprintf(stderr, "[launcher:aspect] index=%d label=%s\n", m->s.aspect_index, launcher_model_view_mode_label(m));
+    } else if (strcmp(c, "screencycle") == 0) {
+        launcher_model_cycle_screen_kind(m);
+    } else if (strcmp(c, "screenprobe") == 0) {
+        fprintf(stderr, "[launcher:screen] index=%d name=%s\n",
+                m->s.screen_kind, launcher_model_screen_kind_label(m));
     } else if (strncmp(c, "scaling:", 8) == 0) {
         const char* name = c + 8;
         if (!strcmp(name, "nearest")) launcher_model_set_scaling_filter(m, 0);
@@ -196,6 +214,12 @@ void launcher_debug_step(LauncherPlatform* p, LauncherModel* m) {
         else fprintf(stderr, "[dbg] unknown screen effect: %s\n", name);
     } else if (strncmp(c, "effectstrength:", 15) == 0) {
         launcher_model_set_screen_effect_strength(m, atoi(c + 15));
+    } else if (strncmp(c, "preset:", 7) == 0) {
+        fprintf(stderr, "[launcher:preset] applied=%d\n", launcher_model_apply_graphics_preset(m, atoi(c + 7)));
+    } else if (strcmp(c, "presetprobe") == 0) {
+        const int index = launcher_model_graphics_preset(m);
+        fprintf(stderr, "[launcher:preset] index=%d name=%s\n", index,
+                index < 0 ? "Custom" : m->graphics_presets[index].name);
     } else if (strcmp(c, "filterprobe") == 0) {
         fprintf(stderr, "[launcher:filters] scaler=%s linear=%d sharp=%d smooth=%d effect=%d strength=%d\n",
                 launcher_model_scaling_filter_label(m), m->s.linear_filter,

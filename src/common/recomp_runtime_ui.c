@@ -191,11 +191,13 @@ void recomp_runtime_ui_adjust_current(RecompRuntimeUi *ui, int direction,
         if (count <= 0) return;
         int base = value - item->minimum;
         if (item->choice_values) {
-            base = 0;
+            base = -1;
             for (int i = 0; i < count; ++i)
                 if (item->choice_values[i] == value) { base = i; break; }
         }
         int delta = direction < 0 ? -1 : 1;
+        /* Unknown/Custom is display-only: enter the list at either end. */
+        if (base < 0 || base >= count) base = delta < 0 ? 0 : count - 1;
         base = (base + delta + count) % count;
         next = item->choice_values ? item->choice_values[base]
                                    : item->minimum + base;
@@ -461,6 +463,21 @@ static int text_width(const char *text, int scale) {
     return count * 6 * scale;
 }
 
+const char *recomp_runtime_ui_item_description(RecompRuntimeUi *ui,
+                                              const RecompRuntimeUiItem *item) {
+    if (!item) return NULL;
+    int value = 0;
+    if (item->type == RECOMP_RUNTIME_UI_CHOICE && item->choice_descriptions &&
+        recomp_runtime_ui_current_value(ui, item, &value)) {
+        for (size_t i = 0; i < item->choice_count; ++i) {
+            int choice = item->choice_values ? item->choice_values[i] : item->minimum + (int)i;
+            if (value == choice && item->choice_descriptions[i])
+                return item->choice_descriptions[i];
+        }
+    }
+    return item->description;
+}
+
 static void item_value(RecompRuntimeUi *ui, const RecompRuntimeUiItem *item,
                        char *out, size_t out_size) {
     if (item->type == RECOMP_RUNTIME_UI_ACTION) {
@@ -484,7 +501,7 @@ static void item_value(RecompRuntimeUi *ui, const RecompRuntimeUiItem *item,
         if (index < item->choice_count)
             snprintf(out, out_size, "%s", item->choices[index]);
         else
-            snprintf(out, out_size, "?");
+            snprintf(out, out_size, "%s", item->unknown_choice_label ? item->unknown_choice_label : "?");
     } else {
         snprintf(out, out_size, "%d", value);
     }
@@ -611,7 +628,8 @@ void recomp_runtime_ui_render_argb8888(RecompRuntimeUi *ui, void *pixels,
     if (ui->in_section) {
         const RecompRuntimeUiItem *item = recomp_runtime_ui_section_item(
             ui, ui->section_index, ui->row_index);
-        if (item && item->description && *item->description) help = item->description;
+        const char *description = recomp_runtime_ui_item_description(ui, item);
+        if (description && *description) help = description;
     }
     rect(pixels,width,height,pitch,panel_x+pad,footer_y-4*scale,
          panel_w-pad*2,scale,border,255);

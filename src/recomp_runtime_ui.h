@@ -100,6 +100,10 @@ typedef struct RecompRuntimeUiItem {
     const int *choice_values;
     /* Optional ACTION confirmation; Cancel is selected by default. */
     const char *confirmation;
+    /* Optional display-only label for values outside CHOICE's recipe list. */
+    const char *unknown_choice_label;
+    /* Optional choice_count descriptions, indexed exactly like choices. */
+    const char *const *choice_descriptions;
 } RecompRuntimeUiItem;
 
 typedef struct RecompRuntimeUiCallbacks {

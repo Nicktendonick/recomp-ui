@@ -285,12 +285,17 @@ typedef struct {
     bool has_affine_filter;
     bool has_smooth_filter;
     bool has_screen_effects;
+    const RecompGraphicsPreset* graphics_presets;
+    int graphics_preset_count;
     bool has_shader;
     bool netplay_supported;
     /* Host opted into first-run wizard + Generate & rebuild (GameInfo). */
     bool setup_wizard_supported;
     const RecompLauncherCNetplayCallbacks* netplay;
     const RecompLauncherCModProvider* mods;
+    const RecompLauncherCBuiltinMod* builtin_mods;
+    int builtin_mod_count;
+    char builtin_mod_status[256];
     int       mod_selected;
     int       mod_package_selected;
     bool      mod_show_packages;
@@ -605,6 +610,9 @@ bool launcher_model_rom_verified(const LauncherModel* m);
 void launcher_model_set_view(LauncherModel* m, LngView v);
 /* Patch import is independent of the optional mod catalog provider. */
 bool launcher_model_has_mods_view(const LauncherModel* m);
+int launcher_model_graphics_preset(const LauncherModel* m);
+bool launcher_model_apply_graphics_preset(LauncherModel* m, int index);
+bool launcher_model_set_builtin_mod(LauncherModel* m, int index, bool enabled);
 bool launcher_model_has_credits_view(const LauncherModel* m);
 void launcher_model_show_credit_tools(LauncherModel* m, bool open);
 void launcher_model_open_config(LauncherModel* m, int player);  // -> Controller view

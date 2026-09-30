@@ -45,6 +45,8 @@ void recomp_runtime_ui_adjust_current(RecompRuntimeUi *ui, int direction,
                                       int activate, int repeat);
 void recomp_runtime_ui_enter_section(RecompRuntimeUi *ui, size_t section);
 void recomp_runtime_ui_leave_section(RecompRuntimeUi *ui);
+const char *recomp_runtime_ui_item_description(RecompRuntimeUi *ui,
+                                              const RecompRuntimeUiItem *item);
 /* Reads a TEXT item's current value; writes "" when unavailable. */
 void recomp_runtime_ui_current_text(RecompRuntimeUi *ui,
                                     const RecompRuntimeUiItem *item, char *buf,

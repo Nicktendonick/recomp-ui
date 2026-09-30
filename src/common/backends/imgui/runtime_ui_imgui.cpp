@@ -49,7 +49,7 @@ void value_text(RecompRuntimeUi *ui, const RecompRuntimeUiItem *item,
         if (index < item->choice_count)
             std::snprintf(out, out_size, "%s", item->choices[index]);
         else
-            std::snprintf(out, out_size, "Unavailable");
+            std::snprintf(out, out_size, "%s", item->unknown_choice_label ? item->unknown_choice_label : "Unavailable");
     } else if (item->key &&
                std::strcmp(item->key,
                            RECOMP_RUNTIME_UI_KEY_GYRO_SENSITIVITY) == 0) {
@@ -126,8 +126,9 @@ void draw_items(RecompRuntimeUi *ui, const LauncherTheme &theme,
         if (!enabled) ImGui::BeginDisabled();
         const ImVec2 start = ImGui::GetCursorScreenPos();
         const float description_w = std::max(40.0f, ImGui::GetContentRegionAvail().x - theme.spacing_md * 2);
-        const float description_h = item->description && item->description[0]
-            ? ImGui::CalcTextSize(item->description, nullptr, false, description_w).y : 0.0f;
+        const char* description = recomp_runtime_ui_item_description(ui, item);
+        const float description_h = description && description[0]
+            ? ImGui::CalcTextSize(description, nullptr, false, description_w).y : 0.0f;
         const float row_h = std::max(theme.row_height, ImGui::GetTextLineHeight() +
             description_h + theme.spacing_sm * 2 + 4.0f);
         const float step_button_w =
@@ -176,11 +177,11 @@ void draw_items(RecompRuntimeUi *ui, const LauncherTheme &theme,
                                                   : theme.text_muted),
                           value);
         }
-        if (item->description && item->description[0]) {
+        if (description && description[0]) {
             draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(start.x + theme.spacing_md,
                                 start.y + theme.spacing_sm +
                                     ImGui::GetTextLineHeight() + 2.0f),
-                          u32(theme.text_muted), item->description, nullptr, description_w);
+                          u32(theme.text_muted), description, nullptr, description_w);
         }
         if (editing_this && enabled) {
             const float field_w = touch_friendly

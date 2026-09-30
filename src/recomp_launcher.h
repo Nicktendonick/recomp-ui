@@ -340,6 +340,22 @@ typedef enum RecompLauncherCModOptionType {
     RECOMP_MOD_OPTION_TEXT = 3,
 } RecompLauncherCModOptionType;
 
+/* Optional built-in switches, independent of archive-based mod support.
+ * Host owns descriptors/context through launcher exit and handles persistence.
+ * set_enabled returns 1 ONLY after saving; failure must retain the old value.
+ * Callbacks run on the launcher thread, never the gameplay thread. */
+typedef struct RecompLauncherCBuiltinMod {
+    const char* id;
+    const char* label;
+    const char* description;
+    void* ctx;
+    int (*get_enabled)(void* ctx);
+    int (*set_enabled)(void* ctx, int enabled);
+    const char* (*last_error)(void* ctx);
+} RecompLauncherCBuiltinMod;
+
+#include "recomp_graphics_preset.h"
+
 typedef struct RecompLauncherCModPackage {
     char id[RECOMP_LAUNCHER_MOD_ID_MAX];
     char version[32];
@@ -1304,6 +1320,10 @@ typedef struct RecompLauncherCGameInfo {
     /* Opt-in extra presentation rows; zero-init keeps older hosts unchanged. */
     int has_smooth_filter;
     int has_screen_effects;
+    const RecompLauncherCBuiltinMod* builtin_mods;
+    int builtin_mod_count;
+    const RecompGraphicsPreset* graphics_presets;
+    int graphics_preset_count;
 } RecompLauncherCGameInfo;
 
 /* recomp_launcher_run_window return codes */

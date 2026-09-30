@@ -2525,6 +2525,25 @@ void draw_screen_effect_rows(LauncherModel* m, const LauncherTheme& th,
 
 void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
     eyebrow("DISPLAY");
+    if (m->graphics_preset_count > 0) {
+        const int current = launcher_model_graphics_preset(m);
+        row_label("Graphics preset", th);
+        ImGui::SetNextItemWidth(px(220));
+        if (ImGui::BeginCombo("##graphics_preset", current < 0 ? "Custom" : m->graphics_presets[current].name)) {
+            for (int i = 0; i < m->graphics_preset_count; ++i) {
+                if (ImGui::Selectable(m->graphics_presets[i].name, current == i))
+                    launcher_model_apply_graphics_preset(m, i);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", m->graphics_presets[i].description);
+            }
+            ImGui::EndCombo();
+        }
+        const int selected = launcher_model_graphics_preset(m);
+        ImGui::TextWrapped("%s", selected < 0 ? "Custom combination. Adjust the filters below, or choose a preset."
+                                            : m->graphics_presets[selected].description);
+        ImGui::TextWrapped("Presets change filters only. Aspect ratio, colour model and window size stay unchanged.");
+        ImGui::Spacing();
+    }
 
     if (!any_deep_display(m)) {
         // ---- legacy minimal surface (SNES/NES etc.) — aligned label grid -------
@@ -7618,11 +7637,32 @@ static void draw_rom_patch(LauncherModel* m, const LauncherTheme& th) {
 void draw_mods(LauncherModel* m, const LauncherTheme& th) {
     const auto* mods = m ? m->mods : nullptr;
     if (!launcher_model_has_mods_view(m)) return;
-    if (m->rom_patch_supported) {
-        draw_rom_patch(m, th);
-        if (!mods) return;
+    if (m->builtin_mod_count > 0 && m->builtin_mods) {
+        if (ImGui::BeginChild("##builtin_mods", ImVec2(0, px(180)),
+                              ImGuiChildFlags_Borders)) {
+            eyebrow("GAMEPLAY MODS");
+            for (int i = 0; i < m->builtin_mod_count; ++i) {
+                const auto& mod = m->builtin_mods[i];
+                if (!mod.get_enabled || !mod.set_enabled || !mod.label) continue;
+                ImGui::PushID(i);
+                bool enabled = mod.get_enabled(mod.ctx) != 0;
+                if (ImGui::Checkbox(mod.label, &enabled))
+                    launcher_model_set_builtin_mod(m, i, enabled);
+                if (mod.description) ImGui::TextWrapped("%s", mod.description);
+                const char* error = mod.last_error ? mod.last_error(mod.ctx) : nullptr;
+                if (error && *error) ImGui::TextWrapped("%s", error);
+                ImGui::PopID();
+            }
+            if (m->builtin_mod_status[0]) ImGui::TextWrapped("%s", m->builtin_mod_status);
+        }
+        ImGui::EndChild();
         ImGui::Dummy(ImVec2(0, px(8)));
     }
+    if (m->rom_patch_supported) {
+        draw_rom_patch(m, th);
+        ImGui::Dummy(ImVec2(0, px(8)));
+    }
+    if (!mods) return;
     const bool feature_provider =
         mods->feature_count && mods->feature_get &&
         mods->feature_option_get && mods->feature_enable &&

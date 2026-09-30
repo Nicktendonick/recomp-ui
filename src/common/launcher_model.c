@@ -336,10 +336,25 @@ void launcher_model_init(LauncherModel* m,
         m->has_affine_filter    = game->has_affine_filter != 0;
         m->has_smooth_filter    = game->has_smooth_filter != 0;
         m->has_screen_effects   = game->has_screen_effects != 0;
+        if (game->graphics_presets && game->graphics_preset_count > 0 && game->graphics_preset_count <= 16) {
+            bool valid = true;
+            for (int i = 0; i < game->graphics_preset_count; ++i) {
+                const RecompGraphicsPreset* p = &game->graphics_presets[i];
+                if (!recomp_graphics_preset_valid(p) || (p->scaling == 2 && !m->has_sharp_filter) ||
+                    (p->scaling == 3 && !m->has_smooth_filter) || (p->effect && !m->has_screen_effects)) valid = false;
+            }
+            if (valid) {
+                m->graphics_presets = game->graphics_presets;
+                m->graphics_preset_count = game->graphics_preset_count;
+            }
+        }
         m->has_shader           = game->has_shader != 0;
         m->netplay_supported    = game->netplay_supported != 0 && game->netplay != NULL;
         m->netplay              = game->netplay;
         m->rom_patch_supported  = game->rom_patch_supported != 0;
+        m->builtin_mods = game->builtin_mods;
+        m->builtin_mod_count = game->builtin_mods && game->builtin_mod_count > 0
+            ? game->builtin_mod_count : 0;
         m->rom_patch_note       = game->rom_patch_note;
         m->rom_patch_cache_dir  = game->rom_patch_cache_dir;
         m->rom_patch_required_sha1 = game->rom_patch_required_sha1;
@@ -990,7 +1005,21 @@ bool launcher_model_rom_verified(const LauncherModel* m) {
 }
 
 bool launcher_model_has_mods_view(const LauncherModel* m) {
-    return m && (m->mods != NULL || m->rom_patch_supported);
+    return m && (m->mods != NULL || m->rom_patch_supported || m->builtin_mod_count > 0);
+}
+
+bool launcher_model_set_builtin_mod(LauncherModel* m, int index, bool enabled) {
+    if (!m || !m->builtin_mods || index < 0 || index >= m->builtin_mod_count) return false;
+    const RecompLauncherCBuiltinMod* mod = &m->builtin_mods[index];
+    if (!mod->get_enabled || !mod->set_enabled) return false;
+    if (!mod->set_enabled(mod->ctx, enabled ? 1 : 0)) {
+        const char* error = mod->last_error ? mod->last_error(mod->ctx) : NULL;
+        safe_copy(m->builtin_mod_status, sizeof(m->builtin_mod_status),
+                  error && *error ? error : "Could not save this mod setting. Previous value retained.");
+        return false;
+    }
+    safe_copy(m->builtin_mod_status, sizeof(m->builtin_mod_status), "Saved. Applies when you play.");
+    return true;
 }
 
 bool launcher_model_has_credits_view(const LauncherModel* m) {
@@ -1093,6 +1122,24 @@ const char* launcher_model_scaling_filter_label(const LauncherModel* m) {
     if (m->has_sharp_filter && m->s.sharp_filter) return "Sharp fractional";
     if (m->s.linear_filter) return "Linear";
     return "Nearest";
+}
+
+int launcher_model_graphics_preset(const LauncherModel* m) {
+    if (!m) return -1;
+    const int scaling = m->s.smooth_filter ? 3 : m->s.sharp_filter ? 2 : m->s.linear_filter ? 1 : 0;
+    return recomp_graphics_preset_match(m->graphics_presets, m->graphics_preset_count,
+                                       scaling, m->s.screen_effect, m->s.screen_effect_strength);
+}
+
+bool launcher_model_apply_graphics_preset(LauncherModel* m, int index) {
+    if (!m || !m->graphics_presets || index < 0 || index >= m->graphics_preset_count) return false;
+    const RecompGraphicsPreset* p = &m->graphics_presets[index];
+    if (!recomp_graphics_preset_valid(p) || (p->scaling == 2 && !m->has_sharp_filter) ||
+        (p->scaling == 3 && !m->has_smooth_filter) || (p->effect && !m->has_screen_effects)) return false;
+    launcher_model_set_scaling_filter(m, p->scaling);
+    m->s.screen_effect = p->effect;
+    m->s.screen_effect_strength = p->strength;
+    return true;
 }
 
 void launcher_model_set_screen_effect(LauncherModel* m, int effect) {
