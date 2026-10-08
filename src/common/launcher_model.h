@@ -45,6 +45,8 @@ typedef enum {
     LNG_VIEW_MODS,
     LNG_VIEW_ASSIST_TOOLS,
     LNG_VIEW_CREDITS,
+    LNG_VIEW_GRAPHICS,
+    LNG_VIEW_AUDIO,
 } LngView;
 
 typedef enum {
@@ -247,6 +249,7 @@ typedef struct {
     const char* backdrop_path;
     const char* tagline;
     bool sidebar_layout;
+    bool organized_settings;
     const char* settings_note;
 
     // ---- N64 Transfer Pak (GameInfo.tpak_slots > 0 games) ------------------
@@ -613,6 +616,7 @@ bool launcher_model_has_mods_view(const LauncherModel* m);
 int launcher_model_graphics_preset(const LauncherModel* m);
 bool launcher_model_apply_graphics_preset(LauncherModel* m, int index);
 bool launcher_model_set_builtin_mod(LauncherModel* m, int index, bool enabled);
+bool launcher_model_set_builtin_value(LauncherModel* m, int index, int value);
 bool launcher_model_has_credits_view(const LauncherModel* m);
 void launcher_model_show_credit_tools(LauncherModel* m, bool open);
 void launcher_model_open_config(LauncherModel* m, int player);  // -> Controller view

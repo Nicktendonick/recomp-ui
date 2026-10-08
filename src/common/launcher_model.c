@@ -53,9 +53,9 @@ static const char* kHotkeyNames[LNG_HK_COUNT] = {
     "Solar level up", "Solar level down", "Resume live solar",
     "Rewind", "Save states menu"
 };
-static const char* kViewNames[7] = {
+static const char* kViewNames[9] = {
     "Dashboard", "Settings", "Controller", "Netplay", "Mods",
-    "Assist Tools", "Credits"
+    "Assist Tools", "Credits", "Graphics", "Audio"
 };
 static const char* kSrcNames[3]  = { "None", "Keyboard", "Gamepad" };
 
@@ -291,6 +291,7 @@ void launcher_model_init(LauncherModel* m,
         m->backdrop_path = game->backdrop_path;
         m->tagline = game->tagline;
         m->sidebar_layout = game->sidebar_layout;
+        m->organized_settings = game->organized_settings != 0;
         m->settings_note = game->settings_note;
         m->aspect_labels        = game->aspect_labels;    // NULL => built-in 4:3/16:9/21:9
         m->num_aspect_labels    = game->num_aspect_labels;
@@ -1009,10 +1010,16 @@ bool launcher_model_has_mods_view(const LauncherModel* m) {
 }
 
 bool launcher_model_set_builtin_mod(LauncherModel* m, int index, bool enabled) {
+    return launcher_model_set_builtin_value(m, index, enabled ? 1 : 0);
+}
+
+bool launcher_model_set_builtin_value(LauncherModel* m, int index, int value) {
     if (!m || !m->builtin_mods || index < 0 || index >= m->builtin_mod_count) return false;
     const RecompLauncherCBuiltinMod* mod = &m->builtin_mods[index];
     if (!mod->get_enabled || !mod->set_enabled) return false;
-    if (!mod->set_enabled(mod->ctx, enabled ? 1 : 0)) {
+    const int maximum = mod->choices && mod->choice_count > 0 ? mod->choice_count - 1 : 1;
+    if (value < 0 || value > maximum || (mod->is_available && !mod->is_available(mod->ctx))) return false;
+    if (!mod->set_enabled(mod->ctx, value)) {
         const char* error = mod->last_error ? mod->last_error(mod->ctx) : NULL;
         safe_copy(m->builtin_mod_status, sizeof(m->builtin_mod_status),
                   error && *error ? error : "Could not save this mod setting. Previous value retained.");
@@ -1038,7 +1045,8 @@ void launcher_model_set_view(LauncherModel* m, LngView v) {
     // Keep this bound at the final enum value.  Assist Tools and Credits were
     // added after Mods; using the old LNG_VIEW_MODS ceiling made their header
     // buttons look clickable while silently rejecting the navigation request.
-    if (v < 0 || v > LNG_VIEW_CREDITS) return;
+    if (!m || v < 0 || v > LNG_VIEW_AUDIO) return;
+    if (!m->organized_settings && (v == LNG_VIEW_GRAPHICS || v == LNG_VIEW_AUDIO)) return;
     if (v != LNG_VIEW_CREDITS) m->credits_tools_open = false;
     /* Re-entering Netplay should rescan server + LAN lists. */
     if (m->view == LNG_VIEW_NETPLAY && v != LNG_VIEW_NETPLAY)
@@ -3568,6 +3576,6 @@ const char* launcher_hotkey_name(LngHotkey h) {
 }
 
 const char* launcher_view_name(LngView v) {
-    if (v < 0 || v > LNG_VIEW_CREDITS) return "?";
+    if (v < 0 || v > LNG_VIEW_AUDIO) return "?";
     return kViewNames[v];
 }

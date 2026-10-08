@@ -352,6 +352,12 @@ typedef struct RecompLauncherCBuiltinMod {
     int (*get_enabled)(void* ctx);
     int (*set_enabled)(void* ctx, int enabled);
     const char* (*last_error)(void* ctx);
+    /* Optional organized-settings routing. NULL section keeps this in Mods.
+     * With choices, get/set carry a zero-based index instead of a boolean. */
+    const char* section;
+    const char* const* choices;
+    int choice_count;
+    int (*is_available)(void* ctx);
 } RecompLauncherCBuiltinMod;
 
 #include "recomp_graphics_preset.h"
@@ -1310,6 +1316,7 @@ typedef struct RecompLauncherCGameInfo {
     const char* backdrop_path;
     const char* tagline;
     int sidebar_layout;
+    int organized_settings; /* Opt-in categorized launcher/runtime presentation. */
     const char* settings_note; // Optional host-owned location/help text, Settings only.
     /* Opt-in dual-corpus host. Patch output still has to match required_sha1;
      * allowing the verified source does not relax output verification. */

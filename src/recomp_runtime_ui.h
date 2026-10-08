@@ -104,6 +104,7 @@ typedef struct RecompRuntimeUiItem {
     const char *unknown_choice_label;
     /* Optional choice_count descriptions, indexed exactly like choices. */
     const char *const *choice_descriptions;
+    const char *group; /* Optional subheading; does not consume a navigation row. */
 } RecompRuntimeUiItem;
 
 typedef struct RecompRuntimeUiCallbacks {
@@ -157,6 +158,7 @@ typedef struct RecompRuntimeUiConfig {
 
 enum {
     RECOMP_RUNTIME_UI_PRESENTATION_TOUCH_FRIENDLY = UINT32_C(1) << 0,
+    RECOMP_RUNTIME_UI_PRESENTATION_ORGANIZED = UINT32_C(1) << 1,
 };
 
 typedef uint64_t RecompRuntimeUiStandardFeatures;

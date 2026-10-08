@@ -77,12 +77,20 @@ void draw_sections(RecompRuntimeUi *ui, const LauncherTheme &theme,
 
 void draw_items(RecompRuntimeUi *ui, const LauncherTheme &theme,
                 bool touch_friendly) {
+    const bool organized = (ui->config.presentation_flags & RECOMP_RUNTIME_UI_PRESENTATION_ORGANIZED) != 0;
+    const char* last_group = "";
     const size_t count = recomp_runtime_ui_section_item_count(
         ui, ui->section_index);
     for (size_t index = 0; index < count; ++index) {
         const RecompRuntimeUiItem *item = recomp_runtime_ui_section_item(
             ui, ui->section_index, index);
         if (!item) continue;
+        if (organized && item->group && std::strcmp(last_group, item->group)) {
+            ImGui::Spacing();
+            ImGui::TextColored(col(theme.accent2), "%s", item->group);
+            ImGui::Separator();
+            last_group = item->group;
+        }
 
         // Keep the two distinct session actions together, including on narrow
         // windows. They remain ordinary model rows for keyboard/controller use.
@@ -129,8 +137,14 @@ void draw_items(RecompRuntimeUi *ui, const LauncherTheme &theme,
         const char* description = recomp_runtime_ui_item_description(ui, item);
         const float description_h = description && description[0]
             ? ImGui::CalcTextSize(description, nullptr, false, description_w).y : 0.0f;
+        const float label_w = ImGui::CalcTextSize(item->label ? item->label : "").x;
+        const float value_w = ImGui::CalcTextSize(value).x;
+        const float controls_reserve = item->type == RECOMP_RUNTIME_UI_INT ? (touch_friendly ? 220.0f : 100.0f) : 0.0f;
+        const bool stacked = organized && label_w + value_w + controls_reserve + theme.spacing_md * 3 >
+                                         ImGui::GetContentRegionAvail().x;
+        const float value_offset = stacked ? ImGui::GetTextLineHeight() + 4.0f : 0.0f;
         const float row_h = std::max(theme.row_height, ImGui::GetTextLineHeight() +
-            description_h + theme.spacing_sm * 2 + 4.0f);
+            value_offset + description_h + theme.spacing_sm * 2 + 4.0f);
         const float step_button_w =
             touch_friendly ? std::max(76.0f, row_h * 0.90f) : 38.0f;
         const float step_gap = touch_friendly ? 12.0f : 6.0f;
@@ -172,7 +186,7 @@ void draw_items(RecompRuntimeUi *ui, const LauncherTheme &theme,
             const ImVec2 value_size = ImGui::CalcTextSize(value);
             draw->AddText(ImVec2(end.x - theme.spacing_md - value_size.x -
                                     step_controls_w,
-                                start.y + theme.spacing_sm),
+                                start.y + theme.spacing_sm + value_offset),
                           u32(selected && enabled ? theme.accent2
                                                   : theme.text_muted),
                           value);
@@ -180,7 +194,7 @@ void draw_items(RecompRuntimeUi *ui, const LauncherTheme &theme,
         if (description && description[0]) {
             draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(start.x + theme.spacing_md,
                                 start.y + theme.spacing_sm +
-                                    ImGui::GetTextLineHeight() + 2.0f),
+                                    ImGui::GetTextLineHeight() + value_offset + 2.0f),
                           u32(theme.text_muted), description, nullptr, description_w);
         }
         if (editing_this && enabled) {
@@ -434,7 +448,8 @@ extern "C" void recomp_runtime_ui_render_imgui(RecompRuntimeUi *ui) {
         for (size_t i = 0; i < ui->config.item_count; ++i)
             if (ui->config.items[i].key && std::strcmp(ui->config.items[i].key, RECOMP_RUNTIME_UI_KEY_PAUSE) == 0)
                 has_pause = true;
-        const char *close_label = has_pause ? "Close menu" : "Resume";
+        const bool organized = (ui->config.presentation_flags & RECOMP_RUNTIME_UI_PRESENTATION_ORGANIZED) != 0;
+        const char *close_label = has_pause && !organized ? "Close menu" : "Resume";
         const float close_w = touch_friendly
             ? std::max(320.0f, ImGui::CalcTextSize(close_label).x +
                                    theme.spacing_lg * 2.0f)
@@ -448,7 +463,7 @@ extern "C" void recomp_runtime_ui_render_imgui(RecompRuntimeUi *ui) {
             ImGui::PushStyleColor(ImGuiCol_Text, col(theme.accent_text));
         }
         if (ImGui::Button(close_label, ImVec2(close_w, close_h))) {
-            if (has_pause || !recomp_runtime_ui_activate(ui, RECOMP_RUNTIME_UI_KEY_RESUME))
+            if ((has_pause && !organized) || !recomp_runtime_ui_activate(ui, RECOMP_RUNTIME_UI_KEY_RESUME))
                 recomp_runtime_ui_close(ui);
         }
         if (storybook) ImGui::PopStyleColor(4);

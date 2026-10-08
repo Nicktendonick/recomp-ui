@@ -1380,8 +1380,8 @@ void draw_save_row(LauncherModel* m, const LauncherTheme& th) {
         if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
-    ImGui::TextWrapped("Battery save: %s", sp[0] ? sp : "(not configured)");
-    if (has_save) ImGui::TextWrapped("Present (%ld bytes). Loaded when you press Play.", sz);
+    if (!m->organized_settings) ImGui::TextWrapped("Battery save: %s", sp[0] ? sp : "(not configured)");
+    if (has_save) ImGui::TextWrapped(m->organized_settings ? "Loaded when you press Play." : "Present (%ld bytes). Loaded when you press Play.", sz);
     else ImGui::TextWrapped("No battery save yet. Use the game's save feature or Import.");
     if (m->file_status[0]) ImGui::TextWrapped("%s", m->file_status);
 }
@@ -2193,7 +2193,20 @@ void draw_storybook_dashboard(LauncherModel* m, const LauncherTheme& th) {
     draw_game_panel(m, th, false, false);
     ImGui::Dummy(ImVec2(0, gap));
     if (begin_panel("home_system")) {
-        draw_system_controls(m, th);
+        if (!m->organized_settings || ImGui::CollapsingHeader("Game files")) {
+            if (m->organized_settings) {
+                ImGui::TextWrapped("ROM: %s", launcher_model_rom_path(m));
+                ImGui::TextWrapped("Battery save: %s", m->sram_path ? m->sram_path : "(not configured)");
+                ImGui::Spacing();
+            }
+            draw_system_controls(m, th);
+            if (m->organized_settings) {
+                if (m->settings_note) ImGui::TextWrapped("%s", m->settings_note);
+                ImGui::Spacing();
+                if (launcher_model_can_restore_defaults(m) && ImGui::Button("Restore launcher defaults..."))
+                    launcher_model_request_restore_defaults(m);
+            }
+        }
     }
     end_panel();
     if (columns) end_container();
@@ -2397,7 +2410,7 @@ void draw_view_mode_row(LauncherModel* m, const LauncherTheme& th,
     if (!has_view_mode_control(m)) return;
     const char* label = (m->aspect_setting_label && m->aspect_setting_label[0])
         ? m->aspect_setting_label : "View mode";
-    row_label(label, th, col_w);
+    row_label(m->organized_settings ? "Aspect ratio" : label, th, col_w);
     ImGui::PushID("view_mode");
     if (ImGui::Button(launcher_model_view_mode_label(m),
                       ImVec2(px(260), px(30))))
@@ -2886,6 +2899,97 @@ void draw_display_controls(LauncherModel* m, const LauncherTheme& th) {
     }
 }
 
+// Opt-in category layout. Reuse the same model setters as the legacy pages.
+// A control's location must never change its saved value or launch semantics.
+void draw_builtin_setting(LauncherModel* m, int index, const LauncherTheme& th) {
+    const auto& setting = m->builtin_mods[index];
+    if (!setting.label || !setting.get_enabled || !setting.set_enabled) return;
+    ImGui::PushID(setting.id ? setting.id : setting.label);
+    const bool available = !setting.is_available || setting.is_available(setting.ctx);
+    ImGui::BeginDisabled(!available);
+    const int current = setting.get_enabled(setting.ctx);
+    if (setting.choices && setting.choice_count > 0) {
+        row_label(setting.label, th, px(190));
+        ImGui::SetNextItemWidth(std::min(px(260), ImGui::GetContentRegionAvail().x));
+        const char* preview = current >= 0 && current < setting.choice_count ? setting.choices[current] : "Unknown";
+        if (ImGui::BeginCombo("##choice", preview)) {
+            for (int i = 0; i < setting.choice_count; ++i)
+                if (ImGui::Selectable(setting.choices[i], current == i))
+                    launcher_model_set_builtin_value(m, index, i);
+            ImGui::EndCombo();
+        }
+    } else {
+        bool on = current != 0;
+        if (ImGui::Checkbox(setting.label, &on))
+            launcher_model_set_builtin_mod(m, index, on);
+    }
+    ImGui::EndDisabled();
+    if (setting.description && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("%s", setting.description);
+    if (!available) ImGui::TextDisabled("Unavailable with the current settings. Hover for details.");
+    const char* error = setting.last_error ? setting.last_error(setting.ctx) : nullptr;
+    if (error && *error) ImGui::TextWrapped("%s", error);
+    ImGui::PopID();
+}
+
+void draw_organized_graphics(LauncherModel* m, const LauncherTheme& th) {
+    if (begin_panel("graphics_window")) {
+        eyebrow("WINDOW & SCREEN");
+        const float cw = px(190);
+        row_label("Window scale", th, cw);
+        ImGui::BeginDisabled(m->s.fullscreen != 0);
+        if (ImGui::Button(launcher_model_scale_label(m), ImVec2(px(120), px(30))))
+            launcher_model_cycle_scale(m);
+        ImGui::EndDisabled();
+        row_label("Fullscreen", th, cw);
+        ImGui::PushID("organized_fullscreen");
+        if (ImGui::Button(launcher_model_fullscreen_label(m), ImVec2(px(120), px(30))))
+            launcher_model_cycle_fullscreen(m);
+        ImGui::PopID();
+        draw_view_mode_row(m, th, cw);
+    }
+    end_panel();
+    ImGui::Spacing();
+    if (begin_panel("graphics_picture")) {
+        eyebrow("PICTURE");
+        if (m->graphics_preset_count > 0) {
+            const int current = launcher_model_graphics_preset(m);
+            row_label("Graphics preset", th, px(190));
+            ImGui::SetNextItemWidth(px(220));
+            if (ImGui::BeginCombo("##preset", current < 0 ? "Custom" : m->graphics_presets[current].name)) {
+                for (int i = 0; i < m->graphics_preset_count; ++i) {
+                    if (ImGui::Selectable(m->graphics_presets[i].name, current == i))
+                        launcher_model_apply_graphics_preset(m, i);
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", m->graphics_presets[i].description);
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::TextWrapped("Presets change filters only. Choose one, then fine-tune below.");
+            ImGui::Spacing();
+        }
+        draw_scaling_filter_row(m, th, px(190));
+        if (m->has_screen_kind) {
+            row_label("Colour profile", th, px(190));
+            if (ImGui::Button(launcher_model_screen_kind_label(m), ImVec2(px(220), px(30))))
+                launcher_model_cycle_screen_kind(m);
+        }
+        draw_screen_effect_rows(m, th, px(190));
+    }
+    end_panel();
+    ImGui::Spacing();
+    if (begin_panel("graphics_battle")) {
+        eyebrow("BATTLE VIEW");
+        ImGui::TextWrapped("Experimental framing options for reviewed widescreen battles.");
+        for (int i = 0; i < m->builtin_mod_count; ++i) {
+            const auto& setting = m->builtin_mods[i];
+            if (setting.section && std::strcmp(setting.section, "Graphics") == 0)
+                draw_builtin_setting(m, i, th);
+        }
+        if (m->builtin_mod_status[0]) ImGui::TextWrapped("%s", m->builtin_mod_status);
+    }
+    end_panel();
+}
+
 // Video/Display module (docs/ARCHITECTURE.md): base window-scale/fullscreen
 // row set, specialized per system — SNES adds linear-filter + widescreen,
 // PSX adds the full deep surface (window size/renderer/supersampling/aspect/
@@ -2909,6 +3013,21 @@ void panel_video_draw(LauncherModel* m, const LauncherTheme* th) {
 
 void draw_audio_controls(LauncherModel* m, const LauncherTheme& th) {
     eyebrow("AUDIO");
+    if (m->organized_settings) {
+        row_label("Volume", th, px(190));
+        ImGui::SetNextItemWidth(std::min(px(360), ImGui::GetContentRegionAvail().x));
+        int volume = m->s.volume;
+        if (ImGui::SliderInt("##volume", &volume, 0, 100, "%d%%"))
+            launcher_model_volume_delta(m, volume - m->s.volume);
+        ImGui::TextDisabled("0%% mutes the game.");
+        ImGui::Spacing();
+        if (ImGui::CollapsingHeader("Advanced audio")) {
+            row_label("Sample rate", th, px(190));
+            if (ImGui::Button(launcher_model_freq_label(m), ImVec2(px(120), px(30))))
+                launcher_model_cycle_freq(m);
+        }
+        return;
+    }
     // Fixed label column so the sample-rate button, the volume stepper's "-",
     // and the SPU toggle all share the same left edge (aligned grid).
     float cw = ImGui::CalcTextSize("Sample rate").x;
@@ -3069,7 +3188,7 @@ void panel_input_draw(LauncherModel* m, const LauncherTheme* th) {
 // the architecture.
 int avail_system(const LauncherModel* m) { return m->has_bios; }
 void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {
-    eyebrow("SYSTEM");
+    eyebrow(m->organized_settings ? "BIOS" : "SYSTEM");
     const SystemProfile* prof = (const SystemProfile*)m->profile;
     const bool is_gba = prof && prof->id && std::strcmp(prof->id, "gba") == 0;
     const bool is_psx = prof && prof->id && std::strcmp(prof->id, "psx") == 0;
@@ -3681,9 +3800,9 @@ void draw_assist_tools(LauncherModel* m, const LauncherTheme& th) {
         end_panel();
         return;
     }
-    eyebrow("ASSIST TOOLS / CHEATS");
+    eyebrow(m->organized_settings ? "ASSIST TOOLS" : "ASSIST TOOLS / CHEATS");
     bool enabled = m->s.assist_tools != 0;
-    if (ImGui::Checkbox("Enable Assist Tools / Cheats", &enabled))
+    if (ImGui::Checkbox(m->organized_settings ? "Enable Assist Tools" : "Enable Assist Tools / Cheats", &enabled))
         m->s.assist_tools = enabled ? 1 : 0;
     ImGui::Dummy(ImVec2(0, px(6)));
     ImGui::PushStyleColor(ImGuiCol_Text, col(th.text_muted));
@@ -4447,6 +4566,10 @@ void draw_controller(LauncherModel* m, const LauncherTheme& th) {
     const SystemProfile* prof = (const SystemProfile*)m->profile;
     const LauncherPanel* p = find_composed(prof->panels_controller, "controller_config", m);
     if (p) p->draw(m, &th);
+    if (m->organized_settings) {
+        ImGui::Spacing();
+        panel_hotkeys_draw(m, &th);
+    }
 }
 
 const RecompLauncherCNetplayCallbacks* np_cb(LauncherModel* m) {
@@ -7593,17 +7716,17 @@ static void draw_mod_features(LauncherModel* m, const LauncherTheme& th) {
 static void draw_rom_patch(LauncherModel* m, const LauncherTheme& th) {
     if (!m || !m->rom_patch_supported) return;
 
-    if (ImGui::BeginChild("##rom_patch", ImVec2(0, px(170)),
-                          ImGuiChildFlags_Borders)) {
-        eyebrow("ROM PATCH");
+    if (ImGui::BeginChild("##rom_patch", ImVec2(0, m->organized_settings ? 0 : px(170)),
+                          ImGuiChildFlags_Borders | (m->organized_settings ? ImGuiChildFlags_AutoResizeY : 0))) {
+        eyebrow(m->organized_settings ? "ENGLISH TRANSLATION" : "ROM PATCH");
         bool enabled = m->s.rom_patch_enabled != 0;
-        if (ImGui::Checkbox("Enable ROM patch", &enabled))
+        if (ImGui::Checkbox(m->organized_settings ? "Enable English translation" : "Enable ROM patch", &enabled))
             launcher_model_toggle_rom_patch(m);
 
         const float clear_w = px(70);
         const float browse_w = px(95);
-        ImGui::SameLine(ImGui::GetContentRegionAvail().x - browse_w - clear_w -
-                        px(8));
+        if (!m->organized_settings)
+            ImGui::SameLine(ImGui::GetContentRegionAvail().x - browse_w - clear_w - px(8));
         if (ImGui::Button("Browse...", ImVec2(browse_w, px(28)))) {
             static const char* patterns[] = { "*.ips", "*.ips32", "*.bps" };
             if (launcher_pick_file("Select ROM patch", patterns, 3,
@@ -7638,11 +7761,17 @@ void draw_mods(LauncherModel* m, const LauncherTheme& th) {
     const auto* mods = m ? m->mods : nullptr;
     if (!launcher_model_has_mods_view(m)) return;
     if (m->builtin_mod_count > 0 && m->builtin_mods) {
-        if (ImGui::BeginChild("##builtin_mods", ImVec2(0, px(180)),
-                              ImGuiChildFlags_Borders)) {
+        if (ImGui::BeginChild("##builtin_mods", ImVec2(0, m->organized_settings ? 0 : px(180)),
+                              ImGuiChildFlags_Borders | (m->organized_settings ? ImGuiChildFlags_AutoResizeY : 0))) {
             eyebrow("GAMEPLAY MODS");
             for (int i = 0; i < m->builtin_mod_count; ++i) {
                 const auto& mod = m->builtin_mods[i];
+                if (m->organized_settings) {
+                    if (mod.section && std::strcmp(mod.section, "Graphics") == 0) continue;
+                    draw_builtin_setting(m, i, th);
+                    if (mod.description) ImGui::TextWrapped("%s", mod.description);
+                    continue;
+                }
                 if (!mod.get_enabled || !mod.set_enabled || !mod.label) continue;
                 ImGui::PushID(i);
                 bool enabled = mod.get_enabled(mod.ctx) != 0;
@@ -8801,7 +8930,7 @@ void draw_restore_defaults_modal(LauncherModel* m) {
 void draw_game_header(LauncherModel* m, const LauncherTheme& th) {
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float width = ImGui::GetContentRegionAvail().x;
-    const float height = px(146);
+    const float height = px(m->organized_settings ? 100 : 146);
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height),
                       imcol(th.panel), px(th.radius_lg));
@@ -8825,7 +8954,7 @@ void draw_game_header(LauncherModel* m, const LauncherTheme& th) {
     }
     if (g_game_logo.id) {
         ImGui::SetCursorScreenPos(ImVec2(origin.x + px(12), origin.y + px(4)));
-        image_fit(g_game_logo, 190, 138);
+        image_fit(g_game_logo, m->organized_settings ? 145 : 190, m->organized_settings ? 92 : 138);
     } else {
         ImGui::SetCursorScreenPos(ImVec2(origin.x + px(16), origin.y + px(20)));
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + px(190));
@@ -8833,7 +8962,8 @@ void draw_game_header(LauncherModel* m, const LauncherTheme& th) {
         ImGui::PopTextWrapPos();
     }
     if (m->tagline && m->tagline[0]) {
-        ImGui::SetCursorScreenPos(ImVec2(origin.x + px(230), origin.y + px(48)));
+        ImGui::SetCursorScreenPos(ImVec2(origin.x + px(m->organized_settings ? 185 : 230),
+                                       origin.y + px(m->organized_settings ? 28 : 48)));
         const float text_width = std::max(px(100), std::min(px(370), width - px(252)));
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + text_width);
         ImGui::PushStyleColor(ImGuiCol_Text, col(th.accent2));
@@ -8853,7 +8983,9 @@ void draw_game_navigation(LauncherModel* m, const LauncherTheme& th) {
     struct Nav { const char* label; LngView view; bool shown; };
     const Nav items[] = {
         {"Home", LNG_VIEW_DASHBOARD, true},
-        {"Settings", LNG_VIEW_SETTINGS, true},
+        {"Settings", LNG_VIEW_SETTINGS, !m->organized_settings},
+        {"Graphics", LNG_VIEW_GRAPHICS, m->organized_settings},
+        {"Audio", LNG_VIEW_AUDIO, m->organized_settings},
         {"Controls", LNG_VIEW_CONTROLLER, true},
         {"Assist Tools", LNG_VIEW_ASSIST_TOOLS, m->has_assist_tools != 0},
         {"Mods", LNG_VIEW_MODS, launcher_model_has_mods_view(m)},
@@ -9038,6 +9170,11 @@ void draw_ui(LauncherModel* m, const LauncherTheme& th, int logical_w, int logic
     switch (m->view) {
         case LNG_VIEW_DASHBOARD:  draw_dashboard(m, th, logical_w); break;
         case LNG_VIEW_SETTINGS:   draw_settings(m, th);             break;
+        case LNG_VIEW_GRAPHICS:   draw_organized_graphics(m, th);    break;
+        case LNG_VIEW_AUDIO:
+            if (begin_panel("audio_page")) draw_audio_controls(m, th);
+            end_panel();
+            break;
         case LNG_VIEW_CONTROLLER: draw_controller(m, th);           break;
         case LNG_VIEW_NETPLAY:    draw_netplay(m, th);              break;
         case LNG_VIEW_MODS:       draw_mods(m, th);                 break;

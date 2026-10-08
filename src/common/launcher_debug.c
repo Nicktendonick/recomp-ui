@@ -168,10 +168,20 @@ void launcher_debug_step(LauncherPlatform* p, LauncherModel* m) {
         const char* v = c + 5;
         if      (strcmp(v, "dashboard")  == 0) launcher_model_set_view(m, LNG_VIEW_DASHBOARD);
         else if (strcmp(v, "settings")   == 0) launcher_model_set_view(m, LNG_VIEW_SETTINGS);
+        else if (strcmp(v, "graphics")   == 0) launcher_model_set_view(m, LNG_VIEW_GRAPHICS);
+        else if (strcmp(v, "audio")      == 0) launcher_model_set_view(m, LNG_VIEW_AUDIO);
         else if (strcmp(v, "controller") == 0) launcher_model_set_view(m, LNG_VIEW_CONTROLLER);
         else if (strcmp(v, "assist_tools") == 0) launcher_model_set_view(m, LNG_VIEW_ASSIST_TOOLS);
         else if (strcmp(v, "credits") == 0) launcher_model_set_view(m, LNG_VIEW_CREDITS);
         else if (strcmp(v, "mods") == 0) launcher_model_set_view(m, LNG_VIEW_MODS);
+    } else if (strncmp(c, "builtinset:", 11) == 0) {
+        int index, value;
+        if (sscanf(c + 11, "%d:%d", &index, &value) == 2)
+            fprintf(stderr, "[launcher:builtin-set] index=%d value=%d accepted=%d\n",
+                    index, value, launcher_model_set_builtin_value(m, index, value));
+    } else if (strcmp(c, "uiprobe") == 0) {
+        fprintf(stderr, "[launcher:ui] organized=%d view=%s translation_section=Mods patch=%d\n",
+                m->organized_settings, launcher_view_name(m->view), m->s.rom_patch_enabled);
     } else if (strcmp(c, "builtinprobe") == 0) {
         for (int i = 0; i < m->builtin_mod_count; ++i) {
             const RecompLauncherCBuiltinMod* mod = &m->builtin_mods[i];

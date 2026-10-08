@@ -18,6 +18,24 @@ static int has(RecompRuntimeUiStandardFeatures features,
     return (features & feature) != 0;
 }
 
+/* Stable category order for hosts that explicitly request the organized UI.
+ * Other hosts retain their original sections, row order and footer behavior. */
+static int organized_order(const RecompRuntimeUiItem *item) {
+    const char *section = item->section ? item->section : "";
+    const char *group = item->group ? item->group : "";
+    int rank = !strcmp(section, "Game") ? 0 : !strcmp(section, "Graphics") ? 100 :
+               !strcmp(section, "Audio") ? 200 : !strcmp(section, "Assist Tools") ? 300 : 400;
+    if (!strcmp(group, "End session")) rank += 50;
+    else if (!strcmp(group, "Picture")) rank += 20;
+    else if (!strcmp(group, "Battle View")) rank += 40;
+    else if (!strcmp(group, "Information")) rank += 60;
+    if (!strcmp(group, "Window & Screen")) {
+        if (!strcmp(item->key, RECOMP_RUNTIME_UI_KEY_FULLSCREEN)) rank += 1;
+        else if (strcmp(item->key, RECOMP_RUNTIME_UI_KEY_WINDOW_SCALE)) rank += 2;
+    }
+    return rank;
+}
+
 static void add_item(RecompRuntimeUiItem *items, size_t *count,
                      const char *key, const char *section, const char *label,
                      const char *description, RecompRuntimeUiItemType type,
@@ -183,6 +201,29 @@ RecompRuntimeUi *recomp_runtime_ui_create_standard(
     }
 
     RecompRuntimeUiConfig menu = standard->menu;
+    if (menu.presentation_flags & RECOMP_RUNTIME_UI_PRESENTATION_ORGANIZED) {
+        for (size_t i = 0; i < count; ++i) {
+            RecompRuntimeUiItem *item = &items[i];
+            if (item->section && !strcmp(item->section, "Display")) {
+                item->section = "Graphics";
+                if (!item->group) item->group = "Window & Screen";
+            }
+            if (!strcmp(item->key, RECOMP_RUNTIME_UI_KEY_RESET) ||
+                !strcmp(item->key, RECOMP_RUNTIME_UI_KEY_CLOSE))
+                item->group = "End session";
+            else if (item->section && !strcmp(item->section, "Game")) item->group = "Playback";
+            if (!strcmp(item->key, RECOMP_RUNTIME_UI_KEY_CLOSE)) item->label = "Quit game";
+            if (!strcmp(item->key, RECOMP_RUNTIME_UI_KEY_AUDIO)) item->label = "Sound";
+        }
+        for (size_t i = 1; i < count; ++i) {
+            RecompRuntimeUiItem item = items[i];
+            size_t j = i;
+            while (j > 0 && organized_order(&items[j - 1]) > organized_order(&item)) {
+                items[j] = items[j - 1]; --j;
+            }
+            items[j] = item;
+        }
+    }
     menu.items = items;
     menu.item_count = count;
     RecompRuntimeUi *ui = recomp_runtime_ui_create(&menu);
