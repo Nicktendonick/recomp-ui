@@ -107,6 +107,23 @@ if(BUILD_TESTING)
     # helper. Calling the helper twice also guards its no-duplicate contract.
     find_package(SDL2 QUIET)
     if(TARGET SDL2::SDL2)
+        add_executable(recomp-ui-scripted-key-test
+            tests/launcher_debug_key_test.cpp
+            src/third_party/imgui/backends/imgui_impl_sdl2.cpp
+            src/third_party/imgui/imgui.cpp
+            src/third_party/imgui/imgui_draw.cpp
+            src/third_party/imgui/imgui_tables.cpp
+            src/third_party/imgui/imgui_widgets.cpp)
+        target_include_directories(recomp-ui-scripted-key-test PRIVATE
+            src/common src/third_party/imgui)
+        target_link_libraries(recomp-ui-scripted-key-test PRIVATE SDL2::SDL2)
+        if(MSVC)
+            target_compile_options(recomp-ui-scripted-key-test PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(recomp-ui-scripted-key-test PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME recomp-ui-scripted-key COMMAND recomp-ui-scripted-key-test)
+
         add_library(recomp-runtime-ui-sdlrenderer2-check OBJECT)
         recomp_target_runtime_ui_sdlrenderer2(
             recomp-runtime-ui-sdlrenderer2-check)
