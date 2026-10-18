@@ -14,6 +14,7 @@
 #include "launcher_boot_timing.h"
 #include "launcher_gl.h"
 #include "launcher_input.h"
+#include "launcher_capture_events.h"
 #include "launcher_files.h"
 #include "launcher_debug.h"
 #include "launcher_binds.h"
@@ -25,6 +26,7 @@
 #include "launcher_sdlcompat.h"   // pulls the right SDL header + event shim
 
 #include "imgui.h"
+#include "launcher_play_focus.h"
 #if defined(LNG_SDL3)
   #include "imgui_impl_sdl3.h"
   #define LNG_ImplSDL_InitForOpenGL  ImGui_ImplSDL3_InitForOpenGL
@@ -7985,18 +7987,6 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
         }
         return;
     }
-    // Back/Cancel (Circle/O on a DualSense, B on Xbox, Backspace on keyboard) AND
-    // Start re-home the focus ring to PLAY. Directional nav through the card child
-    // windows is easy to wander out of with no way back; these are the forcing
-    // functions that snap the highlight back to the primary action. Start
-    // deliberately only HIGHLIGHTS PLAY (does not launch), so it can't fire the
-    // game by accident — the launch is the activate button (A/Cross) on the
-    // focused PLAY, or a mouse click. SetKeyboardFocusHere() targets the NEXT
-    // submitted item — PLAY's button.
-    if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) ||
-        ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false) ||
-        ImGui::IsKeyPressed(ImGuiKey_Backspace, false))
-        ImGui::SetKeyboardFocusHere();
     float play_x = origin.x + fullw - play_w;
     if (m->netplay_supported &&
         (m->view == LNG_VIEW_DASHBOARD || m->view == LNG_VIEW_SETTINGS ||
@@ -8016,6 +8006,9 @@ void draw_footer(LauncherModel* m, const LauncherTheme& th, float footer_h) {
     const bool can_play = launcher_model_can_launch(m);
     const bool bios_block = launcher_model_bios_blocks_play(m);
     const bool play_enabled = can_play || bios_block;
+    // Back/Cancel or Start focuses PLAY without launching. Keep this adjacent:
+    // SetKeyboardFocusHere targets the next item, never the optional NETPLAY.
+    launcher_imgui_focus_play_on_shortcut();
     if (neon_cta("##play", "PLAY", ImVec2(play_w, play_h), play_enabled)) {
         /* Prefer mismatch prompt over launch even if can_play races true. */
         if (bios_block)
@@ -9240,6 +9233,10 @@ bool try_capture(LauncherModel* m, const SDL_Event& ev) {
     if (!m->capturing && !m->hk_capturing &&
         !m->camera_capturing)
         return false;
+
+    // ImGui caches open gamepads. Keep lifecycle notifications flowing even
+    // while binding capture consumes input and gamepad navigation is paused.
+    if (launcher_capture_event_passthrough(&ev)) return false;
 
     // ESC cancels any capture — keyboard, pad, or hotkey.
     if (ev.type == SDL_EVENT_KEY_DOWN && LNG_EVKEY(ev) == SDLK_ESCAPE) {

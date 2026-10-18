@@ -4,6 +4,8 @@
 #include "backends/imgui_impl_sdl2.h"
 #include <cassert>
 
+void test_launcher_play_focus();
+
 int main() {
     SDL_SetMainReady();
     SDL_setenv("SDL_VIDEODRIVER", "dummy", 1);
@@ -40,5 +42,6 @@ int main() {
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
     SDL_DestroyWindow(window);
+    test_launcher_play_focus();
     SDL_Quit();
 }
